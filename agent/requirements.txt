@@ -1,0 +1,10 @@
+# Family-Hub concierge ADK agent. Pin to the ADK line this code targets (MCPToolset +
+# StdioConnectionParams API). If you install a different major and the MCP imports differ, adjust the
+# two `google.adk.tools.mcp_tool` imports in concierge/agent.py.
+google-adk>=1.2,<2
+mcp>=1.2
+# HTTP surface for the React client (agent/api.py). google-adk already pulls fastapi+uvicorn for its own
+# `adk api_server`; pinned here too so `uvicorn agent.api:app` works without relying on that transitively.
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pytest>=8.0

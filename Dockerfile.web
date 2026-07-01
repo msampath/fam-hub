@@ -1,0 +1,47 @@
+# Family-Hub WEB app — the React build served by the Express server (which also proxies Gemini for the
+# in-app copilot). The capstone's primary demo path hosts React as static assets; this container is the
+# convenient "whole app in one command" + the production-path serve.
+#
+# Multi-stage: the build toolchain (vitest/playwright/jsdom/typescript/esbuild + the source tree) is
+# discarded so the final image carries only the bundled server, the static dist/, and PRODUCTION deps.
+
+# ---- 1. builder: install everything, build the client bundle + the bundled server (dist/server.cjs) ----
+FROM node:24-bookworm-slim AS builder
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+# Supabase config is now injected at RUNTIME (the server writes window.__APP_CONFIG__ into index.html), so the
+# Supabase ARGs are OPTIONAL — one built image runs against cloud Supabase OR the local SQLite appliance.
+# VITE_AGENT_BASE_URL still gates whether the React surface shows the concierge panel (any truthy value enables
+# it); the appliance build sets it to "1" since the agent runs on the same box.
+ARG VITE_SUPABASE_URL
+ARG VITE_SUPABASE_ANON_KEY
+ARG VITE_AGENT_BASE_URL
+ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL
+ENV VITE_SUPABASE_ANON_KEY=$VITE_SUPABASE_ANON_KEY
+ENV VITE_AGENT_BASE_URL=$VITE_AGENT_BASE_URL
+RUN npm run build
+
+# ---- 2. proddeps: a clean production-only node_modules (esbuild externalizes runtime deps, so the bundled
+#         server.cjs still requires them at runtime — express/helmet/@google/genai/mammoth/xlsx/pdf-parse/...) ----
+FROM node:24-bookworm-slim AS proddeps
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+
+# ---- 3. runtime: only what's needed to serve in production ----
+FROM node:24-bookworm-slim
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=proddeps /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
+COPY package.json ./
+# Writable data dir for the LAN appliance's SQLite DB (STORAGE=sqlite), shared with the agent container via a
+# volume; owned by `node` so the dropped-privilege process can create/lock it. (Unused in cloud/Supabase mode.)
+RUN mkdir -p /app/data && chown -R node:node /app/data
+VOLUME /app/data
+EXPOSE 4894
+# Drop privileges — serves the (root-owned, world-readable) dist/ read-only.
+USER node
+CMD ["node", "dist/server.cjs"]

@@ -1,0 +1,48 @@
+# One-command local bring-up of the demo stack:
+#   docker compose up --build
+# Reads variables from a local .env (copy .env.example). Two services:
+#   web   — the React app + Express Gemini proxy (http://localhost:4894)
+#   agent — the Python ADK concierge API + its Node MCP child (http://localhost:8080)
+# The React surface's Concierge Agent panel calls the agent service at VITE_AGENT_BASE_URL (baked at build
+# time). It's the HOST-reachable URL because the bundle runs in the BROWSER, not the compose network.
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
+        VITE_AGENT_BASE_URL: ${VITE_AGENT_BASE_URL:-http://localhost:8080}
+    ports:
+      - "4894:4894"
+    environment:
+      NODE_ENV: production
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
+      VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      # Where Express proxies /api/agent/chat (same-origin from the browser → CSP-safe). In the compose
+      # network the agent service is reachable by its service name.
+      AGENT_BASE_URL: ${AGENT_BASE_URL:-http://agent:8080}
+
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: 8080
+      # ADK / Gemini (AI Studio key). Set GOOGLE_API_KEY to your Gemini key.
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+      GOOGLE_GENAI_USE_VERTEXAI: "FALSE"
+      CONCIERGE_MODEL: ${CONCIERGE_MODEL:-gemini-2.5-flash}
+      # CORS allow-list for the browser bundle's /chat calls (the web origin). "*" allows any (demo default).
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:4894}
+      # Persistence (optional). With these set, the MCP child writes under the visitor's JWT. In the full
+      # demo SUPABASE_ACCESS_TOKEN is per-visitor (injected per request); unset here ⇒ validate-only.
+      SUPABASE_URL: ${VITE_SUPABASE_URL}
+      SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
+      SUPABASE_ACCESS_TOKEN: ${SUPABASE_ACCESS_TOKEN:-}

@@ -1,0 +1,6 @@
+{
+  "name": "Family Summer Calendar Planner",
+  "description": "Family schedule overview with AI calendar imports, shared shopping lists, and gamified daily habits and chores tracker.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

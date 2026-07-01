@@ -1,0 +1,65 @@
+# This repo tracks ONLY the bare minimum needed to build, test, run, and deploy the app.
+# Everything else — planning docs, scratch eval outputs, transcripts, diagnostics, secrets,
+# build artifacts, node_modules — is ignored. Strategy: ignore everything, then allow the essentials.
+# NOTE: .gitignore has no inline comments — keep each pattern on its own line.
+
+# 1) Ignore every top-level entry by default.
+/*
+
+# 2) Allow only the bare-minimum app files + directories.
+!/.gitignore
+!/LICENSE
+!/.nvmrc
+!/.env.example
+!/index.html
+!/metadata.json
+!/package.json
+!/package-lock.json
+!/tsconfig.json
+!/vite.config.ts
+!/vitest.config.ts
+!/server.ts
+!/src/
+!/public/
+!/supabase/
+!/agent/
+!/Dockerfile
+!/Dockerfile.web
+!/docker-compose.yml
+!/docker-compose.appliance.yml
+!/docker-compose.appliance.prebuilt.yml
+!/.dockerignore
+# CI workflows: allow only the tracked workflow file (NOT scratch under .github/).
+!/.github/
+!/.github/workflows/
+/.github/workflows/*
+!/.github/workflows/appliance-images.yml
+# scripts/: allow ONLY the installer (the dir also holds a Playwright profile + scratch — keep those ignored).
+!/scripts/
+/scripts/*
+!/scripts/install.sh
+
+# Curated public docs (capstone §9 step 1): all root .md (README + design/plan docs) + the docs/ and
+# planning/ dirs. Raw session scratch (transcripts, external-tool dumps) is re-ignored in section 3.
+!/*.md
+!/docs/
+!/planning/
+
+# 3) Belt-and-suspenders: never track these even if they appear inside an allowed dir.
+node_modules/
+dist/
+build/
+coverage/
+*.log
+.DS_Store
+# Session scratch that lives as .md but is NOT a curated doc.
+/context_conversation.md
+/code_review_gem.md
+# Python (the ADK agent under /agent) + any secrets that could appear inside an allowed dir.
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+**/.env
+# ADK runtime state (adk web/run session store) — created under /agent, never source.
+.adk/

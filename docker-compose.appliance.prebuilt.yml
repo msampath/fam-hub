@@ -1,0 +1,77 @@
+# LAN appliance — PREBUILT images (no source build). This is what end users run: pull the published images
+# and start. The install script (scripts/install.sh) fetches this file + the env template for you.
+#
+#   1. cp .env.example .env     # add your own Gemini key
+#   2. docker compose -f docker-compose.appliance.prebuilt.yml pull     # .env is auto-read from this dir
+#   3. docker compose -f docker-compose.appliance.prebuilt.yml up -d
+#   4. open http://<this-box's-LAN-ip>:4894  →  set a household passphrase  →  done.
+#
+# Images come from GHCR (built by .github/workflows/appliance-images.yml). Override the owner/tag with
+# IMAGE_OWNER / IMAGE_TAG if you forked or want a pinned version. To BUILD from source instead, use
+# docker-compose.appliance.yml. Keep this on a home network you trust (do NOT port-forward to the internet).
+services:
+  web:
+    image: ghcr.io/${IMAGE_OWNER:-msampath}/fam-hub-web:${IMAGE_TAG:-latest}
+    ports:
+      - "4894:4894"
+    environment:
+      NODE_ENV: production
+      # Backend switch. Defaults to sqlite (the appliance). install.sh writes STORAGE=supabase + the two
+      # VITE_SUPABASE_* vars into .env for the optional cloud-sync mode; absent those, this stays a local box.
+      STORAGE: ${STORAGE:-sqlite}
+      SQLITE_PATH: /app/data/famhub.db    # ignored when STORAGE=supabase (see persistence.ts precedence)
+      VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-}        # cloud mode only — injected to the browser at runtime
+      VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:-}
+      EXIT_ON_UNHANDLED: "true"
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      COPILOT_MODEL: ${COPILOT_MODEL:-gemini-3.1-flash-lite}   # ONE model knob for both engine tiers; high free-tier RPD
+      AGENT_BASE_URL: http://agent:8080
+      # Keyless local-model path (Ollama, etc.): forward LOCAL_LLM_* so the documented zero-key copilot works.
+      LOCAL_LLM_ENABLED: ${LOCAL_LLM_ENABLED:-}
+      LOCAL_LLM_URL: ${LOCAL_LLM_URL:-}
+      LOCAL_LLM_MODEL: ${LOCAL_LLM_MODEL:-}
+      LOCAL_LLM_THINK: ${LOCAL_LLM_THINK:-}
+      LOCAL_LLM_NUM_CTX: ${LOCAL_LLM_NUM_CTX:-}
+      LOCAL_LLM_TIMEOUT_MS: ${LOCAL_LLM_TIMEOUT_MS:-}
+      LOCAL_LLM_KEEP_ALIVE: ${LOCAL_LLM_KEEP_ALIVE:-}
+      LOCAL_LLM_API_KEY: ${LOCAL_LLM_API_KEY:-}
+    volumes:
+      - famhub-data:/app/data
+    restart: unless-stopped
+    healthcheck:                          # /api/health (Express). node:24 base → global fetch, no curl needed.
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4894/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    depends_on:
+      agent:
+        condition: service_started        # start once the agent CONTAINER is up — NOT service_healthy: a
+                                          # keyless/crash-looping agent would otherwise block the whole box,
+                                          # so calendar/chores/shopping + the keyless copilot still serve
+                                          # even when the concierge is down.
+
+  agent:
+    image: ghcr.io/${IMAGE_OWNER:-msampath}/fam-hub-agent:${IMAGE_TAG:-latest}
+    environment:
+      PORT: 8080
+      STORAGE: ${STORAGE:-sqlite}         # mirror web. Default sqlite; STORAGE=supabase (from .env) → cloud.
+      SQLITE_PATH: /app/data/famhub.db    # ignored when STORAGE=supabase (persistence.ts: explicit STORAGE wins)
+      SUPABASE_URL: ${VITE_SUPABASE_URL:-}            # cloud mode: the MCP child's per-request Supabase client
+      SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}   # ONE key — the agent aliases it to GOOGLE_API_KEY internally (api.py)
+      GOOGLE_GENAI_USE_VERTEXAI: "FALSE"
+      COPILOT_MODEL: ${COPILOT_MODEL:-gemini-3.1-flash-lite}   # ONE model knob for both tiers (mirror web)
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:4894}
+    volumes:
+      - famhub-data:/app/data
+    restart: unless-stopped
+    healthcheck:                          # /healthz (FastAPI/uvicorn). node is on PATH in the agent image too.
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+volumes:
+  famhub-data:                          # the box's data lives here — back this up

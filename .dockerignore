@@ -1,0 +1,23 @@
+# Keep build context small + never copy secrets/artifacts into images.
+.git
+node_modules
+dist
+build
+coverage
+**/__pycache__
+**/*.pyc
+**/.venv
+.env
+**/.env
+*.log
+# ADK runtime state (sessions/artifacts) — never read at runtime (InMemorySessionService); dead weight + non-reproducible builds
+**/.adk
+**/*.db
+# scratch eval outputs / docs not needed in the image
+ask-*.json
+ask-*.log
+bench-*.json
+bench-*.log
+*.md
+docs
+planning

@@ -1,0 +1,82 @@
+# Single-click LAN self-host APPLIANCE — one family per box, SQLite, NO Supabase, NO owner cloud cost.
+#
+#   1. cp .env.example .env     # add your own Gemini key
+#   2. docker compose -f docker-compose.appliance.yml up -d --build     # .env is auto-read from this dir
+#   3. open http://<this-box-LAN-ip>:4894  →  set a household passphrase  →  you're in.
+#
+# The web + agent containers SHARE a named volume for the SQLite DB, so the Express server and the agent's MCP
+# child read/write the same file (WAL → concurrent). Inference is BYO: set your own GEMINI/GOOGLE key (or point
+# at a local Ollama — see docs/lan-appliance.md). Trusted-LAN posture: the passphrase gates the box; keep it on
+# a home network you trust (do NOT port-forward it to the public internet without the multi-tenant hardening).
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        VITE_AGENT_BASE_URL: "1"        # show the concierge panel (the agent runs on this box). Supabase is
+                                        # runtime-injected (empty here) → the app boots in local SQLite mode.
+    ports:
+      - "4894:4894"
+    environment:
+      NODE_ENV: production
+      STORAGE: sqlite                   # → LOCAL_MODE: local household auth + the SQLite data API.
+                                        # LOAD-BEARING — do not remove. This is the explicit switch that picks
+                                        # the backend; without it the app would auto-detect (and a stray
+                                        # VITE_SUPABASE_URL would silently flip the box to cloud mode).
+      SQLITE_PATH: /app/data/famhub.db
+      EXIT_ON_UNHANDLED: "true"         # let the orchestrator recycle a wedged process
+      GEMINI_API_KEY: ${GEMINI_API_KEY} # ONE key powers both containers. BYO.
+      COPILOT_MODEL: ${COPILOT_MODEL:-gemini-3.1-flash-lite} # ONE model knob for both engine tiers; high free-tier RPD
+      AGENT_BASE_URL: http://agent:8080 # Express proxies /api/agent/chat here (same compose network)
+      # Keyless local-model path (Ollama, etc.): forward LOCAL_LLM_* so the documented zero-key copilot works.
+      # Empty by default (the BYO-key path ignores them); set them in your env-file to drive a local model.
+      LOCAL_LLM_ENABLED: ${LOCAL_LLM_ENABLED:-}
+      LOCAL_LLM_URL: ${LOCAL_LLM_URL:-}
+      LOCAL_LLM_MODEL: ${LOCAL_LLM_MODEL:-}
+      LOCAL_LLM_THINK: ${LOCAL_LLM_THINK:-}
+      LOCAL_LLM_NUM_CTX: ${LOCAL_LLM_NUM_CTX:-}
+      LOCAL_LLM_TIMEOUT_MS: ${LOCAL_LLM_TIMEOUT_MS:-}
+      LOCAL_LLM_KEEP_ALIVE: ${LOCAL_LLM_KEEP_ALIVE:-}
+      LOCAL_LLM_API_KEY: ${LOCAL_LLM_API_KEY:-}
+    volumes:
+      - famhub-data:/app/data
+    restart: unless-stopped
+    healthcheck:                          # /api/health (Express). node:24 base → global fetch, no curl needed.
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4894/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    depends_on:
+      agent:
+        condition: service_started        # start once the agent CONTAINER is up — NOT service_healthy: a
+                                          # keyless/crash-looping agent would otherwise block the whole box,
+                                          # so calendar/chores/shopping + the keyless copilot still serve
+                                          # even when the concierge is down.
+
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # No host port: only the web container talks to it (AGENT_BASE_URL above).
+    environment:
+      PORT: 8080
+      STORAGE: sqlite                   # the MCP child writes auto-tier results to the SAME SQLite box (load-bearing — see web above)
+      SQLITE_PATH: /app/data/famhub.db
+      GEMINI_API_KEY: ${GEMINI_API_KEY} # ONE key — the agent aliases it to GOOGLE_API_KEY internally (api.py)
+      GOOGLE_GENAI_USE_VERTEXAI: "FALSE"
+      COPILOT_MODEL: ${COPILOT_MODEL:-gemini-3.1-flash-lite} # ONE model knob for both tiers (mirror web)
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:4894}
+    volumes:
+      - famhub-data:/app/data
+    restart: unless-stopped
+    healthcheck:                          # /healthz (FastAPI/uvicorn). node is on PATH in the agent image too.
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+volumes:
+  famhub-data:                          # the box's data lives here — back this up to keep your family's data
