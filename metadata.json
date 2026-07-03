@@ -1,6 +1,6 @@
 {
-  "name": "Family Summer Calendar Planner",
-  "description": "Family schedule overview with AI calendar imports, shared shopping lists, and gamified daily habits and chores tracker.",
+  "name": "Family-Hub — the safe household concierge",
+  "description": "An AI agent that runs the household — calendar, chores, shopping, outings, bills — behind hard safety gates: a no-payment invariant, server-authoritative risk tiers, provenance-verified booking handoffs, per-visitor RLS isolation, and an age-4-safe kid mode. ADK multi-agent + MCP toolbelt + a proactive morning planner.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
