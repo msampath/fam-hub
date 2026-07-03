@@ -102,3 +102,11 @@ def test_api_injects_current_goals_block():
     assert "CURRENT GOALS" in src
     assert "body.goals" in src
     assert "goals_block" in src
+
+
+def test_root_handles_multi_domain_requests_without_silent_drops():
+    # WS4b: a message spanning several specialists routes to the PRIMARY-outcome owner, and the root must
+    # explicitly surface the parts it did NOT delegate (never claim them done) — the honest alternative to
+    # sub-agent fan-out, which ADK's transfer delegation doesn't do (and which would break tool-scoping).
+    assert "MULTI-DOMAIN REQUESTS" in prompts.ROOT
+    assert "silently dropped" in prompts.ROOT

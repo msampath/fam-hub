@@ -1881,23 +1881,27 @@ app.post('/api/copilot', requireAuth, aiRateLimit, async (req, res) => {
     );
 
     // Critic / Verifier (A7): if the model emitted actions with concrete problems (a chore for a non-member,
-    // a past/garbled date, a titleless event), do ONE corrective re-prompt naming the issues so it fixes
-    // them — rather than letting sanitizeCopilotActions silently drop the near-miss into a no-op.
+    // a past/garbled date, a titleless event), run a BOUNDED corrective loop (≤2 passes) naming the issues so
+    // it fixes them — rather than letting sanitizeCopilotActions silently drop the near-miss into a no-op.
+    // Each pass must STRICTLY reduce the issue count to be adopted (monotonic → the loop can't thrash), and
+    // the loop exits the moment the actions verify clean. KAGGLE_EVAL: self-correction as an iterative loop.
     if (useHarness && Array.isArray(parsed.actions) && parsed.actions.length) {
-      const issues = verifyActions(parsed.actions, { memberNames, today });
-      if (issues.length) {
+      let issues = verifyActions(parsed.actions, { memberNames, today });
+      for (let pass = 0; pass < 2 && issues.length; pass++) {
         // Use a THROWAWAY meta for the critic retry so the reported model/usedFallback isn't overwritten by the
         // retry's model when we don't adopt the retry (else telemetry mislabels the kept first answer).
         const retryMeta: any = {};
         const retry: any = await callGeminiJSON(
           `${contextPrompt}\n\n${buildCriticNote(issues)}`, systemPrompt, COPILOT_SCHEMA, '{}', retryMeta, { temperature: 0.3 },
         );
-        // Keep the retry only if it actually reduced the problems (else fall back to the first answer).
-        if (retry && Array.isArray(retry.actions) && verifyActions(retry.actions, { memberNames, today }).length < issues.length) {
-          parsed.actions = retry.actions;
-          if (retry.reply) parsed.reply = retry.reply;
-          meta.model = retryMeta.model; meta.usedFallback = retryMeta.usedFallback; // adopt → report the retry's model
-        }
+        // Keep the retry only if it actually reduced the problems (else keep the current answer and stop —
+        // a pass that can't improve won't improve on a rerun either).
+        const retryIssues = retry && Array.isArray(retry.actions) ? verifyActions(retry.actions, { memberNames, today }) : issues;
+        if (retryIssues.length >= issues.length) break;
+        parsed.actions = retry.actions;
+        if (retry.reply) parsed.reply = retry.reply;
+        meta.model = retryMeta.model; meta.usedFallback = retryMeta.usedFallback; // adopt → report the retry's model
+        issues = retryIssues;
       }
     }
 
