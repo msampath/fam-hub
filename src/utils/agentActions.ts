@@ -56,7 +56,7 @@ function ledgerFieldsFor(tool: string, art: Artifact, message?: string) {
     case 'prepare_handoff': {
       // Carry a booking stub (venue + date/time) so approving the draft can ALSO put the booking on the
       // calendar (A3 last-mile): reserve's validator already produced `booking`; a handoff carries it in its
-      // pre-filled `fields`. Only when a real date is present — else it's just the link.
+      // gathered `fields`. Only when a real date is present — else it's just the link.
       const booking = art.booking || bookingFromFields(art.title || '', art.fields);
       return {
         // Generous clamp: a handoff summary carries the full "details to enter" list, which was being cut

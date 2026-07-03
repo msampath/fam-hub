@@ -169,7 +169,7 @@ export function buildReservationDraft(p: any): { summary: string; link: string; 
 }
 
 // Parse a clock value to 24h "HH:MM", accepting BOTH 24h ("18:00") and 12h AM/PM ("6:30 PM") — handoff
-// fields are FREE TEXT the agent pre-fills from a booking page, and US reservation pages overwhelmingly
+// fields are FREE TEXT the agent gathered from a booking page, and US reservation pages overwhelmingly
 // show 12h times, so a naive HH:MM grab would land a 6:30 PM dinner at 06:30. Returns undefined if unparseable.
 function parseClockTo24h(v: string): string | undefined {
   const m = String(v || '').match(/\b(\d{1,2}):([0-5]\d)\s*([AaPp][Mm])?/);
@@ -182,7 +182,7 @@ function parseClockTo24h(v: string): string | undefined {
   return `${String(h).padStart(2, '0')}:${m[2]}`;
 }
 
-// Extract a booking stub from a handoff's pre-filled fields (label/value pairs) — find a Date field
+// Extract a booking stub from a handoff's gathered fields (label/value pairs) — find a Date field
 // (YYYY-MM-DD) and an optional Time field (24h or 12h AM/PM). Scans ALL matching-labelled fields for a value
 // that actually holds the pattern, so a non-date "date" field can't suppress a valid date in a later field.
 // Returns null without a valid date, so a handoff with no concrete date just keeps its link. Pure → unit-tested.

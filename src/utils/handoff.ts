@@ -1,8 +1,8 @@
 // prepare_handoff (agentic A3): the loop-closer. After the agent researches a real booking/permit/registration
 // URL (via web_search/fetch_page) and gathers the household details, it stages a HANDOFF draft — the exact
-// official URL plus the fields it pre-filled — for the parent to review and submit. The agent NEVER submits or
-// pays (no-payment invariant): a handoff is a confirm-tier DRAFT whose final click belongs to the human.
-// Pure builder → unit-tested; the MCP tool + client ledger reuse it.
+// official URL plus the details the parent will need to ENTER there. A plain link cannot fill the venue's
+// form, and the agent NEVER fills, submits, or pays (no-payment invariant): a handoff is a confirm-tier DRAFT;
+// the typing and the final click belong to the human. Pure builder → unit-tested; the MCP tool + client ledger reuse it.
 
 export interface HandoffField { label: string; value: string }
 export interface HandoffDraft { summary: string; link: string; fields: HandoffField[]; title: string }

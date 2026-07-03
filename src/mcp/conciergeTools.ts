@@ -262,16 +262,17 @@ export const MCP_TOOLS: McpToolDef[] = [
   ...REGISTRY_TOOL_DEFS.map((d): McpToolDef => ({ ...d, run: (a, ctx) => runRegistryTool(d.name, a, ctx) })),
   {
     // prepare_handoff (A3) — the loop-closer. Confirm-tier DRAFT: a REAL booking/permit/registration URL
-    // (found via web_search/fetch_page) plus the fields the agent pre-filled, staged for the parent to
-    // review and SUBMIT themselves. The agent never submits or pays (no-payment invariant).
-    // ADVERTISED here (ListTools) but EXECUTED by the server's PROVENANCE-GATED handler
+    // (found via web_search/fetch_page) plus the details the agent GATHERED for the parent to enter —
+    // a plain link cannot fill the venue's form, and the agent never fills, submits, or pays (no-payment
+    // invariant). ADVERTISED here (ListTools) but EXECUTED by the server's PROVENANCE-GATED handler
     // (src/mcp/server.ts) — which additionally rejects a link the agent didn't actually see published this
     // run. It therefore carries NO `run`: a run here would be a strictly-weaker copy that bypasses that gate.
     name: 'prepare_handoff',
     description: 'Stage a HANDOFF draft to finish a task the parent must complete themselves — a REAL '
       + 'official URL (booking/permit/registration/ticket page, found via web_search/fetch_page) with the '
-      + 'fields you pre-filled. Confirm tier. You NEVER submit or pay; the parent reviews and submits. Use '
-      + 'this (not reserve) once you have the real form URL — e.g. a recreation.gov timed-entry pass.',
+      + 'details the parent will need to enter on that page. You do NOT fill the form, and you NEVER '
+      + 'submit or pay; the parent opens the link, types the details, and submits. Use this (not reserve) '
+      + 'once you have the real form URL — e.g. a recreation.gov timed-entry pass.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -279,7 +280,7 @@ export const MCP_TOOLS: McpToolDef[] = [
         url: { type: 'string', description: 'The REAL http(s) form/booking URL to open.' },
         fields: {
           type: 'array',
-          description: 'Pre-filled fields to carry over (label + value pairs).',
+          description: 'Details the parent will need to enter on the page (label + value pairs you gathered).',
           items: { type: 'object', properties: { label: { type: 'string' }, value: { type: 'string' } } },
         },
       },
