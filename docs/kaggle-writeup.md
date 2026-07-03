@@ -71,11 +71,11 @@ Elsewhere in the loop: the quick path runs a **bounded critic** (invalid actions
 ## Try it
 
 - **Live demo (no login):** https://family-hub-web-420776046740.us-central1.run.app → *Try the demo* → follow the README's 7-step **Golden Path** (grounded ask → agent write → multi-step trip with goal + verified handoff → **the payment refusal** → morning planner → kid mode).
-- **Repo:** https://github.com/msampath/fam-hub — machine-first README (Concept→Evidence table, Mermaid architecture), 918 Vitest tests + offline agent-structure pytest + a live refusal/injection eval, `docker compose up --build` for the full stack.
+- **Repo:** https://github.com/msampath/fam-hub — machine-first README (Concept→Evidence table, Mermaid architecture), 925 Vitest tests + offline agent-structure pytest + a live refusal/injection eval, `docker compose up --build` for the full stack.
 
 ## Honest limitations
 
-The demo agent service runs `--allow-unauthenticated` with per-visitor RLS as the real boundary (fine for a demo; a private deployment would add IAM). Agent sessions are in-memory per instance (`InMemorySessionService`) — goals re-inject as grounded text each turn, which also survives model fallback. The scheduled digest is verified by the owner rather than by an automated E2E (it needs a live cron + mailbox). The cron endpoint is gated by a ≥32-char shared secret (hash-then-`timingSafeEqual`) rather than IAM ingress. Email scanning is disabled in the public demo. Free-tier Gemini capacity 503s are absorbed by a model-fallback chain with bounded retries — and when every model is down, the AI degrades to a non-blocking notice while calendar/chores/shopping keep working.
+The demo agent service runs `--allow-unauthenticated` with per-visitor RLS as the real boundary (fine for a demo; a private deployment would add IAM). Agent sessions are in-memory per instance (`InMemorySessionService`) — goals re-inject as grounded text each turn, which also survives model fallback. The scheduled digest runs on a live Cloud Scheduler cron (verified in production); email *delivery* beyond the account owner waits on a verified sender domain (Resend's sandbox restriction — send failures are logged, never silent). The cron endpoint is gated by a ≥32-char shared secret (hash-then-`timingSafeEqual`) rather than IAM ingress. Email scanning is disabled in the public demo. Free-tier Gemini capacity 503s are absorbed by a model-fallback chain with bounded retries — and when every model is down, the AI degrades to a non-blocking notice while calendar/chores/shopping keep working.
 
 ## Roadmap: the $0 local concierge
 

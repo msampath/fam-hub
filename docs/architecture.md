@@ -86,7 +86,9 @@ The storage backend is chosen at runtime (`STORAGE` env), so **one build runs ei
 ## Deploy modes
 
 - **Cloud:** two Cloud Run services (web + agent) plus a Cloud Scheduler job that triggers the autonomous
-  morning-briefing email. See [`cloud-run-deploy.md`](./cloud-run-deploy.md).
+  **morning agent** — the digest email AND a grounded planner pass that stages up to 3 confirm-tier drafts
+  (shopping, event suggestions, an open goal's next step) into Approvals: the model proposes, deterministic
+  code stages, the parent approves (`src/utils/morningAgent.ts`). See [`cloud-run-deploy.md`](./cloud-run-deploy.md).
 - **LAN appliance:** one `docker compose` on a home box (mini-PC / NAS / Raspberry Pi) with prebuilt images —
   a one-command install, data stays local. See [`INSTALL.md`](./INSTALL.md) and [`lan-appliance.md`](./lan-appliance.md).
 
@@ -100,3 +102,6 @@ Security is **server-authoritative**, never trusted to the model:
 - **Untrusted content** — fetched web pages and stored documents are sanitized and treated as data, never as instructions.
 - **SSRF guard** — the scraper resolves + pins IPs and blocks internal ranges (incl. redirects/rebinding).
 - **Honesty guard** — the agent can't claim it did something a tool didn't actually do that turn.
+- **Kid mode** — a per-device lock that hides Manage/Approvals/Actions/Import and every destructive tap;
+  the ask-input stays because destructive tools are confirm-tier by construction (a kid's request can only
+  stage a draft a parent reviews). Exit = 3-second hold + the step-up PIN when set.

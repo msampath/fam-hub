@@ -63,8 +63,8 @@ Contract (matches `src/utils/agentClient.ts`):
 
 | | |
 | --- | --- |
-| `POST /chat` | `{ message, sessionId? }` + `Authorization: Bearer <supabase-jwt>` → `{ reply, sessionId }` |
-| `GET /healthz` | `{ ok: true }` |
+| `POST /chat` | `{ message, sessionId?, history?, family?, goals?, copilotName? }` + `Authorization: Bearer <supabase-jwt>` → `{ reply, sessionId, actions, model }` — `history`/`family` carry the copilot's context; `goals` re-injects every turn as the CURRENT GOALS block; `copilotName` is the family's (kid-pickable) name for the copilot |
+| `GET /healthz` | `{ ok: true }` — local/docker only: on `*.run.app` Google's frontend RESERVES `/healthz` and 404s it without forwarding; probe `POST /chat` there instead |
 
 Each `/chat` call rebuilds the agent with the **caller's** JWT, so the MCP child persists only under that
 visitor's household (RLS-scoped) — the per-visitor isolation invariant. No token ⇒ the agent still answers
