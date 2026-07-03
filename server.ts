@@ -77,12 +77,22 @@ app.use(compression());
 // dist/index.html); images allow Google avatars + data URIs.
 const supaUrl = process.env.VITE_SUPABASE_URL || '';
 const supaConnect = supaUrl ? [supaUrl, supaUrl.replace(/^http/, 'ws')] : []; // https→wss for realtime
+// The prod static serve injects ONE inline script — the runtime web config (see the static-serve block:
+// "build once, deploy anywhere"). Allow exactly that script by CSP hash; everything else stays inline-free.
+// The content is env-derived and fixed for the process lifetime, and the injection site uses this SAME
+// constant, so the hash can never drift from what's served. Without this, script-src 'self' blocks the
+// injection and a prebuilt image (no baked VITE_*) can't reach Supabase at all.
+const APP_CONFIG_SCRIPT = `window.__APP_CONFIG__=${JSON.stringify({
+  supabaseUrl: process.env.VITE_SUPABASE_URL || '',
+  supabaseAnonKey: process.env.VITE_SUPABASE_ANON_KEY || '',
+})}`;
+const APP_CONFIG_SCRIPT_SHA256 = `'sha256-${createHash('sha256').update(APP_CONFIG_SCRIPT).digest('base64')}'`;
 app.use(helmet({
   contentSecurityPolicy: IS_PRODUCTION ? {
     useDefaults: false,
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'"],
+      scriptSrc: ["'self'", APP_CONFIG_SCRIPT_SHA256],
       scriptSrcAttr: ["'none'"],
       styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'], // + Google Fonts (Space Grotesk) stylesheet
       imgSrc: ["'self'", 'data:', 'https:'],              // Google avatars + data URIs
@@ -2685,9 +2695,10 @@ async function startServer() {
     let indexHtmlInjected: string | null = null;
     app.get('*', (_req, res) => {
       if (indexHtmlInjected == null) {
-        const cfg = { supabaseUrl: process.env.VITE_SUPABASE_URL || '', supabaseAnonKey: process.env.VITE_SUPABASE_ANON_KEY || '' };
         const raw = readFileSync(path.join(distPath, 'index.html'), 'utf8');
-        indexHtmlInjected = raw.replace('</head>', `<script>window.__APP_CONFIG__=${JSON.stringify(cfg)}</script></head>`);
+        // APP_CONFIG_SCRIPT is the module-level constant the CSP script-src hash was computed from —
+        // injecting anything else here would be blocked by that hash.
+        indexHtmlInjected = raw.replace('</head>', `<script>${APP_CONFIG_SCRIPT}</script></head>`);
       }
       res.type('html').send(indexHtmlInjected);
     });
