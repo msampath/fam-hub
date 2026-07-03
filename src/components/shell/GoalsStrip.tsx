@@ -16,7 +16,7 @@ const STEP_DOT: Record<GoalStep['status'], { mark: string; color: string; label?
 };
 
 export default function GoalsStrip() {
-  const { goalsList, toggleGoal, deleteGoal, toggleStep, kidMode } = useApp();
+  const { goalsList, toggleGoal, deleteGoal, toggleStep, kidMode, copilotName } = useApp();
   const { handleSendCopilotMessage } = useCalendar();
 
   // 'active' = anything not finished/abandoned (covers legacy 'open' + the new active/waiting states).
@@ -35,7 +35,7 @@ export default function GoalsStrip() {
   return (
     <div className="rounded-[18px] p-4" style={{ border: `2px solid ${C.elevated}`, boxShadow: brutShadow(C.elevated, 4), background: C.card }}>
       <div className="mb-2 flex items-center gap-2">
-        <span className="text-[12px] font-extrabold uppercase tracking-[0.1em]" style={{ color: C.muted }}>🎯 Goals the copilot is tracking</span>
+        <span className="text-[12px] font-extrabold uppercase tracking-[0.1em]" style={{ color: C.muted }}>🎯 Goals {copilotName} is tracking</span>
         {active.length > 0 && <span className="ml-auto text-[11px] font-semibold" style={{ color: C.muted }}>{active.length} active</span>}
       </div>
 

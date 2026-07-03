@@ -611,9 +611,12 @@ export default function App() {
       const saved = localStorage.getItem('famplan_copilot_messages');
       if (saved) { const arr = JSON.parse(saved) as CopilotMessage[]; if (Array.isArray(arr) && arr.length) return arr; }
     } catch { /* corrupt blob → fall through to the greeting */ }
+    // Greet with the family's chosen name when the cached settings already carry one (reloads); a brand-new
+    // device greets as "Copilot" until the household settings arrive/rename.
+    const greetName = (settings[0]?.copilotName || '').trim() || 'Copilot';
     return [{
       role: 'assistant',
-      text: "👋 **Hi! I'm your Family's Copilot.** I am keeping an eye on your kids school schedule and activities, and can make recommendations about things you might like to do. Tell me what you'd like to start with.\n\nAsk me anything! For example:\n* *Are we busy in July?*\n* *Are there any overlapping calendar conflicts?*\n* *Find open weeks for dynamic family outings.*"
+      text: `👋 **Hi! I'm ${greetName}, your family's copilot.** I am keeping an eye on your kids school schedule and activities, and can make recommendations about things you might like to do. Tell me what you'd like to start with.\n\nAsk me anything! For example:\n* *Are we busy in July?*\n* *Are there any overlapping calendar conflicts?*\n* *Find open weeks for dynamic family outings.*`
     }];
   });
   const [isCopilotThinking, setIsCopilotThinking] = useState(false);
@@ -2628,6 +2631,12 @@ export default function App() {
   // The raw PIN never lives in app state: the server hashes it; we persist only {hash,salt} in the
   // household settings blob, and verify by sending a candidate PIN to the server.
   const hasStepUpPin = !!settings[0]?.stepUpPinHash && !!settings[0]?.stepUpPinSalt;
+  // The family's name for the copilot (kid-pickable; synced household setting). Clamped on save; every
+  // engine sees it — the bar label + goals strip read it here, the quick path gets it via `home: settings[0]`,
+  // and agent turns carry it in the turn context (api.py injects it into the grounded prompt).
+  const copilotName = (settings[0]?.copilotName || '').trim() || 'Copilot';
+  const setCopilotName = (name: string) =>
+    setSettings(prev => [{ ...(prev[0] || {}), copilotName: name.trim().slice(0, 24) }]);
   const handleSetStepUpPin = async (pin: string): Promise<{ ok: boolean; error?: string }> => {
     try {
       const { hash, salt } = await apiSetStepUpPin(pin);
@@ -2821,7 +2830,7 @@ export default function App() {
         .filter(g => g.status !== 'done' && g.status !== 'abandoned')
         .slice(0, 5)
         .map(g => ({ id: g.id, text: g.text, status: g.status, ...(g.nextAction ? { nextAction: g.nextAction } : {}), steps: (g.steps || []).map(s => ({ title: s.title, status: s.status })) }));
-      r = await askConciergeAgent(jwt, agentSessionId, query, { history, family, goals });
+      r = await askConciergeAgent(jwt, agentSessionId, query, { history, family, goals, copilotName });
     } catch (e) {
       console.warn('Agent turn failed; falling back to local copilot.', e);
       return false;
@@ -3114,6 +3123,9 @@ export default function App() {
     digestPrefs, setDigestPrefs,
     // Kid mode (per-device — see useDevicePrefs)
     kidMode, setKidMode,
+
+    // The family's name for the copilot (synced household setting)
+    copilotName, setCopilotName,
 
     // Email scans (B1 bills / B2 packages / B3 kids) + shared suggestion-create (also used by the copilot panel)
     scanEmailForBills, scanEmailForPackages, scanEmailForKidsActivities, handleCreateSuggestion, addedSuggestionKeys,

@@ -37,4 +37,9 @@ describe('GoalsStrip (A6 — goals the concierge tracks)', () => {
     const { getByText } = renderWithBoth(<GoalsStrip />, { goalsList: [] });
     expect(getByText(/No goals yet/)).toBeInTheDocument();
   });
+
+  it('titles the strip with the family-chosen copilot name', () => {
+    const { getByText } = renderWithBoth(<GoalsStrip />, { goalsList: [], copilotName: 'Sparkles' });
+    expect(getByText(/Goals Sparkles is tracking/)).toBeInTheDocument();
+  });
 });

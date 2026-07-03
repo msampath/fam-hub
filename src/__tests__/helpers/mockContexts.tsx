@@ -164,6 +164,10 @@ export function makeAppCtx(overrides: Partial<AppCtx> = {}): AppCtx {
     kidMode: false,
     setKidMode: vi.fn(),
 
+    // Copilot name (household setting)
+    copilotName: 'Copilot',
+    setCopilotName: vi.fn(),
+
     // Email scans (bills/packages/kids) + suggestion create
     scanEmailForBills: vi.fn(async () => ({ suggestions: [], scanned: 0 })),
     scanEmailForPackages: vi.fn(async () => ({ suggestions: [], scanned: 0 })),

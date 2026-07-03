@@ -1406,7 +1406,7 @@ app.post('/api/parse-recipe', requireAuth, aiRateLimit, async (req, res) => {
       return res.status(400).json({ error: 'A dish name or recipe text is required.' });
     }
 
-    const prompt = `Extract the grocery ingredients needed for the following dish or recipe. Return each ingredient as a concise shopping-list item (name plus an approximate quantity when obvious, e.g. "2 lb chicken thighs"). Assign each to the most likely store from exactly: "Costco", "Indian Store", "Grocery Store", "Other". Use "Indian Store" for Indian/South-Asian spices and specialty items, "Costco" for bulk staples, otherwise "Grocery Store".
+    const prompt = `Extract the grocery ingredients needed for the following dish or recipe. Return each ingredient as a concise shopping-list item. Quantities must be BUY units a store actually sells — package sizes ("400 g pack", "small bag", "1 lb", "a dozen", "1 bunch", "small jar", "500 ml carton") — NEVER cook-measure units like cups/tbsp/tsp (a recipe's "2 tbsp coriander seeds" becomes "Coriander seeds (small bag)"; "1/2 cup heavy cream" becomes "Heavy cream (small carton)"). Assign each to the most likely store from exactly: "Costco", "Indian Store", "Grocery Store", "Other". Use "Indian Store" for Indian/South-Asian spices and specialty items, "Costco" for bulk staples, otherwise "Grocery Store".
 
 Dish or recipe:
 ---
@@ -1864,7 +1864,12 @@ app.post('/api/copilot', requireAuth, aiRateLimit, async (req, res) => {
     const contextPrompt = useHarness
       ? buildHarnessUserPrompt(today, upcomingEvents, memberNames, prompt, availability || undefined, weather || undefined, history || undefined, conversation, longWeekend, places, eventsNearby, nowLabel, home?.homeLabel, localKnowledge, savedDocs)
       : buildCopilotPrompt(JSON.stringify(upcomingEvents, null, 2), memberNames, today, prompt);
-    const systemPrompt = useHarness ? COPILOT_HARNESS_SYSTEM : COPILOT_SYSTEM;
+    // Kid-pickable copilot name rides in the household settings blob (`home`) — one appended line so the
+    // quick path answers to the family's name for it too. Clamped; only when actually renamed.
+    const copilotNickname = String(home?.copilotName || '').split(/\s+/).join(' ').trim().slice(0, 24);
+    const nameLine = copilotNickname && copilotNickname.toLowerCase() !== 'copilot'
+      ? `\nThe family named you "${copilotNickname}" — refer to yourself by that name.` : '';
+    const systemPrompt = (useHarness ? COPILOT_HARNESS_SYSTEM : COPILOT_SYSTEM) + nameLine;
 
     const meta: { model?: string; usedFallback?: boolean } = {};
     const parsed: any = await callGeminiJSON(
@@ -2916,8 +2921,11 @@ async function runDailyDigest(): Promise<void> {
     // template text); falls back to the deterministic facts text if the agent is unreachable.
     const body = (await composeBriefingViaAgent(factsText, today)) || factsText;
     // Send to each parent who opted in (best-effort, independent — one bad address doesn't block the others).
+    // LOG every failure: a Resend rejection (e.g. sandbox mode — unverified domain → deliverable only to the
+    // account owner) was previously discarded here, so a recipient silently never received a single digest.
     for (const to of recipients) {
-      await sendDigestEmail(to, `Your Family-Hub briefing — ${today}`, body);
+      const sent = await sendDigestEmail(to, `Your Family-Hub briefing — ${today}`, body);
+      if (!sent.ok && !sent.skipped) console.warn(`[digest] send to ${to} FAILED: ${sent.error} — if this is 'resend 403', verify a domain in Resend and set DIGEST_FROM_EMAIL to it (the shared onboarding@resend.dev sender only delivers to the Resend account owner).`);
     }
   }
 }

@@ -143,6 +143,13 @@ describe('CopilotBar', () => {
     expect(screen.getByLabelText('Ask the copilot')).toBeInTheDocument();
   });
 
+  it('labels the thread with the family-chosen copilot name', async () => {
+    const user = userEvent.setup();
+    renderWithBoth(<CopilotBar onOpenManage={vi.fn()} />, { copilotName: 'Sparkles' });
+    await user.click(screen.getByLabelText('Ask the copilot')); // focus → opens the panel
+    expect(screen.getByText('Sparkles')).toBeInTheDocument();
+  });
+
   it('exiting kid mode requires the 3s hold (a quick tap does nothing)', async () => {
     vi.useFakeTimers();
     try {

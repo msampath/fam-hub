@@ -88,6 +88,7 @@ class ChatIn(BaseModel):
     history: list[dict] | None = None   # recent local-copilot turns [{role, text}] for continuity on escalate
     family: str | None = None           # roster "Leo (8, Kid), Ava (5, Kid)" so the agent doesn't guess ages
     goals: list[dict] | None = None     # the family's CURRENT tracked goals [{id,text,status,nextAction,steps}]
+    copilotName: str | None = None      # what the family calls the copilot (kid-pickable) — answer to it
 
 
 def _visitor_id(jwt: str | None) -> str:
@@ -194,7 +195,14 @@ async def chat(body: ChatIn, authorization: str | None = Header(default=None)):
                 "this block. NEVER say a goal/step was changed or completed unless you called set_goal this turn.\n"
                 + "\n".join(lines) + "\n\n"
             )
-    grounded = f"{context}\n\n{goals_block}{convo}{message}"
+    # Kid-pickable copilot name: one grounded line so every engine answers to the family's name for it.
+    # Clamped + whitespace-collapsed (it's a household setting, not web content — thin guard only).
+    name_block = ""
+    if body.copilotName:
+        safe_name = " ".join(str(body.copilotName).split())[:24]
+        if safe_name and safe_name.lower() != "copilot":
+            name_block = f'(The family named you "{safe_name}" — refer to yourself by that name.)\n\n'
+    grounded = f"{context}\n\n{name_block}{goals_block}{convo}{message}"
     content = types.Content(role="user", parts=[types.Part(text=grounded)])
 
     async def _run_turn(model_name: str | None, turn_session_id: str):

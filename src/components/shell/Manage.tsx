@@ -76,8 +76,10 @@ export default function Manage({ account, onClose }: ManageProps) {
     newMemberAge, setNewMemberAge,
     inviteCodeInput, setInviteCodeInput, isJoiningHousehold, handleJoinHousehold,
     hasStepUpPin, setStepUpPin, verifyStepUpPin, digestPrefs, setDigestPrefs,
-    kidMode, setKidMode,
+    kidMode, setKidMode, copilotName, setCopilotName,
   } = useApp();
+  // Copilot rename (kid-pickable): local draft → Save writes the household setting (synced everywhere).
+  const [copilotNameDraft, setCopilotNameDraft] = useState(copilotName);
   // Daily-briefing email prefs (single-element blob); merge-patch the one entry.
   const digest: DigestPrefs = digestPrefs[0] || { enabled: false, email: account.user?.email || '', sendHour: 7 };
   const setDigest = (patch: Partial<typeof digest>) => setDigestPrefs([{ ...digest, ...patch }]);
@@ -222,6 +224,28 @@ export default function Manage({ account, onClose }: ManageProps) {
               <button type="button" onClick={() => account.onToggleAutoScan(!account.autoScanEnabled)} className="rounded-[10px] px-3 py-1.5 text-xs font-extrabold" style={{ border: `2px solid ${account.autoScanEnabled ? C.emerald : C.elevated}`, color: account.autoScanEnabled ? C.emerald : C.muted, background: account.autoScanEnabled ? `${C.emerald}14` : 'transparent' }}>
                 {account.autoScanEnabled ? 'On' : 'Off'}
               </button>
+            </label>
+            <label className="flex items-center justify-between gap-3 text-sm font-semibold" style={{ color: C.primary }}>
+              <span>Copilot name <span className="text-xs font-normal" style={{ color: C.muted }}>(what the family calls it — let the kids pick!)</span></span>
+              <span className="flex items-center gap-2">
+                <input
+                  value={copilotNameDraft}
+                  onChange={e => setCopilotNameDraft(e.target.value)}
+                  maxLength={24}
+                  aria-label="Copilot name"
+                  className="w-32 rounded-[10px] px-3 py-1.5 text-sm font-semibold outline-none"
+                  style={field}
+                />
+                <button
+                  type="button"
+                  onClick={() => setCopilotName(copilotNameDraft)}
+                  disabled={!copilotNameDraft.trim() || copilotNameDraft.trim() === copilotName}
+                  className="rounded-[10px] px-3 py-1.5 text-xs font-extrabold disabled:opacity-40"
+                  style={{ border: `2px solid ${C.indigo}`, color: C.indigo, background: `${C.indigo}14` }}
+                >
+                  Save
+                </button>
+              </span>
             </label>
             <label className="flex items-center justify-between gap-3 text-sm font-semibold" style={{ color: C.primary }}>
               <span>Kid mode <span className="text-xs font-normal" style={{ color: C.muted }}>(locks this device to the kid-safe view; hold 🔒 3s to exit{hasStepUpPin ? ' + PIN' : ''})</span></span>

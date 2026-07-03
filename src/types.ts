@@ -245,6 +245,7 @@ export interface HouseholdSettings {
   homeLabel?: string;  // human-readable resolved place, e.g. "Sammamish, Washington"
   homeLat?: number;
   homeLng?: number;
+  copilotName?: string; // what the family calls the copilot (kid-pickable, e.g. "Sparkles"); default "Copilot"
   // Step-up PIN for approving high-risk (physical-world / spend) concierge actions. Hashed
   // SERVER-SIDE (node crypto) — never store the raw PIN, and don't rely on client crypto.subtle
   // (unavailable over the plain-http LAN). Set/verified via /api/stepup/* in A3.

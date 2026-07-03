@@ -34,7 +34,7 @@ export default function CopilotBar({ onOpenManage }: CopilotBarProps) {
   const {
     actionLedger, approveLedgerEntry, rejectLedgerEntry, reviseLedgerEntry, verifyStepUpPin, hasStepUpPin,
     scanEmailForBills, scanEmailForPackages, scanEmailForKidsActivities, handleCreateSuggestion, addedSuggestionKeys,
-    autoEmailSuggestions, autoScanActive, kidMode, setKidMode,
+    autoEmailSuggestions, autoScanActive, kidMode, setKidMode, copilotName,
   } = useApp();
 
   // Kid-mode exit gate: hold the 🔒 chip for 3s (a deliberate-adult gesture), then — if a step-up PIN is
@@ -310,7 +310,7 @@ export default function CopilotBar({ onOpenManage }: CopilotBarProps) {
       {open && (
         <div className="mx-auto mt-2.5 max-w-[1200px] rounded-[14px] p-3.5" style={{ border: `2px solid ${C.elevated}`, background: C.pill }}>
           <div className="mb-2.5 flex items-center justify-between gap-2">
-            {colLabel('Copilot', C.indigo)}
+            {colLabel(copilotName, C.indigo)}
             <div className="flex items-center gap-3">
               {!kidMode && actionsCount > 0 && <button type="button" onClick={() => setActionsOpen(true)} className="text-[10px] font-bold uppercase" style={{ color: C.emerald }}>Actions ({actionsCount})</button>}
               {!kidMode && pendingApprovals.length > 0 && <button type="button" onClick={() => setApprovalsOpen(true)} className="text-[10px] font-bold uppercase" style={{ color: C.amber }}>Approvals ({pendingApprovals.length})</button>}

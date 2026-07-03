@@ -20,7 +20,11 @@ export async function sendDigestEmail(
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ from, to, subject, text }),
     });
-    return res.ok ? { ok: true } : { ok: false, error: `resend ${res.status}` };
+    if (res.ok) return { ok: true };
+    // Carry Resend's own message — a 403 names the real problem ("You can only send testing emails to
+    // your own email address…" = sandbox mode / unverified domain), which is otherwise undiagnosable.
+    const detail = await res.text().then(t => t.slice(0, 200)).catch(() => '');
+    return { ok: false, error: `resend ${res.status}${detail ? ` — ${detail}` : ''}` };
   } catch (e: any) {
     return { ok: false, error: e?.message || 'send failed' };
   }

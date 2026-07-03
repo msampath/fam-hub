@@ -118,3 +118,16 @@ def test_shopping_agent_derives_dish_ingredients_itself():
     assert "DISH → INGREDIENTS" in prompts.SHOPPING
     assert "never ask the parent" in prompts.SHOPPING
     assert "make/cook" in prompts.ROOT  # the router sends dish requests to shopping_agent
+    # Owner feedback: quantities must be PURCHASABLE units (a 400 g pack, a small bag), never cook-measures
+    # ("2 tbsp coriander seeds" isn't a thing a store sells).
+    assert "BUY unit" in prompts.SHOPPING
+    assert "cups/tbsp/tsp" in prompts.SHOPPING
+
+
+def test_api_injects_the_family_chosen_copilot_name():
+    # Kid-pickable copilot name: api.py must accept ChatIn.copilotName and fold it into the grounded prompt
+    # (clamped), so the agent answers to the family's name for it.
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parents[1] / "api.py").read_text(encoding="utf-8")
+    assert "copilotName" in src
+    assert "name_block" in src

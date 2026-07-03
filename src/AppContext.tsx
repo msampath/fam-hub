@@ -174,6 +174,10 @@ export interface AppCtx {
   kidMode: boolean;
   setKidMode: React.Dispatch<React.SetStateAction<boolean>>;
 
+  // The family's name for the copilot (kid-pickable, synced household setting; default "Copilot").
+  copilotName: string;
+  setCopilotName: (name: string) => void;
+
   // Email scans (B1 bills / B2 packages / B3 kids) + shared tap-to-add suggestion create
   scanEmailForBills: () => Promise<{ suggestions: CopilotSuggestion[]; scanned: number; error?: string }>;
   scanEmailForPackages: () => Promise<{ suggestions: CopilotSuggestion[]; scanned: number; error?: string }>;

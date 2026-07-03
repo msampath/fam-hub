@@ -43,6 +43,8 @@ export interface AgentTurnContext {
   // The family's CURRENT tracked goals, sent every turn so the agent can reference the right id to update a
   // goal/step and honestly "recheck" (it has no get_goals tool and can't see goals from a prior session).
   goals?: { id: string; text: string; status: string; nextAction?: string; steps: { title: string; status: string }[] }[];
+  // The family's name for the copilot (household setting) — the agent answers to it.
+  copilotName?: string;
 }
 
 // Coerce a raw JSON action element into the AgentAction shape. Defense-in-depth at the wire boundary (the
@@ -73,6 +75,7 @@ export async function askConciergeAgent(jwt: string | null, sessionId: string, m
       ...(ctx?.history?.length ? { history: ctx.history } : {}),
       ...(ctx?.family ? { family: ctx.family } : {}),
       ...(ctx?.goals?.length ? { goals: ctx.goals } : {}),
+      ...(ctx?.copilotName && ctx.copilotName !== 'Copilot' ? { copilotName: ctx.copilotName } : {}),
     }),
   });
   if (!res.ok) throw new Error(`The agent is unavailable right now (${res.status}). Try again in a moment.`);
