@@ -6,7 +6,7 @@
 import { uuid } from './uuid';
 import { MEMBER_COLORS_LIST } from '../constants';
 import { addDaysISO } from './copilotHarness';
-import type { FamilyMember, CalendarEvent, Chore, ShoppingItem, HouseholdSettings, Bill, LibraryDoc } from '../types';
+import type { FamilyMember, CalendarEvent, Chore, ShoppingItem, HouseholdSettings, Bill, LibraryDoc, Goal } from '../types';
 
 // `today` is local ISO 'YYYY-MM-DD'; `userId` is the anonymous visitor's auth id (links the "You" parent
 // so authorship + account-linking resolve). Returns a map of collection dataKey → seeded array.
@@ -25,6 +25,9 @@ export function buildDemoSeed(today: string, userId: string): Record<string, any
     ev({ title: 'Dentist — Ava', start: addDaysISO(today, 3), startTime: '14:00', endTime: '14:45', members: ['Ava'] }),
     ev({ title: 'Max swim lesson', start: addDaysISO(today, 2), startTime: '17:30', endTime: '18:15', category: 'Sports', members: ['Max'] }),
     ev({ title: 'Family movie night', start: addDaysISO(today, 5), startTime: '19:00', members: ['Everyone'] }),
+    // A birthday inside the nudge horizon: fires BOTH the deterministic gift nudge AND gives the
+    // morning planner a concrete fact to propose from — the briefing-preview demo beat lands populated.
+    ev({ title: "Grandma's birthday", start: addDaysISO(today, 6), members: ['Everyone'] }),
   ];
 
   const chore = (title: string, who: string, slot: string): Chore => ({
@@ -64,5 +67,17 @@ export function buildDemoSeed(today: string, userId: string): Record<string, any
         + 'the Redmond Lights market, and a family nature walk at Lake Sammamish State Park on Sunday morning.' },
   ];
 
-  return { members, events, chores, shopping, settings, bills, documents };
+  // Seed one in-progress goal so the Today GoalsStrip lands populated AND the morning planner has an
+  // open goal whose next step it can propose (approval advances it — the goal loop, visible on arrival).
+  const goals: Goal[] = [
+    { id: 'goal-' + uuid(), text: 'Plan a state-park day trip', status: 'active',
+      nextAction: 'Get the Discover Pass', category: 'outing',
+      steps: [
+        { title: 'Pick the park + date', status: 'done' },
+        { title: 'Get the Discover Pass', status: 'active' },
+        { title: 'Pack + go', status: 'pending' },
+      ] },
+  ];
+
+  return { members, events, chores, shopping, settings, bills, documents, goals };
 }

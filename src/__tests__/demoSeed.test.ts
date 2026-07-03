@@ -7,7 +7,19 @@ describe('buildDemoSeed', () => {
   const seed = buildDemoSeed(TODAY, 'anon-123');
 
   it('seeds the expected collections', () => {
-    expect(Object.keys(seed).sort()).toEqual(['bills', 'chores', 'documents', 'events', 'members', 'settings', 'shopping']);
+    expect(Object.keys(seed).sort()).toEqual(['bills', 'chores', 'documents', 'events', 'goals', 'members', 'settings', 'shopping']);
+  });
+
+  it('seeds an in-progress goal (GoalsStrip lands populated; the morning planner can advance it)', () => {
+    expect(seed.goals).toHaveLength(1);
+    const g: any = seed.goals[0];
+    expect(g.status).toBe('active');
+    expect(g.nextAction).toBeTruthy();
+    expect(g.steps.some((s: any) => s.status === 'active')).toBe(true);
+  });
+
+  it("seeds a birthday event inside the nudge horizon (briefing demo beat lands populated)", () => {
+    expect(seed.events.some((e: any) => /birthday/i.test(e.title))).toBe(true);
   });
 
   it('seeds bills (parsed fields only) so the bills_agent has data in the demo', () => {

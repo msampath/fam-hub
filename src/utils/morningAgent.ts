@@ -21,7 +21,11 @@ const HORIZON_DAYS = 14; // proposals may only target [today, today+14] — same
 
 // Anti-runaway output cap (the SCAN_GENCONFIG lesson: a flash repetition loop must truncate cheaply,
 // not burn 8k tokens across the fallback chain on a money path that runs for every household daily).
-export const MORNING_GENCONFIG = { maxOutputTokens: 1024, temperature: 0.4 };
+// 4096, not 1024: on Gemini 2.5-class models maxOutputTokens INCLUDES the thinking budget — at 1k the
+// model spent the whole cap thinking and the JSON truncated after one key, which the malformed-response
+// recovery silently turned into the {"proposals":[]} fallback (found live; the fuller the FACTS, the
+// more it thinks). 4k leaves thinking room while still bounding a runaway to pennies per household/day.
+export const MORNING_GENCONFIG = { maxOutputTokens: 4096, temperature: 0.4 };
 
 export const MORNING_PLANNER_SYSTEM = `You are the family's morning planner. From the FACTS provided (today's agenda, weather, chores, shopping list, tracked goals, and drafts already pending), propose 0-${MAX_PROPOSALS} concrete, immediately useful next actions for the parent to approve. Rules:
 - Respond with ONLY the JSON object. Propose NOTHING when nothing is genuinely useful — an empty list is a good answer.
