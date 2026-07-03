@@ -65,7 +65,7 @@ React surface ─▶ ADK Concierge agent ─delegates▶ specialist sub-agents
 | **Security** | [`src/mcp/conciergeTools.ts`](./src/mcp/conciergeTools.ts) · [`server.ts`](./server.ts) | No-payment invariant + risk tiers in the tool layer; helmet/CSP; step-up PIN (scrypt, server-side); **kid mode** device lock (destructive taps hidden; the ask-input stays because destructive tools are confirm-tier by construction) |
 | **Deployability** | [`Dockerfile`](./Dockerfile) · [`docker-compose.yml`](./docker-compose.yml) | One image (Python ADK + Node MCP child) → Cloud Run; `docker compose up` for the full stack |
 | **Agent CLI** | [`agent/README.md`](./agent/README.md) | `adk run concierge` / `adk web` |
-| **Antigravity** | (build loop) | Ran an **early dev pass** and rendered the neo-brutalist **UI direction that shipped nearly as-is** (the project started as a Google AI Studio app; the main dev loop later ran in Claude Code); shown in the demo video |
+| **Antigravity** | (build loop) | Ran an **early dev pass**, then a detailed **code review of the shipped dark-mode shell** (UI/UX · responsive design · accessibility) — the project started as a Google AI Studio app; the main dev loop later ran in Claude Code; shown in the demo video |
 
 > **More docs:** architecture diagrams → [`docs/architecture.md`](./docs/architecture.md).
 
