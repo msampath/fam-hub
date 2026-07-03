@@ -18,6 +18,7 @@ import { buildRevisePrompt } from './src/utils/reviseDraft';
 import { filterUnrequestedHolidayDeletes } from './src/utils/holidayGuard';
 import { buildBriefing, type Briefing } from './src/utils/briefing';
 import { buildProactiveLedger, buildGoalNudges } from './src/utils/proactiveBriefing';
+import { MORNING_PLANNER_SYSTEM, MORNING_PLANNER_SCHEMA, MORNING_GENCONFIG, buildMorningFacts, validateMorningProposals, toLedgerEntries } from './src/utils/morningAgent';
 import { LEDGER_CAP } from './src/utils/historyLog';
 import { shouldRunDigestNow } from './src/utils/digest';
 import { sendDigestEmail } from './src/utils/mailer';
@@ -38,7 +39,7 @@ import { buildBillQuery, billToSuggestion, buildBillParsePrompt, type ParsedBill
 import { buildNewsletterQuery, buildNewsletterClassifyPrompt } from './src/utils/newsletters';
 import { buildPackageQuery, packageToSuggestion, buildPackageParsePrompt, type ParsedPackage } from './src/utils/packages';
 import { buildKidsActivityQuery, activityToSuggestion, buildKidsActivityParsePrompt, type ParsedActivity } from './src/utils/kidsActivities';
-import type { CalendarEvent, Chore, LedgerEntry, Goal } from './src/types';
+import type { CalendarEvent, Chore, LedgerEntry, Goal, ShoppingItem } from './src/types';
 // Single-click LAN appliance: local SQLite storage + local household auth (no Supabase). See src/storage/.
 import { storageMode, getSqliteAdapter } from './src/storage';
 import { handleDataGet, handleDataSave, handleDataLoadAll } from './src/storage/dataApi';
@@ -2583,22 +2584,38 @@ app.post('/api/scan-kids', requireAuth, aiRateLimit, async (req, res) => {
 app.post('/api/camera-summary', requireAuth, (_req, res) =>
   res.status(501).json({ error: 'Camera summaries are not configured yet (needs Home Assistant + a local vision model).' }));
 
-// ── Morning briefing (on-demand preview) ── pure read-only aggregation of today's agenda + calendar-
-// driven nudges (birthday/trip/supplies → DRAFT actions, never a purchase). No AI, no external fetch.
-// The autonomous emailed version (Cloud Scheduler → this logic → Resend) is the deferred production layer.
+// ── Morning briefing (on-demand preview) ── the same §7a morning agent the scheduler runs, demoable
+// without waiting for the cron: deterministic agenda + nudges, the ADK-concierge-authored narrative,
+// AND the MORNING PLANNER's validated proposals. Proposals come back as stage-ready shapes (tool +
+// summary + payload + goalId) with NO ids/stamps — the CLIENT stages them under the visitor's own
+// RLS-scoped identity (no service-role in this path), still confirm-tier, still parent-approved.
 app.post('/api/morning-briefing', requireAuth, aiRateLimit, async (req, res) => {
   try {
-    const { events = [], chores = [] } = req.body || {};
+    const { events = [], chores = [], goals = [], shopping = [], ledger = [] } = req.body || {};
     const now = new Date();
     const pad = (n: number) => String(n).padStart(2, '0');
     const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-    const briefing = buildBriefing(Array.isArray(events) ? events : [], Array.isArray(chores) ? chores : [], today);
+    const evList = Array.isArray(events) ? events : [];
+    const chList = Array.isArray(chores) ? chores : [];
+    const briefing = buildBriefing(evList, chList, today);
     // The ADK concierge AUTHORS the narrative from the deterministically-extracted facts, so the in-app
     // preview is genuinely agent-generated (matching the emailed digest). Best-effort: if the agent is
     // unreachable, agentSummary stays undefined and the card renders the structured briefing (title/lines/
     // nudges with their 1-tap actions) exactly as before.
     briefing.agentSummary = (await composeBriefingViaAgent(briefingToText(briefing), today)) || undefined;
-    return res.json(briefing);
+    // Morning planner (best-effort, same guard rails as the digest path): empty proposals on any failure.
+    let proposals: unknown[] = [];
+    try {
+      const shList = (Array.isArray(shopping) ? shopping : []).slice(0, 100);
+      const glList = (Array.isArray(goals) ? goals : []).slice(0, 20);
+      const lgList = (Array.isArray(ledger) ? ledger : []).slice(-100);
+      const facts = buildMorningFacts({ today, agendaText: briefingToText(briefing), chores: chList, shopping: shList, goals: glList, pendingLedger: lgList });
+      const raw = await callGeminiJSON(facts, MORNING_PLANNER_SYSTEM, MORNING_PLANNER_SCHEMA, '{"proposals":[]}', undefined, MORNING_GENCONFIG);
+      proposals = validateMorningProposals(raw?.proposals, { today, shopping: shList, pendingLedger: lgList, goals: glList });
+    } catch (e: any) {
+      console.warn('[morning-briefing] planner skipped:', e?.message || e);
+    }
+    return res.json({ ...briefing, proposals });
   } catch (err: any) {
     console.error('morning-briefing error:', err?.message || err);
     return res.status(500).json({ error: 'Could not build the briefing.' });
@@ -2828,12 +2845,13 @@ async function runDailyDigest(): Promise<void> {
     // missed digest on a send failure over a duplicate. (True multi-instance safety needs an atomic claim /
     // Cloud Scheduler; the in-process reentrancy guard below covers the single-instance overlap.)
     await admin.from('family_data').upsert(familyDataRow(row.household_id, 'digestprefs', [{ ...prefs, lastRunDate: today }]), { onConflict: FAMILY_DATA_CONFLICT });
-    const [ev, ch, st, lg, gl] = await Promise.all([
+    const [ev, ch, st, lg, gl, sh] = await Promise.all([
       admin.from('family_data').select('data').eq('household_id', row.household_id).eq('data_key', 'events').maybeSingle(),
       admin.from('family_data').select('data').eq('household_id', row.household_id).eq('data_key', 'chores').maybeSingle(),
       admin.from('family_data').select('data').eq('household_id', row.household_id).eq('data_key', 'settings').maybeSingle(),
       admin.from('family_data').select('data').eq('household_id', row.household_id).eq('data_key', 'actionledger').maybeSingle(),
       admin.from('family_data').select('data').eq('household_id', row.household_id).eq('data_key', 'goals').maybeSingle(),
+      admin.from('family_data').select('data').eq('household_id', row.household_id).eq('data_key', 'shopping').maybeSingle(),
     ]);
     const events = asTypedArray<CalendarEvent>(ev.data?.data);
     const briefing = buildBriefing(events, asTypedArray<Chore>(ch.data?.data), today);
@@ -2850,16 +2868,33 @@ async function runDailyDigest(): Promise<void> {
     // Proactive pre-staging (#1): build approvable shopping drafts (gift/supplies nudges + an umbrella when
     // rain is likely during a today outdoor event) and APPEND them to the household's action ledger, so they
     // wait in Approvals when the parent next opens the app. Best-effort; never blocks the email.
+    const goals = asTypedArray<Goal>(gl.data?.data);
     let stagedCount = 0;
     try {
       const ledger = asTypedArray<LedgerEntry>(lg.data?.data);
       if (!ledger.some(e => e?.proactiveDate === today)) { // same-day dedupe (re-run safe)
         const stamp = { createdAt: new Date(now).toISOString(), createdByUserId: 'concierge', createdByEmail: 'concierge@familyhub' };
         const staged = buildProactiveLedger(briefing, weather, events, today, () => 'ledg-' + randomUUID(), stamp, ledger);
-        if (staged.length) {
-          const merged = [...ledger, ...staged].slice(-LEDGER_CAP);
+        // MORNING PLANNER (§7a): one grounded model call proposes up to 3 further next actions (incl. the
+        // next step of an open goal — the scheduled goal re-check); deterministic validation stages them
+        // CONFIRM-tier. Best-effort: on any model failure the deterministic `staged` above still lands, so
+        // the digest never gets worse than it was pre-planner. KAGGLE_EVAL: proactive closed-app agency.
+        let planned: LedgerEntry[] = [];
+        try {
+          const shopping = asTypedArray<ShoppingItem>(sh.data?.data);
+          const chores = asTypedArray<Chore>(ch.data?.data);
+          const facts = buildMorningFacts({ today, agendaText: briefingToText(briefing, weatherLine), weatherLine, chores, shopping, goals, pendingLedger: [...ledger, ...staged] });
+          const raw = await callGeminiJSON(facts, MORNING_PLANNER_SYSTEM, MORNING_PLANNER_SCHEMA, '{"proposals":[]}', undefined, MORNING_GENCONFIG);
+          const proposals = validateMorningProposals(raw?.proposals, { today, shopping, pendingLedger: [...ledger, ...staged], goals });
+          planned = toLedgerEntries(proposals, today, () => 'ledg-' + randomUUID(), stamp);
+        } catch (e: any) {
+          console.warn('[digest] morning planner skipped (deterministic nudges still staged):', e?.message || e);
+        }
+        const allStaged = [...staged, ...planned];
+        if (allStaged.length) {
+          const merged = [...ledger, ...allStaged].slice(-LEDGER_CAP);
           await admin.from('family_data').upsert(familyDataRow(row.household_id, 'actionledger', merged), { onConflict: FAMILY_DATA_CONFLICT });
-          stagedCount = staged.length;
+          stagedCount = allStaged.length;
         }
       }
     } catch (e: any) {
@@ -2868,9 +2903,9 @@ async function runDailyDigest(): Promise<void> {
 
     // Goal nudges (the agentic goal loop, scheduler half): remind the family of in-progress goals so a
     // multi-day goal doesn't stall silently. Email lines, not fabricated approvable rows.
-    const goalNudges = buildGoalNudges(asTypedArray<Goal>(gl.data?.data));
+    const goalNudges = buildGoalNudges(goals);
     const parts = [briefingToText(briefing, weatherLine)];
-    if (stagedCount) parts.push(`🛎️ ${stagedCount} action${stagedCount === 1 ? '' : 's'} staged in your Concierge Inbox — review when you open the app.`);
+    if (stagedCount) parts.push(`🛎️ ${stagedCount} draft${stagedCount === 1 ? '' : 's'} waiting in Approvals — review when you open the app.`);
     if (goalNudges.length) parts.push(`Goals in progress:\n${goalNudges.join('\n')}`);
     const factsText = parts.join('\n\n');
     // The ADK concierge AUTHORS the briefing from these verified facts (genuinely agent-generated, not

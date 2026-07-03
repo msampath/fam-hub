@@ -52,7 +52,7 @@ export function buildLedgerEntry(
   tool: string,
   riskTier: RiskTier,
   status: LedgerStatus,
-  fields: { summary?: string; link?: string; refId?: string; refIds?: string[]; payload?: unknown; before?: unknown; changes?: unknown; sourceLogId?: string; proactiveDate?: string } | null | undefined,
+  fields: { summary?: string; link?: string; refId?: string; refIds?: string[]; payload?: unknown; before?: unknown; changes?: unknown; sourceLogId?: string; proactiveDate?: string; goalId?: string } | null | undefined,
   stamp: Authored,
 ): LedgerEntry {
   const f = fields || {};
@@ -66,6 +66,7 @@ export function buildLedgerEntry(
   if (f.changes !== undefined) entry.changes = f.changes;
   if (f.sourceLogId !== undefined) entry.sourceLogId = f.sourceLogId;
   if (f.proactiveDate !== undefined) entry.proactiveDate = f.proactiveDate;
+  if (f.goalId !== undefined) entry.goalId = f.goalId;
   return entry;
 }
 

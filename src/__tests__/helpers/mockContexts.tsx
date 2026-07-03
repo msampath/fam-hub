@@ -151,6 +151,7 @@ export function makeAppCtx(overrides: Partial<AppCtx> = {}): AppCtx {
     approveLedgerEntry: vi.fn(),
     rejectLedgerEntry: vi.fn(),
     reviseLedgerEntry: vi.fn(async () => ({ ok: true })),
+    stageLedgerEntries: vi.fn(),
 
     // Step-up PIN gate
     hasStepUpPin: false,

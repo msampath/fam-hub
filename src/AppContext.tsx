@@ -155,6 +155,8 @@ export interface AppCtx {
   approveLedgerEntry: (id: string, stepUpVerified?: boolean) => void;
   rejectLedgerEntry: (id: string) => void;
   reviseLedgerEntry: (id: string, feedback: string) => Promise<{ ok: boolean; error?: string }>;
+  // Stage pre-built pending entries (the morning planner's on-demand path — see BriefingCard).
+  stageLedgerEntries: (entries: LedgerEntry[]) => void;
 
   // Step-up PIN gate for high-risk ('stepup'-tier) actions (A3)
   hasStepUpPin: boolean;

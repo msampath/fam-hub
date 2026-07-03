@@ -2565,6 +2565,12 @@ export default function App() {
   };
   const approveLedgerEntry = (id: string, stepUpVerified = false) => resolveLedgerUpdate(id, true, stepUpVerified);
   const rejectLedgerEntry = (id: string) => resolveLedgerUpdate(id, false);
+  // Stage pre-built pending entries into the Approvals queue (the morning planner's on-demand path:
+  // BriefingCard builds them client-side under the visitor's own identity). Append-only + capped.
+  const stageLedgerEntries = (entries: LedgerEntry[]) => {
+    if (!entries.length) return;
+    setActionLedger(prev => [...prev, ...entries].slice(-LEDGER_CAP));
+  };
 
   // HITL "Modify" (#4): steer a pending draft in plain language instead of rejecting it. Re-prompt the model
   // via /api/revise-draft, shape/sanitize the result, and restage the SAME entry IN PLACE (still pending →
@@ -3102,7 +3108,7 @@ export default function App() {
     customEventDescription, setCustomEventDescription,
     customEventMembers, toggleEventMember,
     // Concierge action ledger + approval handlers (foundation A2)
-    actionLedger, approveLedgerEntry, rejectLedgerEntry, reviseLedgerEntry,
+    actionLedger, approveLedgerEntry, rejectLedgerEntry, reviseLedgerEntry, stageLedgerEntries,
     // Step-up PIN gate (A3)
     hasStepUpPin, verifyStepUpPin: verifyStepUpPinRemote, setStepUpPin: handleSetStepUpPin,
     digestPrefs, setDigestPrefs,
