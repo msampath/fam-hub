@@ -64,3 +64,4 @@ __pycache__/
 **/.env
 # ADK runtime state (adk web/run session store) — created under /agent, never source.
 .adk/
+.gstack/

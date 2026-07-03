@@ -19,6 +19,8 @@ export interface DevicePrefs {
   handleToggleReminders: (enabled: boolean) => void;
   autoScanEnabled: boolean;
   setAutoScanEnabled: Dispatch<SetStateAction<boolean>>;
+  kidMode: boolean;
+  setKidMode: Dispatch<SetStateAction<boolean>>;
 }
 
 export function useDevicePrefs(): DevicePrefs {
@@ -54,9 +56,17 @@ export function useDevicePrefs(): DevicePrefs {
     const saved = localStorage.getItem('famplan_autoscan');
     return saved ? JSON.parse(saved) : false;
   });
+  // Kid mode (default off): locks THIS device to the kid-safe surface — Manage/Approvals/Actions/Import
+  // and chore delete/add are hidden. Per-device on purpose (a wall tablet is the kid surface; a parent's
+  // phone isn't), same rationale as the screensaver prefs above.
+  const [kidMode, setKidMode] = useState<boolean>(() => {
+    const saved = localStorage.getItem('famplan_kidmode');
+    return saved ? JSON.parse(saved) : false;
+  });
 
   useEffect(() => { localStorage.setItem('famplan_idle_timeout', String(idleTimeoutMs)); }, [idleTimeoutMs]);
   useEffect(() => { localStorage.setItem('famplan_autoscan', JSON.stringify(autoScanEnabled)); }, [autoScanEnabled]);
+  useEffect(() => { localStorage.setItem('famplan_kidmode', JSON.stringify(kidMode)); }, [kidMode]);
   useEffect(() => { localStorage.setItem('famplan_signout_timeout', String(signOutMs)); }, [signOutMs]);
   useEffect(() => { localStorage.setItem('famplan_reminders_enabled', JSON.stringify(remindersEnabled)); }, [remindersEnabled]);
   useEffect(() => { localStorage.setItem('famplan_reminder_time', String(reminderTime)); }, [reminderTime]);
@@ -79,5 +89,6 @@ export function useDevicePrefs(): DevicePrefs {
     reminderLeadMinutes, setReminderLeadMinutes,
     handleToggleReminders,
     autoScanEnabled, setAutoScanEnabled,
+    kidMode, setKidMode,
   };
 }

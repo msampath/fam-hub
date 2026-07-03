@@ -76,6 +76,7 @@ export default function Manage({ account, onClose }: ManageProps) {
     newMemberAge, setNewMemberAge,
     inviteCodeInput, setInviteCodeInput, isJoiningHousehold, handleJoinHousehold,
     hasStepUpPin, setStepUpPin, verifyStepUpPin, digestPrefs, setDigestPrefs,
+    kidMode, setKidMode,
   } = useApp();
   // Daily-briefing email prefs (single-element blob); merge-patch the one entry.
   const digest: DigestPrefs = digestPrefs[0] || { enabled: false, email: account.user?.email || '', sendHour: 7 };
@@ -220,6 +221,13 @@ export default function Manage({ account, onClose }: ManageProps) {
               <span>Auto-scan email <span className="text-xs font-normal" style={{ color: C.muted }}>(every 30 min, needs Gmail)</span></span>
               <button type="button" onClick={() => account.onToggleAutoScan(!account.autoScanEnabled)} className="rounded-[10px] px-3 py-1.5 text-xs font-extrabold" style={{ border: `2px solid ${account.autoScanEnabled ? C.emerald : C.elevated}`, color: account.autoScanEnabled ? C.emerald : C.muted, background: account.autoScanEnabled ? `${C.emerald}14` : 'transparent' }}>
                 {account.autoScanEnabled ? 'On' : 'Off'}
+              </button>
+            </label>
+            <label className="flex items-center justify-between gap-3 text-sm font-semibold" style={{ color: C.primary }}>
+              <span>Kid mode <span className="text-xs font-normal" style={{ color: C.muted }}>(locks this device to the kid-safe view; hold 🔒 3s to exit{hasStepUpPin ? ' + PIN' : ''})</span></span>
+              {/* Turning it ON also closes Manage — the device drops straight into the locked kid surface. */}
+              <button type="button" onClick={() => { const on = !kidMode; setKidMode(on); if (on) onClose(); }} className="rounded-[10px] px-3 py-1.5 text-xs font-extrabold" style={{ border: `2px solid ${kidMode ? C.emerald : C.elevated}`, color: kidMode ? C.emerald : C.muted, background: kidMode ? `${C.emerald}14` : 'transparent' }}>
+                {kidMode ? 'On' : 'Off'}
               </button>
             </label>
             {account.remindersEnabled && (

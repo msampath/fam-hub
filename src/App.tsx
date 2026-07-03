@@ -262,6 +262,7 @@ export default function App() {
     remindersEnabled, setRemindersEnabled, reminderTime, setReminderTime,
     reminderLeadMinutes, setReminderLeadMinutes, handleToggleReminders,
     autoScanEnabled, setAutoScanEnabled,
+    kidMode, setKidMode,
   } = devicePrefs;
   // Date string of the last day the digest fired (so it fires once/day). Ref + localStorage
   // so it survives reloads without re-creating the scheduler effect.
@@ -3105,6 +3106,9 @@ export default function App() {
     // Step-up PIN gate (A3)
     hasStepUpPin, verifyStepUpPin: verifyStepUpPinRemote, setStepUpPin: handleSetStepUpPin,
     digestPrefs, setDigestPrefs,
+    // Kid mode (per-device — see useDevicePrefs)
+    kidMode, setKidMode,
+
     // Email scans (B1 bills / B2 packages / B3 kids) + shared suggestion-create (also used by the copilot panel)
     scanEmailForBills, scanEmailForPackages, scanEmailForKidsActivities, handleCreateSuggestion, addedSuggestionKeys,
     autoEmailSuggestions,

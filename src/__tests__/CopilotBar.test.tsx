@@ -128,4 +128,38 @@ describe('CopilotBar', () => {
     await user.click(screen.getByLabelText('Manage'));
     expect(onOpenManage).toHaveBeenCalledTimes(1);
   });
+
+  it('kid mode hides Actions/Approvals/Import/Manage and shows the hold-to-exit lock; the input stays', () => {
+    renderWithBoth(<CopilotBar onOpenManage={vi.fn()} />, {
+      kidMode: true,
+      actionLedger: [draft({ id: 'd1' })], // a pending approval exists — badge must STILL be hidden
+    });
+    expect(screen.queryByLabelText(/Actions/)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Approvals/)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Import')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Manage')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Exit kid mode (press and hold)')).toBeInTheDocument();
+    // The copilot input remains — destructive tools are confirm-tier, a kid can only STAGE drafts.
+    expect(screen.getByLabelText('Ask the copilot')).toBeInTheDocument();
+  });
+
+  it('exiting kid mode requires the 3s hold (a quick tap does nothing)', async () => {
+    vi.useFakeTimers();
+    try {
+      const { appCtx } = renderWithBoth(<CopilotBar onOpenManage={vi.fn()} />, { kidMode: true });
+      const lock = screen.getByLabelText('Exit kid mode (press and hold)');
+      // Quick tap: down → up before 3s → no exit.
+      fireEvent.pointerDown(lock);
+      vi.advanceTimersByTime(1000);
+      fireEvent.pointerUp(lock);
+      vi.advanceTimersByTime(5000);
+      expect(appCtx.setKidMode).not.toHaveBeenCalled();
+      // Full 3s hold (no PIN set in the mock ctx) → exits.
+      fireEvent.pointerDown(lock);
+      await vi.advanceTimersByTimeAsync(3100);
+      expect(appCtx.setKidMode).toHaveBeenCalledWith(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

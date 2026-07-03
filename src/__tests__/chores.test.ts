@@ -1,6 +1,30 @@
 import { describe, it, expect } from 'vitest';
-import { choreMatchesSlot } from '../utils/chores';
+import { choreEmoji, choreMatchesSlot } from '../utils/chores';
 import { getCurrentTimeOfDay } from '../utils/dates';
+
+describe('choreEmoji (kid-mode picture icons)', () => {
+  it('maps common chore titles to a matching emoji', () => {
+    expect(choreEmoji('Make your bed')).toBe('🛏️');
+    expect(choreEmoji('Brush teeth')).toBe('🪥');
+    expect(choreEmoji('Feed the dog')).toBe('🐶');   // dog wins over the generic feed→🐾
+    expect(choreEmoji('Water the plants')).toBe('🪴');
+    expect(choreEmoji('Tidy the playroom')).toBe('🧸');
+    expect(choreEmoji('Pack school bag')).toBe('🎒');
+    expect(choreEmoji('Take out the trash')).toBe('🗑️');
+    expect(choreEmoji('Practice piano')).toBe('🎹'); // music wins over the generic practice→✏️
+  });
+
+  it('is case-insensitive', () => {
+    expect(choreEmoji('MAKE YOUR BED')).toBe('🛏️');
+    expect(choreEmoji('feed the DOG')).toBe('🐶');
+  });
+
+  it('falls back to ⭐ for unknown titles and junk input', () => {
+    expect(choreEmoji('Do the thing')).toBe('⭐');
+    expect(choreEmoji('')).toBe('⭐');
+    expect(choreEmoji(undefined as unknown as string)).toBe('⭐');
+  });
+});
 
 describe('choreMatchesSlot', () => {
   it("returns true for any chore when filter is 'All'", () => {

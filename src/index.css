@@ -62,3 +62,24 @@ body {
   0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
   40%           { opacity: 1;    transform: translateY(-2px); }
 }
+/* Kid-mode completion celebration: a small confetti burst over a chore card when its LAST slot is
+   checked. Each piece gets its scatter vector (--dx/--dy) + color inline; the shared shape lives here.
+   Hidden entirely under prefers-reduced-motion (the card's green "done" state carries the feedback). */
+.confetti-piece {
+  position: absolute;
+  left: 50%;
+  top: 45%;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  pointer-events: none;
+  animation: confettiPop 0.75s ease-out forwards;
+}
+@keyframes confettiPop {
+  0%   { transform: translate(-50%, -50%) scale(0.3) rotate(0deg); opacity: 1; }
+  70%  { opacity: 1; }
+  100% { transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(1) rotate(340deg); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .confetti-piece { display: none; }
+}

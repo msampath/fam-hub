@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import ChoresPage from '../components/shell/pages/ChoresPage';
@@ -89,5 +89,62 @@ describe('ChoresPage', () => {
     await user.click(screen.getByText(/Add chore for/i));   // open the form
     await user.click(screen.getByText('Add chore'));        // submit
     expect(ctx.setChoresList).toHaveBeenCalled();
+  });
+
+  it('renders a picture emoji before each chore title (pre-reader navigation)', () => {
+    renderWithApp(<ChoresPage />, {
+      familyMembers: members,
+      choresList: [chore({ id: 'a1', assignedTo: 'Ava', title: 'Make your bed' })],
+    });
+    expect(screen.getByText('🛏️')).toBeInTheDocument();
+  });
+
+  it('asks for confirmation before deleting a chore (and keeps it on cancel)', async () => {
+    const user = userEvent.setup();
+    const confirmSpy = vi.spyOn(window, 'confirm');
+    const { ctx } = renderWithApp(<ChoresPage />, {
+      familyMembers: members,
+      choresList: [chore({ id: 'a1', assignedTo: 'Ava', title: 'Brush teeth' })],
+    });
+    confirmSpy.mockReturnValueOnce(false); // cancel → no delete
+    await user.click(screen.getByRole('button', { name: 'Delete Brush teeth' }));
+    expect(ctx.setChoresList).not.toHaveBeenCalled();
+    confirmSpy.mockReturnValueOnce(true);  // confirm → delete goes through
+    await user.click(screen.getByRole('button', { name: 'Delete Brush teeth' }));
+    expect(ctx.setChoresList).toHaveBeenCalledTimes(1);
+    confirmSpy.mockRestore();
+  });
+
+  it('kid mode hides the delete button and the add-chore form', () => {
+    renderWithApp(<ChoresPage />, {
+      kidMode: true,
+      familyMembers: members,
+      choresList: [chore({ id: 'a1', assignedTo: 'Ava', title: 'Brush teeth' })],
+    });
+    expect(screen.queryByRole('button', { name: /Delete/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Add chore for/i)).not.toBeInTheDocument();
+    // The check-off slots stay — the board remains fully usable for the kid.
+    expect(screen.getByRole('checkbox', { name: 'Brush teeth' })).toBeInTheDocument();
+  });
+
+  it('fires the confetti celebration when the LAST slot of a chore is checked', async () => {
+    const user = userEvent.setup();
+    renderWithApp(<ChoresPage />, {
+      familyMembers: members,
+      choresList: [chore({ id: 'a1', assignedTo: 'Ava', title: 'Brush teeth', timesPerDay: 1, completedCount: 0 })],
+    });
+    expect(screen.queryByTestId('confetti-burst')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('checkbox', { name: 'Brush teeth' }));
+    expect(screen.getByTestId('confetti-burst')).toBeInTheDocument();
+  });
+
+  it('does NOT fire confetti when a mid slot of a multi-rep chore is checked', async () => {
+    const user = userEvent.setup();
+    renderWithApp(<ChoresPage />, {
+      familyMembers: members,
+      choresList: [chore({ id: 'a1', assignedTo: 'Ava', title: 'Brush teeth', timesPerDay: 2, completedCount: 0 })],
+    });
+    await user.click(screen.getByRole('checkbox', { name: 'Brush teeth (1)' }));
+    expect(screen.queryByTestId('confetti-burst')).not.toBeInTheDocument();
   });
 });

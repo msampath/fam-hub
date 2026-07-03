@@ -1,7 +1,7 @@
-import { useState, type FormEvent } from 'react';
+import { useState, type CSSProperties, type FormEvent } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { useApp } from '../../../AppContext';
-import { earnedXp, lifetimeEarnedXp } from '../../../utils/chores';
+import { choreEmoji, earnedXp, lifetimeEarnedXp } from '../../../utils/chores';
 import { uuid } from '../../../utils/uuid';
 import type { Chore } from '../../../types';
 import { C, brutShadow, memberHex } from '../theme';
@@ -26,7 +26,7 @@ function bucketOf(c: Chore): string {
 export default function ChoresPage() {
   const {
     choresList, setChoresList, familyMembers, authorStamp,
-    xpBankList,
+    xpBankList, kidMode,
     newChoreTitle, setNewChoreTitle, newChoreAssigned, setNewChoreAssigned,
     newChorePoints, setNewChorePoints, newChoreTimesPerDay, setNewChoreTimesPerDay,
     newChoreRepeatType, setNewChoreRepeatType, newChoreScheduleTime, setNewChoreScheduleTime,
@@ -35,6 +35,8 @@ export default function ChoresPage() {
   const kids = familyMembers.filter(m => m.role === 'Kid');
   const [activeKid, setActiveKid] = useState(0);
   const [justChecked, setJustChecked] = useState<string | null>(null);
+  // Chore id whose LAST slot was just checked — drives the confetti celebration burst on that card.
+  const [justCompleted, setJustCompleted] = useState<string | null>(null);
   const [showAddChore, setShowAddChore] = useState(false);
   const [addMsg, setAddMsg] = useState<string | null>(null);
 
@@ -65,9 +67,20 @@ export default function ChoresPage() {
 
   const display = useRollingXp(Object.fromEntries(kids.map(k => [k.name, earnedXp(choresList, k.name)])));
 
-  const deleteChore = (id: string) => setChoresList(prev => prev.filter(c => c.id !== id));
+  // Deleting is destructive and irreversible — confirm first (small fingers tap fast; same guard
+  // pattern as handleRedeemReward in useChores).
+  const deleteChore = (id: string) => {
+    const chore = choresList.find(c => c.id === id);
+    if (!window.confirm(`Delete "${chore?.title ?? 'this chore'}"?`)) return;
+    setChoresList(prev => prev.filter(c => c.id !== id));
+  };
 
   const toggleSlot = (choreId: string, slotIdx: number) => {
+    // Read completion off the CURRENT list (not inside the updater — updaters must stay pure):
+    // checking the last open slot completes the chore → fire the celebration burst on that card.
+    const cur = choresList.find(c => c.id === choreId);
+    const wasComplete = !!cur && (cur.completedCount ?? 0) >= (cur.timesPerDay || 1);
+    const completesNow = !!cur && !wasComplete && slotIdx >= (cur.completedCount ?? 0) && slotIdx + 1 >= (cur.timesPerDay || 1);
     setChoresList(prev => prev.map(c => {
       if (c.id !== choreId) return c;
       const isSlotCompleted = slotIdx < (c.completedCount ?? 0);
@@ -77,7 +90,36 @@ export default function ChoresPage() {
     const tag = `${choreId}_${slotIdx}`;
     setJustChecked(tag);
     setTimeout(() => setJustChecked(j => (j === tag ? null : j)), 650);
+    if (completesNow) {
+      setJustCompleted(choreId);
+      setTimeout(() => setJustCompleted(j => (j === choreId ? null : j)), 900);
+    }
   };
+
+  // Confetti burst pieces (celebration on completing a chore's last slot). Scatter vectors + colors
+  // are inline per piece; the shared shape/animation is `.confetti-piece` in index.css (and hidden
+  // entirely under prefers-reduced-motion there).
+  const CONFETTI_COLORS = [C.emerald, C.amber, C.indigo, '#f472b6'];
+  const confettiBurst = (
+    <div aria-hidden data-testid="confetti-burst">
+      {Array.from({ length: 8 }).map((_, i) => {
+        const angle = (i / 8) * Math.PI * 2;
+        const dist = 46 + (i % 3) * 16;
+        return (
+          <span
+            key={i}
+            className="confetti-piece"
+            style={{
+              '--dx': `${Math.round(Math.cos(angle) * dist)}px`,
+              '--dy': `${Math.round(Math.sin(angle) * dist - 24)}px`,
+              background: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+              animationDelay: `${(i % 4) * 40}ms`,
+            } as CSSProperties}
+          />
+        );
+      })}
+    </div>
+  );
 
   if (kids.length === 0) {
     return (
@@ -107,23 +149,29 @@ export default function ChoresPage() {
     return (
       <div
         key={chore.id}
-        className="rounded-[18px] px-4 py-3.5"
+        className="relative rounded-[18px] px-4 py-3.5"
         style={isComplete
           ? { border: `2px solid ${C.emerald}`, background: 'rgba(52,211,153,0.05)' }
           : { border: `2px solid ${accent}`, boxShadow: brutShadow(accent, 5), background: C.card }}
       >
+        {justCompleted === chore.id && confettiBurst}
         <div className="mb-3 flex items-start justify-between">
           <div
-            className="flex-1 pr-2.5 text-lg font-extrabold leading-tight"
+            className="flex flex-1 items-center gap-2.5 pr-2.5 text-lg font-extrabold leading-tight"
             style={{ color: isComplete ? C.muted : C.primary, textDecoration: isComplete ? 'line-through' : 'none', opacity: isComplete ? 0.55 : 1 }}
           >
-            {chore.title}
+            {/* Picture-first for pre-readers (kid mode targets age 4+) — pure title→emoji map. */}
+            <span aria-hidden className="text-2xl leading-none">{choreEmoji(chore.title)}</span>
+            <span>{chore.title}</span>
           </div>
           <div className="flex flex-shrink-0 items-center gap-2">
             <div className="whitespace-nowrap rounded-[9px] px-2.5 py-1 text-xs font-extrabold" style={{ color: C.amber, background: `${C.amber}1a`, border: `1.5px solid ${C.amber}38` }}>
               +{chore.points} XP
             </div>
-            <button type="button" onClick={() => deleteChore(chore.id)} aria-label={`Delete ${chore.title}`} className="flex h-9 w-9 flex-shrink-0 items-center justify-center" style={{ color: C.ink }}><Trash2 size={14} /></button>
+            {/* Hidden in kid mode; 44px target + confirm otherwise (deleting is the one irreversible tap here). */}
+            {!kidMode && (
+              <button type="button" onClick={() => deleteChore(chore.id)} aria-label={`Delete ${chore.title}`} className="flex h-11 w-11 flex-shrink-0 items-center justify-center" style={{ color: C.ink }}><Trash2 size={16} /></button>
+            )}
           </div>
         </div>
         <div className="flex gap-2">
@@ -183,8 +231,9 @@ export default function ChoresPage() {
           })}
         </div>
 
-        {/* Add chore (manual, alongside the copilot) — assignee = the selected kid */}
-        <div className="flex justify-center">
+        {/* Add chore (manual, alongside the copilot) — assignee = the selected kid.
+            Hidden in kid mode: the board is check-off-only for kids; parents add/edit. */}
+        {!kidMode && <div className="flex justify-center">
           {showAddChore ? (
             <form onSubmit={handleAddChore} className="w-full max-w-[560px] rounded-[16px] p-4" style={{ border: `2px solid ${accent}`, background: C.card }}>
               <div className="mb-2 text-[11px] font-extrabold uppercase tracking-[0.1em]" style={{ color: accent }}>New chore for {kid.name}</div>
@@ -215,7 +264,7 @@ export default function ChoresPage() {
               <Plus size={14} /> Add chore for {kid.name}
             </button>
           )}
-        </div>
+        </div>}
 
         {/* XP scorecard */}
         <div className="mx-auto w-full max-w-[560px] rounded-[20px] p-5" style={{ border: `2px solid ${accent}`, boxShadow: brutShadow(accent, 5), background: C.card }}>

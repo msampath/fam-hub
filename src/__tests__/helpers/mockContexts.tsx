@@ -159,6 +159,10 @@ export function makeAppCtx(overrides: Partial<AppCtx> = {}): AppCtx {
     digestPrefs: [],
     setDigestPrefs: vi.fn(),
 
+    // Kid mode (per-device)
+    kidMode: false,
+    setKidMode: vi.fn(),
+
     // Email scans (bills/packages/kids) + suggestion create
     scanEmailForBills: vi.fn(async () => ({ suggestions: [], scanned: 0 })),
     scanEmailForPackages: vi.fn(async () => ({ suggestions: [], scanned: 0 })),

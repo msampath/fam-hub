@@ -34,8 +34,27 @@ export default function CopilotBar({ onOpenManage }: CopilotBarProps) {
   const {
     actionLedger, approveLedgerEntry, rejectLedgerEntry, reviseLedgerEntry, verifyStepUpPin, hasStepUpPin,
     scanEmailForBills, scanEmailForPackages, scanEmailForKidsActivities, handleCreateSuggestion, addedSuggestionKeys,
-    autoEmailSuggestions, autoScanActive,
+    autoEmailSuggestions, autoScanActive, kidMode, setKidMode,
   } = useApp();
+
+  // Kid-mode exit gate: hold the 🔒 chip for 3s (a deliberate-adult gesture), then — if a step-up PIN is
+  // set — verify it before unlocking. The PIN reuses the existing server-side scrypt verify; no new server
+  // surface. KAGGLE_EVAL: Security — the kid-safe device lock and its step-up unlock.
+  const holdTimerRef = useRef<number | null>(null);
+  const startExitHold = () => {
+    if (holdTimerRef.current != null) return;
+    holdTimerRef.current = window.setTimeout(async () => {
+      holdTimerRef.current = null;
+      if (hasStepUpPin) {
+        const pin = window.prompt('Parent PIN to exit kid mode:') || '';
+        if (!pin || !(await verifyStepUpPin(pin))) return;
+      }
+      setKidMode(false);
+    }, 3000);
+  };
+  const cancelExitHold = () => {
+    if (holdTimerRef.current != null) { window.clearTimeout(holdTimerRef.current); holdTimerRef.current = null; }
+  };
 
   const pending = actionLedger.filter(e => e.status === 'pending');
   const resolved = actionLedger.filter(e => e.status !== 'pending');
@@ -203,8 +222,10 @@ export default function CopilotBar({ onOpenManage }: CopilotBarProps) {
         </form>
 
         {/* Actions (#) — proactive email finds to act on + manual inbox scans; opens the Actions modal.
-            Always available (so a manual scan is reachable); prominent when there are finds, subtle at 0. */}
-        <button
+            Always available (so a manual scan is reachable); prominent when there are finds, subtle at 0.
+            Kid mode hides Actions/Approvals/Import/Manage below — the bar becomes ask-only; the input stays
+            because every destructive tool is confirm-tier, so a kid's request can only STAGE a draft. */}
+        {!kidMode && <button
           type="button"
           onClick={() => setActionsOpen(true)}
           aria-label={`Actions (${actionsCount})`}
@@ -218,11 +239,11 @@ export default function CopilotBar({ onOpenManage }: CopilotBarProps) {
           {actionsCount > 0 && (
             <span className="flex h-[20px] min-w-[20px] items-center justify-center rounded-full px-1 text-[11px] font-black" style={{ background: C.emerald, color: C.app }}>{actionsCount}</span>
           )}
-        </button>
+        </button>}
 
         {/* Approvals (#) — drafts awaiting approval; opens the Approvals modal. Stays present (subtle) once the
             queue empties but history exists, so the approved/rejected audit trail doesn't become unreachable. */}
-        {(pendingApprovals.length > 0 || resolvedApprovals.length > 0) && (
+        {!kidMode && (pendingApprovals.length > 0 || resolvedApprovals.length > 0) && (
           <button
             type="button"
             onClick={() => { setApprovalsOpen(true); setHistoryOpen(false); }}
@@ -243,7 +264,7 @@ export default function CopilotBar({ onOpenManage }: CopilotBarProps) {
         )}
 
         {/* Import (URL / text / PDF → calendar) */}
-        <button
+        {!kidMode && <button
           type="button"
           onClick={() => setImportOpen(o => !o)}
           aria-label="Import"
@@ -254,18 +275,33 @@ export default function CopilotBar({ onOpenManage }: CopilotBarProps) {
             : { border: `2px solid ${C.elevated}`, background: C.card, color: C.muted }}
         >
           <Paperclip size={18} />
-        </button>
+        </button>}
 
-        {/* Manage */}
-        <button
-          type="button"
-          onClick={onOpenManage}
-          aria-label="Manage"
-          className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[13px] md:h-11 md:w-11"
-          style={{ border: `2px solid ${C.elevated}`, background: C.card, color: C.muted }}
-        >
-          <Settings size={18} />
-        </button>
+        {/* Manage — replaced in kid mode by the 🔒 hold-to-exit chip (3s hold, then PIN if set). */}
+        {!kidMode ? (
+          <button
+            type="button"
+            onClick={onOpenManage}
+            aria-label="Manage"
+            className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[13px] md:h-11 md:w-11"
+            style={{ border: `2px solid ${C.elevated}`, background: C.card, color: C.muted }}
+          >
+            <Settings size={18} />
+          </button>
+        ) : (
+          <button
+            type="button"
+            aria-label="Exit kid mode (press and hold)"
+            title="Kid mode is on — press and hold 3 seconds to exit"
+            onPointerDown={startExitHold}
+            onPointerUp={cancelExitHold}
+            onPointerLeave={cancelExitHold}
+            className="flex h-10 w-10 flex-shrink-0 select-none items-center justify-center rounded-[13px] text-base md:h-11 md:w-11"
+            style={{ border: `2px solid ${C.elevated}`, background: C.card, color: C.muted, touchAction: 'none' }}
+          >
+            🔒
+          </button>
+        )}
       </div>
 
       {importOpen && <ImportDrawer onClose={() => setImportOpen(false)} />}
@@ -276,8 +312,8 @@ export default function CopilotBar({ onOpenManage }: CopilotBarProps) {
           <div className="mb-2.5 flex items-center justify-between gap-2">
             {colLabel('Copilot', C.indigo)}
             <div className="flex items-center gap-3">
-              {actionsCount > 0 && <button type="button" onClick={() => setActionsOpen(true)} className="text-[10px] font-bold uppercase" style={{ color: C.emerald }}>Actions ({actionsCount})</button>}
-              {pendingApprovals.length > 0 && <button type="button" onClick={() => setApprovalsOpen(true)} className="text-[10px] font-bold uppercase" style={{ color: C.amber }}>Approvals ({pendingApprovals.length})</button>}
+              {!kidMode && actionsCount > 0 && <button type="button" onClick={() => setActionsOpen(true)} className="text-[10px] font-bold uppercase" style={{ color: C.emerald }}>Actions ({actionsCount})</button>}
+              {!kidMode && pendingApprovals.length > 0 && <button type="button" onClick={() => setApprovalsOpen(true)} className="text-[10px] font-bold uppercase" style={{ color: C.amber }}>Approvals ({pendingApprovals.length})</button>}
               {/* Clear the on-screen thread (declutter) — view-only; history + agent memory are kept. */}
               {!noneVisible && <button type="button" onClick={() => setViewHiddenBefore(copilotMessages.length)} className="text-[10px] font-bold uppercase" style={{ color: C.ink }}>Clear</button>}
               <button type="button" onClick={() => setOpen(false)} className="text-[10px] font-bold uppercase" style={{ color: C.ink }}>Close</button>

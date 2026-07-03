@@ -90,6 +90,36 @@ export function applyDailyReset(
   };
 }
 
+// Emoji icon for a chore title, so pre-readers (kid mode targets age 4+) can navigate by picture.
+// Deliberately a pure keyword map, NOT a stored field: no Chore schema / COLLECTIONS / MCP-validator
+// churn, and copilot-created chores get an icon for free. First match wins; ⭐ when nothing matches.
+// Order matters where words collide ("feed the dog" → 🐶 not 🐾; "water the plants" → 🪴).
+const CHORE_EMOJI: [RegExp, string][] = [
+  [/\bbed\b/i, '🛏️'],
+  [/teeth|tooth|brush/i, '🪥'],
+  [/bath|shower/i, '🛁'],
+  [/piano|music|guitar|violin/i, '🎹'],
+  [/dish|plate|table/i, '🍽️'],
+  [/laundry|clothes|fold|sock/i, '🧺'],
+  [/trash|garbage|recycl/i, '🗑️'],
+  [/dog|puppy/i, '🐶'],
+  [/cat|kitten|litter/i, '🐱'],
+  [/fish|aquarium/i, '🐠'],
+  [/feed|\bpet\b/i, '🐾'],
+  [/plant|water|flower|garden/i, '🪴'],
+  [/toy|playroom|tidy|pick up/i, '🧸'],
+  [/school|backpack|\bbag\b|lunch/i, '🎒'],
+  [/homework|study|practice/i, '✏️'],
+  [/book|read/i, '📚'],
+  [/room|vacuum|sweep|dust|clean/i, '🧹'],
+  [/shoe/i, '👟'],
+];
+export function choreEmoji(title: string): string {
+  const t = String(title || '');
+  for (const [re, emoji] of CHORE_EMOJI) if (re.test(t)) return emoji;
+  return '⭐';
+}
+
 // Does a chore belong in the selected slot? Lenient: chores with no slot, or an
 // "Anytime"/unrecognized slot, always show. A chore is only hidden when its slot
 // names a *different* known bucket than the filter.

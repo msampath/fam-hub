@@ -165,6 +165,13 @@ export interface AppCtx {
   digestPrefs: DigestPrefs[];
   setDigestPrefs: React.Dispatch<React.SetStateAction<DigestPrefs[]>>;
 
+  // Kid mode (per-device, WS2 — see useDevicePrefs): locks this device to the kid-safe surface.
+  // KAGGLE_EVAL: Security — kid mode hides Manage/Approvals/Actions/Import and chore delete/add;
+  // the copilot input stays because every destructive tool is confirm-tier server-side, so the worst
+  // a child's request can do is STAGE a pending approval a parent later reviews.
+  kidMode: boolean;
+  setKidMode: React.Dispatch<React.SetStateAction<boolean>>;
+
   // Email scans (B1 bills / B2 packages / B3 kids) + shared tap-to-add suggestion create
   scanEmailForBills: () => Promise<{ suggestions: CopilotSuggestion[]; scanned: number; error?: string }>;
   scanEmailForPackages: () => Promise<{ suggestions: CopilotSuggestion[]; scanned: number; error?: string }>;
