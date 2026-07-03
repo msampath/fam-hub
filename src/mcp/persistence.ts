@@ -58,9 +58,23 @@ export function makePersistence(env: Record<string, string | undefined> = proces
   return new SupabasePersistence(client);
 }
 
-class SupabasePersistence implements Persistence {
+export class SupabasePersistence implements Persistence {
   private hid: string | null = null;
+  // One promise-chain lock per data_key: a model turn can fire MANY tool calls in parallel (found live —
+  // "make paneer butter masala" → ~15 concurrent add_shopping_item calls), and each write here is a
+  // read-modify-write of the SAME whole-collection JSONB row. Unserialized, they all read the same stale
+  // blob and last-write-wins (16 adds → 2 persisted). All of one specialist's calls flow through this one
+  // MCP child process, so an in-process queue fully serializes them; cross-process CAS (a Postgres
+  // conditional update) stays the tracked follow-up for concurrent HUMAN+agent writes.
+  private locks = new Map<string, Promise<unknown>>();
   constructor(private client: SupabaseClient) {}
+
+  private locked<T>(dataKey: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.locks.get(dataKey) ?? Promise.resolve();
+    const run = prev.then(fn, fn); // run regardless of the predecessor's outcome
+    this.locks.set(dataKey, run.catch(() => {})); // keep the chain alive past a failed write
+    return run;
+  }
 
   // The visitor's household (RLS returns only their own membership). Cached for the process lifetime.
   private async householdId(): Promise<string> {
@@ -81,35 +95,44 @@ class SupabasePersistence implements Persistence {
     return Array.isArray(data?.data) ? data!.data : [];
   }
 
-  async append(dataKey: string, items: any[], current?: any[]): Promise<number> {
-    const hid = await this.householdId();
-    const cur = current ?? await this.loadCollection(dataKey); // reuse a preloaded blob if given
-    const next = [...cur, ...items];
-    const { error } = await this.client.from('family_data').upsert(
-      familyDataRow(hid, dataKey, next), { onConflict: FAMILY_DATA_CONFLICT },
-    );
-    if (error) throw new Error(`write "${dataKey}" failed: ` + error.message);
-    return next.length;
+  // `current` (the caller's preloaded blob) is intentionally IGNORED — same reasoning as SqlitePersistence:
+  // under the lock every append must merge into the FRESHEST blob, and a preloaded snapshot is stale by
+  // definition for every call after the first in a parallel burst.
+  async append(dataKey: string, items: any[], _current?: any[]): Promise<number> {
+    return this.locked(dataKey, async () => {
+      const hid = await this.householdId();
+      const cur = await this.loadCollection(dataKey);
+      const next = [...cur, ...items];
+      const { error } = await this.client.from('family_data').upsert(
+        familyDataRow(hid, dataKey, next), { onConflict: FAMILY_DATA_CONFLICT },
+      );
+      if (error) throw new Error(`write "${dataKey}" failed: ` + error.message);
+      return next.length;
+    });
   }
 
   async replace(dataKey: string, items: any[]): Promise<void> {
-    const hid = await this.householdId();
-    const { error } = await this.client.from('family_data').upsert(
-      familyDataRow(hid, dataKey, items), { onConflict: FAMILY_DATA_CONFLICT },
-    );
-    if (error) throw new Error(`replace "${dataKey}" failed: ` + error.message);
+    return this.locked(dataKey, async () => {
+      const hid = await this.householdId();
+      const { error } = await this.client.from('family_data').upsert(
+        familyDataRow(hid, dataKey, items), { onConflict: FAMILY_DATA_CONFLICT },
+      );
+      if (error) throw new Error(`replace "${dataKey}" failed: ` + error.message);
+    });
   }
 
-  // Dormant cloud path: load → transform → forced upsert (no CAS). The active appliance path
-  // (SqlitePersistence) is CAS-guarded; a Postgres-side conditional update is the tracked follow-up
-  // (low-risk on Postgres / low write volume).
+  // Cloud read-modify-write: serialized per collection by the same in-process lock (parallel tool calls
+  // can't clobber each other); a Postgres-side conditional update (cross-process CAS vs a concurrent
+  // human edit) is the tracked follow-up — low-risk on Postgres / low write volume.
   async mutate(dataKey: string, transform: (cur: any[]) => any[]): Promise<void> {
-    const hid = await this.householdId();
-    const cur = await this.loadCollection(dataKey);
-    const { error } = await this.client.from('family_data').upsert(
-      familyDataRow(hid, dataKey, transform(cur)), { onConflict: FAMILY_DATA_CONFLICT },
-    );
-    if (error) throw new Error(`mutate "${dataKey}" failed: ` + error.message);
+    return this.locked(dataKey, async () => {
+      const hid = await this.householdId();
+      const cur = await this.loadCollection(dataKey);
+      const { error } = await this.client.from('family_data').upsert(
+        familyDataRow(hid, dataKey, transform(cur)), { onConflict: FAMILY_DATA_CONFLICT },
+      );
+      if (error) throw new Error(`mutate "${dataKey}" failed: ` + error.message);
+    });
   }
 }
 

@@ -33,14 +33,15 @@ build-from-source, **local-model option**, backup, security posture): **[`docs/I
 
 **Try it with no sign-in** — the "Try the demo" button uses Supabase anonymous auth → a seeded, per-visitor-isolated sample household. Or bring up the whole stack in one command: `docker compose up --build`.
 
-**Golden path (2 minutes, no account)** — every step below is live in the demo:
+**Golden path (3 minutes, no account)** — every step below is live in the demo:
 1. Click **Try the demo — no sign-in** → a seeded household (You, Ava, Max) loads with events, chores, bills, and a home location.
 2. Ask the copilot **"what does our week look like?"** → a grounded, day-accurate answer from the deterministic FACTS harness.
 3. Say **"add a chore for Max to water the plants tomorrow morning"** → the ADK concierge routes to `chores_agent` → MCP `add_chore` persists under *your* anonymous session's RLS scope → "✓ 1 change saved".
-4. Say **"plan a Mount Rainier day trip for the family next weekend and track it as a goal"** → the `outings` loop researches real logistics on the live web, tracks a goal (watch the Today **Goals** strip), and stages a **provenance-verified** booking handoff in **Actions**.
-5. Say **"buy the tickets and pay with our card"** → the refusal: *"My tools don't handle money"* — the no-payment invariant, live.
-6. Tap **☀️ Preview today's briefing** → the morning planner proposes next actions (grounded in the seeded facts); stage them into **Approvals** with one tap.
-7. Manage → **Kid mode: On** → the device locks to the age-4-safe surface (picture chores, no destructive taps); hold the 🔒 3 s to exit.
+4. Say **"I want to make paneer butter masala"** → the shopping specialist derives the recipe *itself* (you never list ingredients) and adds ~15 family-scaled items routed by store — paneer & garam masala to **Indian Store**, cream & tomatoes to **Grocery Store** — then tells you how to remove any.
+5. Say **"plan a Mount Rainier day trip for the family next weekend and track it as a goal"** → the `outings` loop researches real logistics on the live web, tracks a goal (watch the Today **Goals** strip), and stages a **provenance-verified** booking handoff in **Actions**.
+6. Say **"buy the tickets and pay with our card"** → the refusal: *"My tools don't handle money"* — the no-payment invariant, live.
+7. Tap **☀️ Preview today's briefing** → the morning planner proposes next actions (grounded in the seeded facts); stage them into **Approvals** with one tap.
+8. Manage → **Kid mode: On** → the device locks to the age-4-safe surface (picture chores, no destructive taps); hold the 🔒 3 s to exit.
 
 ```
 "Try the demo" → Supabase anonymous auth (per-visitor, RLS-isolated, auto-seeded household)

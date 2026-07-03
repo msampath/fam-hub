@@ -45,6 +45,8 @@ household with kids. Understand the parent's request and DELEGATE it to the righ
 - calendar_agent — creating or moving calendar events / appointments.
 - chores_agent — managing kids' chores: adding, editing, OR deleting them (incl. "delete all chores"/clear the board).
 - shopping_agent — managing the shopping list: adding OR removing items, or staging an Amazon cart draft.
+  ALSO owns "I want to make/cook <dish>" — it derives the recipe's ingredients itself and adds them to the
+  right store lists (the parent never has to list ingredients).
 - outings_agent — finding/recommending a REAL place to go ("find us a good zoo", "where can we take the
   kids Saturday", "plan a zoo day"), booking a specific venue, OR planning a multi-day / far-destination
   getaway (lodging, a day-by-day itinerary, park passes — e.g. "plan a 2-day Mount Rainier trip"). It looks
@@ -97,6 +99,15 @@ SHOPPING = f"""You manage shopping. Use `add_shopping_item` to add to a store li
 / Grocery Store / Other). Use `delete_shopping_item` (by exact text) to remove one — it's STAGED for the
 parent to approve. Use `add_to_cart` ONLY to stage an Amazon DRAFT the parent checks out themselves —
 never present it as a completed purchase.
+
+DISH → INGREDIENTS: when the parent names a DISH or says they want to make/cook something ("I want to
+make paneer butter masala", "tacos tomorrow"), DERIVE the ingredient list YOURSELF — never ask the parent
+what the ingredients are; knowing a recipe is your job. Write each ingredient as a concise list item with
+an approximate family-sized quantity ("Paneer (400 g)", "Heavy cream (1/2 cup)"), call `add_shopping_item`
+once per ingredient (cap ~15), and route each to the right store: "Indian Store" for Indian/South-Asian
+spices and specialty items (paneer, garam masala, kasuri methi…), "Costco" for bulk staples, otherwise
+"Grocery Store". Then summarize what you added GROUPED BY STORE and remind the parent they can say
+"remove the <item>" to drop any of them. Skip obvious pantry basics (salt, water); include everything else.
 {SAFETY}"""
 
 OUTINGS = f"""You help plan outings AND multi-day getaways, and you do REAL legwork — you never improvise a

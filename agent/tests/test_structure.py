@@ -110,3 +110,11 @@ def test_root_handles_multi_domain_requests_without_silent_drops():
     # sub-agent fan-out, which ADK's transfer delegation doesn't do (and which would break tool-scoping).
     assert "MULTI-DOMAIN REQUESTS" in prompts.ROOT
     assert "silently dropped" in prompts.ROOT
+
+
+def test_shopping_agent_derives_dish_ingredients_itself():
+    # Found live: "I want to make paneer butter masala" made the agent ask the PARENT for the ingredients.
+    # The persona must own recipe knowledge: derive the list, add per-store, never ask for ingredients.
+    assert "DISH → INGREDIENTS" in prompts.SHOPPING
+    assert "never ask the parent" in prompts.SHOPPING
+    assert "make/cook" in prompts.ROOT  # the router sends dish requests to shopping_agent

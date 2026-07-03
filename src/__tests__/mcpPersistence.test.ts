@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { makePersistence, persistResult, type Persistence } from '../mcp/persistence';
+import { makePersistence, persistResult, SupabasePersistence, type Persistence } from '../mcp/persistence';
 import type { McpToolResult } from '../mcp/conciergeTools';
 
 const mockPersistence = () => {
@@ -73,5 +73,73 @@ describe('persistResult', () => {
     const { p } = mockPersistence();
     await persistResult(res({ tool: 'create_event', artifact: { id: 'e1' } }), p, { events: [{ id: 'e0' }] });
     expect(p.append).toHaveBeenCalledWith('events', [{ id: 'e1' }], [{ id: 'e0' }]);
+  });
+});
+
+// A parallel model turn fires MANY appends against the SAME whole-collection JSONB row (found live:
+// "make paneer butter masala" → ~15 concurrent add_shopping_item calls → only 2 items survived the
+// last-write-wins clobber). SupabasePersistence must serialize per data_key and merge into the FRESHEST
+// blob, so every item lands. The mock client yields between read and write to force the overlap.
+describe('SupabasePersistence concurrent appends', () => {
+  const mockClient = () => {
+    const store: Record<string, any[]> = {};
+    const tick = () => new Promise(r => setTimeout(r, 1)); // force interleaving between read + write
+    const from = (table: string) => {
+      if (table === 'household_members') {
+        return { select: () => ({ limit: async () => ({ data: [{ household_id: 'h1' }], error: null }) }) };
+      }
+      return {
+        select: () => ({ eq: () => ({ eq: (_k: string, dataKey: string) => ({
+          maybeSingle: async () => { await tick(); return { data: { data: store[dataKey] ?? [] }, error: null }; },
+        }) }) }),
+        upsert: async (row: { data_key: string; data: any[] }) => { await tick(); store[row.data_key] = row.data; return { error: null }; },
+      };
+    };
+    return { client: { from } as never, store };
+  };
+
+  it('N parallel appends to one collection all land (serialized read-modify-write)', async () => {
+    const { client, store } = mockClient();
+    const p = new SupabasePersistence(client);
+    await Promise.all(Array.from({ length: 12 }, (_, i) => p.append('shopping', [{ id: `s${i}`, text: `Item ${i}` }])));
+    expect(store.shopping).toHaveLength(12);
+    expect(new Set(store.shopping.map((s: any) => s.id)).size).toBe(12); // every distinct item survived
+  });
+
+  it('ignores a stale preloaded blob — merges into the freshest state under the lock', async () => {
+    const { client, store } = mockClient();
+    store.shopping = [{ id: 'existing' }];
+    const p = new SupabasePersistence(client);
+    // Both calls pass the SAME stale preloaded snapshot (what the pre-lock code trusted).
+    await Promise.all([
+      p.append('shopping', [{ id: 'a' }], [{ id: 'existing' }]),
+      p.append('shopping', [{ id: 'b' }], [{ id: 'existing' }]),
+    ]);
+    expect(store.shopping.map((s: any) => s.id).sort()).toEqual(['a', 'b', 'existing']);
+  });
+
+  it('a failed write does not wedge the lock — later appends still run', async () => {
+    const store: Record<string, any[]> = {};
+    let failNextUpsert = true; // one-shot: the first upsert errors, everything after succeeds
+    const client = {
+      from: (table: string) => {
+        if (table === 'household_members') {
+          return { select: () => ({ limit: async () => ({ data: [{ household_id: 'h1' }], error: null }) }) };
+        }
+        return {
+          select: () => ({ eq: () => ({ eq: (_k: string, dataKey: string) => ({
+            maybeSingle: async () => ({ data: { data: store[dataKey] ?? [] }, error: null }),
+          }) }) }),
+          upsert: async (row: { data_key: string; data: any[] }) => {
+            if (failNextUpsert) { failNextUpsert = false; return { error: { message: 'transient' } }; }
+            store[row.data_key] = row.data; return { error: null };
+          },
+        };
+      },
+    } as never;
+    const p = new SupabasePersistence(client);
+    await expect(p.append('shopping', [{ id: 'x' }])).rejects.toThrow(/write "shopping" failed/);
+    await p.append('shopping', [{ id: 'y' }]);
+    expect(store.shopping.map((s: any) => s.id)).toEqual(['y']);
   });
 });
