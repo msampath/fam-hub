@@ -205,7 +205,7 @@ Or trigger the scheduled job directly: `gcloud scheduler jobs run family-hub-dig
 
 | Check | Command / action | Expect |
 | --- | --- | --- |
-| Agent healthy | `curl .../healthz` on the agent | `{"ok":true}` |
+| Agent healthy | `curl -s -X POST .../chat -H "Content-Type: application/json" -d '{"message":"hi"}'` | a JSON `reply` (never `/healthz` — GFE reserves it) |
 | Web serves | open the web URL | app loads, Google sign-in works |
 | Concierge panel shows | sign in / "Try the demo" | the in-app Concierge agent panel is visible (proves `VITE_AGENT_BASE_URL`) |
 | Agent reachable from web | send a concierge prompt (e.g. *"Add a zoo day next Saturday"*) | event created — proves web→agent `AGENT_BASE_URL` wiring |
