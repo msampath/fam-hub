@@ -21,6 +21,7 @@ export default function ShoppingPage() {
     handleSuggestRestock, isSuggestingRestock, shoppingAiError, familyMembers,
     handlePlanMeals, isPlanningMeals, mealPlan,
     handleScanPantryPhoto, isScanningPantry, pantryScan, confirmPantryScan, dismissPantryScan,
+    kidMode,
   } = useApp();
   const [showRecipes, setShowRecipes] = useState(false);
 
@@ -72,7 +73,7 @@ export default function ShoppingPage() {
             >
               <ChefHat size={15} /> Recipes
             </button>
-            {hasCompletedNonStaple && (
+            {!kidMode && hasCompletedNonStaple && (
               <button
                 type="button"
                 onClick={clearCompleted}
@@ -189,7 +190,7 @@ export default function ShoppingPage() {
                   {pantryList.map(p => (
                     <span key={p.id} className="flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-semibold" style={{ background: C.card, border: `2px solid ${C.elevated}`, color: C.primary }}>
                       {p.text}
-                      <button type="button" onClick={() => handleDeletePantryItem(p.id)} aria-label={`Remove ${p.text}`} style={{ color: C.ink }}><Trash2 size={12} /></button>
+                      {!kidMode && <button type="button" onClick={() => handleDeletePantryItem(p.id)} aria-label={`Remove ${p.text}`} style={{ color: C.ink }}><Trash2 size={12} /></button>}
                     </span>
                   ))}
                 </div>
@@ -279,9 +280,10 @@ export default function ShoppingPage() {
                     <button type="button" onClick={() => toggleStaple(item.id)} title="Staple (recurring)" aria-label={item.staple ? `Unstar ${item.text}` : `Mark ${item.text} a staple`} className="flex-shrink-0">
                       <Star size={15} fill={item.staple ? C.amber : 'none'} style={{ color: item.staple ? C.amber : C.muted }} />
                     </button>
-                    <button type="button" onClick={() => deleteItem(item.id)} aria-label={`Delete ${item.text}`} className="flex-shrink-0" style={{ color: C.ink }}>
+                    {/* Kid mode hides destructive taps here too (checking items off stays). */}
+                    {!kidMode && <button type="button" onClick={() => deleteItem(item.id)} aria-label={`Delete ${item.text}`} className="flex-shrink-0" style={{ color: C.ink }}>
                       <Trash2 size={15} />
-                    </button>
+                    </button>}
                   </div>
                 ))}
               </div>

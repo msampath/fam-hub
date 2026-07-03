@@ -16,7 +16,7 @@ const STEP_DOT: Record<GoalStep['status'], { mark: string; color: string; label?
 };
 
 export default function GoalsStrip() {
-  const { goalsList, toggleGoal, deleteGoal, toggleStep } = useApp();
+  const { goalsList, toggleGoal, deleteGoal, toggleStep, kidMode } = useApp();
   const { handleSendCopilotMessage } = useCalendar();
 
   // 'active' = anything not finished/abandoned (covers legacy 'open' + the new active/waiting states).
@@ -61,7 +61,7 @@ export default function GoalsStrip() {
                     {!isDone && waiting && <div className="truncate text-[11px] font-bold" style={{ color: C.amber }}>⏳ Waiting on you — review in Approvals</div>}
                     {!isDone && !waiting && g.nextAction && <div className="truncate text-[11px] font-semibold" style={{ color: C.indigo }}>Next: {g.nextAction}</div>}
                   </div>
-                  <button type="button" onClick={() => deleteGoal(g.id)} aria-label={`Remove ${g.text}`} className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-[13px] font-bold" style={{ color: C.ink }}>✕</button>
+                  {!kidMode && <button type="button" onClick={() => deleteGoal(g.id)} aria-label={`Remove ${g.text}`} className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-[13px] font-bold" style={{ color: C.ink }}>✕</button>}
                 </div>
 
                 {steps.length > 0 && (

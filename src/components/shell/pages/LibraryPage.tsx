@@ -13,7 +13,7 @@ import { C, brutShadow } from '../theme';
 // persisted in the household's `documents` collection; the copilot grounds answers on the text
 // (LOCAL KNOWLEDGE FACTS, server-side). Binary file storage + vector RAG are a deferred upgrade.
 export default function LibraryPage() {
-  const { authorStamp } = useApp();
+  const { authorStamp, kidMode } = useApp();
   const { libraryDocs, setLibraryDocs } = useCalendar();
 
   const [search, setSearch] = useState('');
@@ -227,7 +227,8 @@ export default function LibraryPage() {
                         <button type="button" onClick={() => setOpenDoc(doc)} className="flex min-w-0 flex-1 items-center gap-2.5 text-left text-[13px] font-semibold" style={{ color: C.indigo }}>
                           <span>📄</span><span className="truncate">{doc.name}</span>
                         </button>
-                        <button type="button" onClick={() => setMenuId(cur => (cur === doc.id ? null : doc.id))} aria-label={`Actions for ${doc.name}`} aria-haspopup="menu" aria-expanded={menuId === doc.id} className="flex h-9 w-9 flex-shrink-0 items-center justify-center text-[15px] font-bold" style={{ color: C.ink }}>⋯</button>
+                        {/* Kid mode hides the row actions (Rename/Move/Delete) — docs are the copilot's memory. */}
+                        {!kidMode && <button type="button" onClick={() => setMenuId(cur => (cur === doc.id ? null : doc.id))} aria-label={`Actions for ${doc.name}`} aria-haspopup="menu" aria-expanded={menuId === doc.id} className="flex h-9 w-9 flex-shrink-0 items-center justify-center text-[15px] font-bold" style={{ color: C.ink }}>⋯</button>}
                         {menuId === doc.id && (
                           <div role="menu" className="absolute right-0 top-10 z-10 flex w-32 flex-col overflow-hidden rounded-[12px]" style={{ border: `2px solid ${C.elevated}`, boxShadow: brutShadow(C.elevated, 5), background: C.card }}>
                             <button type="button" role="menuitem" onClick={() => { setEditDoc({ id: doc.id, mode: 'rename', value: doc.name }); setMenuId(null); }} className="px-3 py-2 text-left text-[13px] font-semibold" style={{ color: C.primary }}>✏️ Rename</button>
@@ -258,7 +259,7 @@ export default function LibraryPage() {
               </div>
               <div className="flex gap-2">
                 <button type="button" onClick={() => downloadDoc(openDoc)} className="rounded-[10px] px-3 py-1.5 text-[12px] font-bold" style={btnGhost}>⬇ Download</button>
-                <button type="button" onClick={() => deleteDoc(openDoc.id)} className="rounded-[10px] px-3 py-1.5 text-[12px] font-bold" style={{ background: `${C.red}18`, color: C.red, border: `2px solid ${C.red}33` }}>Delete</button>
+                {!kidMode && <button type="button" onClick={() => deleteDoc(openDoc.id)} className="rounded-[10px] px-3 py-1.5 text-[12px] font-bold" style={{ background: `${C.red}18`, color: C.red, border: `2px solid ${C.red}33` }}>Delete</button>}
                 <button type="button" onClick={() => setOpenDoc(null)} aria-label="Close" className="rounded-[10px] px-3 py-1.5 text-[12px] font-bold" style={btnGhost}>Close</button>
               </div>
             </div>

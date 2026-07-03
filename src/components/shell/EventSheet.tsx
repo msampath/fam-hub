@@ -1,4 +1,5 @@
 import { X, Trash2, MapPin, Check, CalendarPlus } from 'lucide-react';
+import { useApp } from '../../AppContext';
 import { useCalendar } from '../../CalendarContext';
 import { useModalA11y } from '../../hooks/useModalA11y';
 import { formatTime, toLocalDateStr } from '../../utils/dates';
@@ -13,6 +14,7 @@ export default function EventSheet() {
     familyMembers, handleDeleteEvent, conflicts, visitLog, handleMarkVisited,
     handleSetEventFreeBusy, googleUser, googleCalendarsList, openGooglePush,
   } = useCalendar();
+  const { kidMode } = useApp();
 
   const close = () => setSelectedEventDetail(null);
   // active = sheet open (this component is always mounted + returns null when closed → focus must move on OPEN).
@@ -100,9 +102,10 @@ export default function EventSheet() {
               <CalendarPlus size={13} /> Push to Google
             </button>
           )}
-          <button type="button" onClick={() => { handleDeleteEvent(ev.id); close(); }} className="ml-auto flex items-center gap-1.5 rounded-[10px] px-3 py-1.5 text-[12px] font-extrabold" style={{ background: `${C.red}18`, color: C.red, border: `2px solid ${C.red}33` }}>
+          {/* Kid mode: viewing an event is fine; deleting one isn't. */}
+          {!kidMode && <button type="button" onClick={() => { handleDeleteEvent(ev.id); close(); }} className="ml-auto flex items-center gap-1.5 rounded-[10px] px-3 py-1.5 text-[12px] font-extrabold" style={{ background: `${C.red}18`, color: C.red, border: `2px solid ${C.red}33` }}>
             <Trash2 size={13} /> Delete
-          </button>
+          </button>}
         </div>
 
         <div className="mt-3 text-[11px] font-semibold" style={{ color: C.ink }}>To change the time or title, ask the copilot (e.g. “move {ev.title} to 3pm”).</div>
