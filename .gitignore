@@ -28,6 +28,7 @@
 !/docker-compose.yml
 !/docker-compose.appliance.yml
 !/docker-compose.appliance.prebuilt.yml
+!/cloudbuild.web.yaml
 !/.dockerignore
 # CI workflows: allow only the tracked workflow file (NOT scratch under .github/).
 !/.github/

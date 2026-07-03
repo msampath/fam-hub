@@ -1,0 +1,22 @@
+# Builds the WEB image from Dockerfile.web. `gcloud run deploy --source .` uses the repo's default
+# `Dockerfile` — which is the AGENT image — so the web service must be built explicitly against Dockerfile.web.
+#
+# Usage (see docs/cloud-run-deploy.md):
+#   gcloud builds submit --config cloudbuild.web.yaml \
+#     --substitutions=_IMAGE=us-central1-docker.pkg.dev/$PROJECT_ID/fam-hub/web:latest
+#
+# Supabase config is injected at RUNTIME (server.ts writes window.__APP_CONFIG__), so the only build-time
+# arg that matters is VITE_AGENT_BASE_URL — a truthy flag that reveals the in-app Concierge panel.
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - Dockerfile.web
+      - --build-arg
+      - VITE_AGENT_BASE_URL=enabled
+      - -t
+      - ${_IMAGE}
+      - .
+images:
+  - ${_IMAGE}
