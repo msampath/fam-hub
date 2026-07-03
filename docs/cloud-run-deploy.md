@@ -44,6 +44,13 @@ gcloud services enable run.googleapis.com cloudbuild.googleapis.com \
 gcloud artifacts repositories create fam-hub \
   --repository-format=docker --location=us-central1 \
   --description="Family-Hub images"
+
+# NEW projects only (hit live 2026-07): the default compute service account no longer gets build
+# permissions automatically, so `--source` deploys fail with "does not have storage.objects.get
+# access … run-sources-…zip". Grant it the builder role once:
+gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
+  --member=serviceAccount:PROJECT_NUMBER-compute@developer.gserviceaccount.com \
+  --role=roles/cloudbuild.builds.builder --condition=None
 ```
 
 > Run every command below from the **repo root** (`F:\github\fam-hub`).
@@ -78,9 +85,12 @@ Why these flags:
 
 **Copy the service URL** it prints, e.g. `https://concierge-agent-abc123-uc.a.run.app`. You need it in step 3.
 
-Smoke test:
+Smoke test — **note: NOT `/healthz`.** Google's frontend reserves the `/healthz` path on `*.run.app` and
+answers it with its own 404 without ever forwarding to your container (found live — the service looked
+dead while being perfectly healthy). Probe the real contract instead:
 ```bash
-curl https://concierge-agent-abc123-uc.a.run.app/healthz   # -> {"ok":true}
+curl -s -X POST https://concierge-agent-abc123-uc.a.run.app/chat \
+  -H "Content-Type: application/json" -d '{"message":"hi"}'   # -> {"reply":"…","sessionId":…}
 ```
 
 ---
@@ -128,10 +138,13 @@ gcloud run deploy family-hub-web \
   --set-env-vars "DIGEST_FROM_EMAIL=Family-Hub <onboarding@resend.dev>"
 ```
 
-Then set `APP_URL` to the web service's own URL (printed on deploy) — a second pass:
+Then set `APP_URL` to the web service's own URL (printed on deploy) — a second pass. **Use
+`--update-env-vars` (merges), NOT `--set-env-vars`** — on `services update`, `--set-env-vars` REPLACES the
+entire env-var set with just the ones given, producing a revision with no Supabase/Gemini config that fails
+to boot (found live; Cloud Run kept serving the last healthy revision, which masks the mistake):
 ```bash
 gcloud run services update family-hub-web --region us-central1 \
-  --set-env-vars APP_URL=https://family-hub-web-xyz789-uc.a.run.app
+  --update-env-vars APP_URL=https://family-hub-web-xyz789-uc.a.run.app
 ```
 
 What each digest var does (all three required to actually send mail):

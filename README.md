@@ -33,7 +33,9 @@ build-from-source, **local-model option**, backup, security posture): **[`docs/I
 
 **Try it with no sign-in** — the "Try the demo" button uses Supabase anonymous auth → a seeded, per-visitor-isolated sample household. Or bring up the whole stack in one command: `docker compose up --build`.
 
-**Golden path (3 minutes, no account)** — every step below is live in the demo:
+**🔗 Live demo: https://family-hub-web-420776046740.us-central1.run.app**
+
+**Golden path (3 minutes, no account)** — every step below is live at that URL:
 1. Click **Try the demo — no sign-in** → a seeded household (You, Ava, Max) loads with events, chores, bills, and a home location.
 2. Ask the copilot **"what does our week look like?"** → a grounded, day-accurate answer from the deterministic FACTS harness.
 3. Say **"add a chore for Max to water the plants tomorrow morning"** → the ADK concierge routes to `chores_agent` → MCP `add_chore` persists under *your* anonymous session's RLS scope → "✓ 1 change saved".

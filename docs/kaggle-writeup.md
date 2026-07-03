@@ -4,7 +4,7 @@
 
 > **Draft for the Kaggle Writeup editor** (AI Agents: Intensive Vibe Coding Capstone · **Track: Concierge Agents**). Paste into the Writeup; attach the cover image + video; set the project links. Word target ≤2,500 (this draft ≈2,300).
 >
-> Links to fill at submission: `<LIVE_DEMO_URL>` (Cloud Run) · `<YOUTUBE_URL>` · repo: https://github.com/msampath/fam-hub
+> Links to fill at submission: https://family-hub-web-420776046740.us-central1.run.app (Cloud Run) · `<YOUTUBE_URL>` · repo: https://github.com/msampath/fam-hub
 
 ---
 
@@ -70,7 +70,7 @@ Elsewhere in the loop: the quick path runs a **bounded critic** (invalid actions
 
 ## Try it
 
-- **Live demo (no login):** `<LIVE_DEMO_URL>` → *Try the demo* → follow the README's 7-step **Golden Path** (grounded ask → agent write → multi-step trip with goal + verified handoff → **the payment refusal** → morning planner → kid mode).
+- **Live demo (no login):** https://family-hub-web-420776046740.us-central1.run.app → *Try the demo* → follow the README's 7-step **Golden Path** (grounded ask → agent write → multi-step trip with goal + verified handoff → **the payment refusal** → morning planner → kid mode).
 - **Repo:** https://github.com/msampath/fam-hub — machine-first README (Concept→Evidence table, Mermaid architecture), 918 Vitest tests + offline agent-structure pytest + a live refusal/injection eval, `docker compose up --build` for the full stack.
 
 ## Honest limitations
