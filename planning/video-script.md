@@ -7,7 +7,7 @@
 ---
 
 **[0:00–0:25 · HOOK + PROBLEM]** — *Title card → app on screen*
-> "This is Family-Hub — an agent that runs our household. It plans the weekend, assigns the chores, watches the bills, and does the booking legwork. And here's the headline: it **provably cannot spend our money**. Running a family is a coordination job nobody applied for — and the reason we don't hand it to an AI is trust. So I built the trust first."
+> "This is Family-Hub — an agent that runs our household. It plans the weekend, assigns the chores, watches the bills, and does the booking legwork. And here's the thing: it can't spend our money. Not *won't* — **can't**. There's nothing in it that can pay. Running a family is a coordination job nobody applied for — and the reason we don't hand it to an AI is trust. So I built the trust first."
 
 **[0:25–0:50 · WHY AGENTS]** — *Cut: the "plan a trip" ask being typed*
 > "The valuable work isn't answering questions — it's multi-step: research the park's pass rules on the live web, check our calendar, draft the itinerary, find the real booking page and gather what its form will ask. That takes an agent that chooses tools and keeps going. Every capability is also blast radius — so the architecture is a safety stack with an agent inside."

@@ -1,6 +1,6 @@
 # Family-Hub: the safe household concierge
 
-*An agent that runs your family's week — and provably can't spend your money.*
+*An agent that runs your family's week.*
 
 > **Draft for the Kaggle Writeup editor** (AI Agents: Intensive Vibe Coding Capstone · **Track: Concierge Agents**). Paste into the Writeup; attach the cover image + video; set the project links. Word target ≤2,500 (this draft ≈2,300).
 >
