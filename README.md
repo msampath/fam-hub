@@ -52,6 +52,9 @@ React surface ─▶ ADK Concierge agent ─delegates▶ specialist sub-agents
                        ▼
                 Tool Registry tools ─▶ Supabase  (writes under the visitor's JWT)
                 no-payment invariant + risk tiers enforced SERVER-SIDE; IoT honestly "unavailable"
+
+Cloud Scheduler ─▶ morning agent: digest email + a grounded planner pass that STAGES
+                confirm-tier drafts (shopping · events · a goal's next step) into Approvals
 ```
 
 ### Concepts → evidence

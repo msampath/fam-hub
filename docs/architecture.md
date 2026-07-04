@@ -15,7 +15,7 @@ local **SQLite** file on the appliance.
 | Layer | Tech | Responsibility |
 | --- | --- | --- |
 | **Client** | React 19 + Vite + TypeScript | The whole UI + state hub (`src/App.tsx`), persisted collections, the Copilot bar, calendar/chores/shopping, the Approvals queue. |
-| **Web server** | Express (`server.ts`) | Auth + rate-limit, the Copilot quick-path (Gemini + grounding), parse/geocode endpoints, the agent proxy, the daily-digest email, Google-OAuth token refresh, SSRF-guarded scraping. |
+| **Web server** | Express (`server.ts`) | Auth + rate-limit, the Copilot quick-path (Gemini + grounding), parse/geocode endpoints, the agent proxy, the **morning agent** (digest email + a planner pass that stages confirm-tier drafts), inbox scans (bills/packages/kids/newsletters — fields only), Google-OAuth token refresh, SSRF-guarded scraping. |
 | **Agent service** | Python + Google ADK (`agent/`, FastAPI) | A root **concierge** engine routing to 7 tool-scoped specialists (calendar, chores, shopping, outings, briefing, bills, files). Runs on Gemini. |
 | **Tool server** | Node MCP server (`src/mcp/`) | The agent's toolbelt over stdio: calendar/chores/shopping writes, goals, web research, booking hand-offs, doc management — each tier-gated. |
 | **Storage** | Supabase Postgres **or** SQLite | Household data as JSON collections. Cloud: RLS-scoped `family_data`. Appliance: a local SQLite DB behind Express. |
@@ -25,6 +25,7 @@ local **SQLite** file on the appliance.
 
 ```mermaid
 flowchart LR
+  SCHED["Cloud Scheduler (hourly)"]
   subgraph CLIENT["CLIENT · React SPA"]
     APP["App.tsx — state hub<br/>persisted collections"]
     BAR["Copilot bar + Approvals queue"]
@@ -33,7 +34,8 @@ flowchart LR
     AUTH["requireAuth · rate-limit"]
     QP["Copilot quick-path<br/>Gemini + grounded FACTS"]
     PROXY["/api/agent/chat proxy"]
-    DIG["daily digest → email"]
+    DIG["morning agent<br/>digest email + planner → confirm-tier drafts"]
+    SCAN["inbox scans (fields only)<br/>bills · packages · kids · newsletters"]
     SEC["SSRF guard · prompt sanitize"]
   end
   subgraph AGENT["AGENT · Python ADK (agent/)"]
@@ -45,6 +47,7 @@ flowchart LR
     GEM["Gemini API"]
     STORE["Supabase (RLS) — or — SQLite"]
     GCAL["Google Calendar"]
+    GMAIL["Gmail (opt-in scans)"]
     WEB2["Maps · Weather · Web search"]
   end
   CLIENT -->|"quick reads / actions"| WEB
@@ -53,6 +56,10 @@ flowchart LR
   ROOT --> SPEC --> MCP --> STORE
   SPEC --> GEM
   MCP --> WEB2
+  SCHED -->|"POST /internal/run-digest<br/>(shared secret)"| DIG
+  DIG -->|"planner call"| GEM
+  DIG -->|"stages drafts → Approvals ledger"| STORE
+  SCAN --> GMAIL
   CLIENT -->|"data + auth"| STORE
   CLIENT -->|"calendar sync"| GCAL
 ```

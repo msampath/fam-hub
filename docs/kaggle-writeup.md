@@ -32,6 +32,9 @@ React shell ─▶ Express (server.ts) ──▶ quick path: deterministic FACTS
                     ▼
         MCP toolbelt (Tool Registry) ─▶ Supabase Postgres (writes under the VISITOR's JWT)
         no-payment invariant + risk tiers enforced SERVER-SIDE
+
+Cloud Scheduler ─▶ morning agent: digest email + grounded planner → confirm-tier drafts in Approvals
+Gmail (opt-in, fields only) ─▶ inbox scans: bills → collection · packages/kids' events → one-tap adds
 ```
 
 **Two engines, one copilot.** Simple asks run a *quick path*: the server pre-fetches verified FACTS blocks (dates, per-person availability, weather + AQI + pollen, real nearby venues with drive times, real ticketed events, the household's document corpus) and makes **one** grounded model call. This is a deliberate reliability pattern — the model reasons over server-verified data instead of tool-calling for reads, so a small model can't hallucinate a venue. Action and planning turns route to the **ADK multi-agent concierge**: a root router that holds *no tools* and delegates to seven specialists (calendar / chores / shopping / outings / briefing / bills / files), each connected to the MCP toolbelt through a per-specialist `tool_filter` — a specialist *cannot call a tool outside its slice*. The split buys tool-scoping and small-model routing reliability; `outings_agent` is the deep loop (research → plan → execute → handoff), and the others are honest thin adapters.
