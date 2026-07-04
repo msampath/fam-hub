@@ -13,6 +13,7 @@
 > "The valuable work isn't answering questions — it's multi-step: research the park's pass rules on the live web, check our calendar, draft the itinerary, find the real booking page and gather what its form will ask. That takes an agent that chooses tools and keeps going. Every capability is also blast radius — so the architecture is a safety stack with an agent inside."
 
 **[0:50–1:25 · ARCHITECTURE]** — *Architecture diagram (docs/architecture.md render), cursor tracing the flow*
+> *(Optional one-liner if the beat runs short: "One design rule throughout: an agent exists where durable data exists — email finds become calendar records, so the calendar agent owns them; only bills keep their own store, so only bills got an agent.")*
 > "One copilot, two engines. Simple asks run a deterministic harness — the server pre-fetches verified facts: availability, weather, real venues with drive times — and the model reasons over *those*, so it can't invent a place. Action turns go to an ADK multi-agent concierge: a root router with **no tools of its own**, delegating to seven specialists, each MCP-filtered to its own slice — the shopping agent literally cannot touch the calendar. Every write carries a server-side risk tier: reversible creates auto-apply, everything destructive stages into Approvals, and there is **no payment tool to call** — that invariant is enforced in the MCP layer and proven by tests, not promised by a prompt."
 
 **[1:25–3:20 · LIVE DEMO]** — *Fresh incognito → the Cloud Run URL*

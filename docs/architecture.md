@@ -92,6 +92,19 @@ The storage backend is chosen at runtime (`STORAGE` env), so **one build runs ei
 - **LAN appliance:** one `docker compose` on a home box (mini-PC / NAS / Raspberry Pi) with prebuilt images —
   a one-command install, data stays local. See [`INSTALL.md`](./INSTALL.md) and [`lan-appliance.md`](./lan-appliance.md).
 
+## Inbox intelligence (email → app)
+
+Four opt-in scans read the parent's Gmail — **parsed fields only, bodies are never stored**:
+
+- **Bills** → persisted to the `bills` collection → the read-only `bills_agent` answers "what do we owe?"
+- **Packages** and **kids' events** → surfaced as **one-tap suggestions**; accepting one creates a calendar
+  record, and from then on the *calendar* capability (shared calendar + copilot search) owns it.
+- **Newsletters** → auto-ingested into the Docs corpus that grounds `search_local_knowledge`.
+
+The taxonomy rule this encodes: **capabilities ≠ specialists — an agent exists where a durable, queryable
+store exists**, not one per feature. Bills keep their own store, so bills got an agent; package/event finds
+become calendar data, so no separate agent pretends to own them.
+
 ## Safety model
 
 Security is **server-authoritative**, never trusted to the model:
