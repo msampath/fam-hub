@@ -1,7 +1,8 @@
 # Deploy Family-Hub to Cloud Run — step by step
 
 End state: the **live deployable** for the capstone — two Cloud Run services plus a Cloud Scheduler job that
-fires the autonomous Morning Briefing email.
+fires the autonomous **morning agent** (the digest email + a grounded planner pass that stages confirm-tier
+drafts into Approvals).
 
 ```
                 Cloud Scheduler (hourly cron)
@@ -11,7 +12,8 @@ fires the autonomous Morning Briefing email.
               (Dockerfile.web)        AGENT_BASE_URL          (Dockerfile)
               Express + React           /chat                 Python ADK + Node MCP child
               · in-app copilot                                · 7 tool-scoped specialists
-              · /internal/run-digest → Resend email           · per-request visitor-JWT isolation
+              · morning agent: Resend email                   · per-request visitor-JWT isolation
+                + planner → confirm-tier drafts
                         │                                            │
                         └───────────────  Supabase  ───────────────┘
 ```
