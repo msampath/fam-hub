@@ -2557,8 +2557,14 @@ export default function App() {
       if (built) {
         const ev = { ...built, ...authorStamp() } as CalendarEvent;
         setEvents(prev => [ev, ...prev]);
-        stagePushToGoogle([ev]);
-        setCopilotMessages(prev => [...prev, { role: 'assistant', text: `🗓️ Added "${ev.title}" to your calendar. (Approve the Google-push draft to add it there too.)` }]);
+        // Only offer the Google-push follow-up when a Google calendar is actually connected — otherwise
+        // (anonymous demo, or no sync set up) the chained draft is a dead-end that can never be approved.
+        if (connectedCalendars.length) {
+          stagePushToGoogle([ev]);
+          setCopilotMessages(prev => [...prev, { role: 'assistant', text: `🗓️ Added "${ev.title}" to your calendar. (Approve the Google-push draft to add it there too.)` }]);
+        } else {
+          setCopilotMessages(prev => [...prev, { role: 'assistant', text: `🗓️ Added "${ev.title}" to your calendar.` }]);
+        }
       } else {
         setCopilotMessages(prev => [...prev, { role: 'assistant', text: `✓ Marked done.` }]);
       }
