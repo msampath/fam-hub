@@ -1,6 +1,12 @@
 # Video script — ≤5:00, YouTube (public), attached to the Kaggle Media Gallery
 
-**Recording setup:** 1080p screen capture of the LIVE Cloud Run demo in a fresh incognito window (no bookmarks bar). Second source: a phone/tablet clip for the kid-mode segment (optional but strong). Voiceover over captures; keep cuts tight — the rubric scores clarity + conciseness. Rehearse once against the clock; the demo beats below are pre-verified via the README Golden Path.
+> **FORMAT (final): deck + live demo.** Minutes 0:00–2:10 = present **`planning/video-deck.pptx`**
+> (8 slides; each slide's narration is in its speaker notes — that IS the script for the first two
+> minutes; the Antigravity session capture drops into slide 7's beat). Minute 2:10–~4:50 = drive the
+> LIVE demo following slide 8's six beats — spoken lines for each beat are in the LIVE DEMO section
+> below. Close over the Today page with the line on slide 8's notes.
+
+**Recording setup:** 1080p. Part 1: present the deck full-screen (PowerPoint presenter view shows the notes). Part 2: fresh incognito window on the LIVE Cloud Run demo (no bookmarks bar; ask Claude to pre-warm the service first). Second source: a phone/tablet clip for the kid-mode segment (optional but strong). Voiceover over captures; keep cuts tight — the rubric scores clarity + conciseness. Rehearse once against the clock; the demo beats below are pre-verified via the README Golden Path.
 
 > Timing budget totals 4:40, leaving 20 s of slack. If a live beat drags, cut segment 7 (CLI) to a 5-second overlay — the concept is also evidenced in `agent/README.md`.
 
