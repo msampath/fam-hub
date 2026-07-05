@@ -7,7 +7,23 @@ describe('buildDemoSeed', () => {
   const seed = buildDemoSeed(TODAY, 'anon-123');
 
   it('seeds the expected collections', () => {
-    expect(Object.keys(seed).sort()).toEqual(['bills', 'chores', 'documents', 'events', 'goals', 'members', 'settings', 'shopping']);
+    expect(Object.keys(seed).sort()).toEqual(['actionledger', 'bills', 'chores', 'documents', 'events', 'goals', 'members', 'settings', 'shopping']);
+  });
+
+  it('seeds exactly ONE pending confirm-tier approval so the Approvals queue is visible on arrival', () => {
+    expect(seed.actionledger).toHaveLength(1);
+    const e: any = seed.actionledger[0];
+    // suggest_event = an APPROVAL (agent executes on OK), not a USER_COMPLETES handoff (Actions).
+    expect(e).toMatchObject({ tool: 'suggest_event', riskTier: 'confirm', status: 'pending' });
+    expect(e.summary).toBeTruthy();
+    // Approving rides the generic booking-payload apply path — the payload must carry a valid booking.
+    expect((e.payload as any).booking.title).toBeTruthy();
+    expect((e.payload as any).booking.start >= TODAY).toBe(true);
+    // NOT a morning-planner draft: proactiveDate keys the digest's same-day dedupe and must stay unset.
+    expect(e.proactiveDate).toBeUndefined();
+    // Distinct from planner-proposable items (Grandma's birthday / Discover Pass) → no dedupe collision
+    // when the judge taps the briefing's "Stage drafts".
+    expect(/birthday|discover pass/i.test((e.payload as any).booking.title)).toBe(false);
   });
 
   it('seeds an in-progress goal (GoalsStrip lands populated; the morning planner can advance it)', () => {

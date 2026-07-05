@@ -6,7 +6,7 @@
 import { uuid } from './uuid';
 import { MEMBER_COLORS_LIST } from '../constants';
 import { addDaysISO } from './copilotHarness';
-import type { FamilyMember, CalendarEvent, Chore, ShoppingItem, HouseholdSettings, Bill, LibraryDoc, Goal } from '../types';
+import type { FamilyMember, CalendarEvent, Chore, ShoppingItem, HouseholdSettings, Bill, LibraryDoc, Goal, LedgerEntry } from '../types';
 
 // `today` is local ISO 'YYYY-MM-DD'; `userId` is the anonymous visitor's auth id (links the "You" parent
 // so authorship + account-linking resolve). Returns a map of collection dataKey → seeded array.
@@ -79,5 +79,23 @@ export function buildDemoSeed(today: string, userId: string): Record<string, any
       ] },
   ];
 
-  return { members, events, chores, shopping, settings, bills, documents, goals };
+  // Seed ONE pending confirm-tier draft so the Approvals queue is visible the moment a judge arrives
+  // (the button only renders when something is pending or resolved — an empty fresh household would hide
+  // the safety-gate surface entirely). Shaped exactly like a suggest_event the copilot stages from an
+  // inbox find: it references the seeded "Eastside Weekend Guide" newsletter, and approving it rides the
+  // existing booking-payload apply path (becomes a calendar event — zero special-casing). Distinct
+  // title/date from anything the morning planner proposes, so the briefing's "Stage drafts" beat still
+  // stages its own drafts (no dedupe collision). No proactiveDate: this is an inbox find, not a
+  // morning-planner draft, and that field keys the digest's same-day dedupe.
+  const actionledger: LedgerEntry[] = [
+    {
+      id: 'ledg-' + uuid(),
+      tool: 'suggest_event', riskTier: 'confirm', status: 'pending',
+      summary: 'Add "Family nature walk — Lake Sammamish State Park" Sunday 10:00 AM (from your Eastside Weekend Guide)',
+      payload: { booking: { title: 'Family nature walk — Lake Sammamish State Park', start: addDaysISO(today, 4), startTime: '10:00' } },
+      createdAt: today, createdByUserId: userId,
+    },
+  ];
+
+  return { members, events, chores, shopping, settings, bills, documents, goals, actionledger };
 }

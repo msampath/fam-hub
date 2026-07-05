@@ -4,6 +4,7 @@ import { useCalendar } from '../../CalendarContext';
 import { useApp } from '../../AppContext';
 import { suggestionKey } from '../../utils/aiActions';
 import { isAgentConfigured } from '../../utils/agentClient';
+import { USER_COMPLETES } from '../../constants';
 import type { CopilotSuggestion } from '../../types';
 import ImportDrawer from './ImportDrawer';
 import Modal from './Modal';
@@ -61,7 +62,6 @@ export default function CopilotBar({ onOpenManage }: CopilotBarProps) {
   // Two buckets, by WHO completes the work: USER_COMPLETES handoffs (booking/cart/pass — you open & finish
   // them yourself) are "Actions"; everything else pending (delete/reschedule event, push to Google, …) is an
   // "Approval" the AGENT executes once you OK it. Derived from `tool` — no LedgerEntry schema change.
-  const USER_COMPLETES = new Set(['prepare_handoff', 'reserve', 'add_to_cart']);
   const pendingActions = pending.filter(e => USER_COMPLETES.has(e.tool));    // you do it
   const pendingApprovals = pending.filter(e => !USER_COMPLETES.has(e.tool)); // the agent does it
   // Partition RESOLVED history the same way, so a completed handoff (a user Action) doesn't conjure a phantom

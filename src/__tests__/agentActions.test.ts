@@ -28,7 +28,20 @@ describe('buildAgentActionResult', () => {
     expect(r.appliedCount).toBe(0);
     expect(r.ledger.map(l => l.riskTier)).toEqual(['confirm', 'stepup']);
     expect(r.ledger[0].link).toBe('https://maps.google.com/x');
-    expect(r.summary).toMatch(/2 drafts staged/);
+    // reserve + add_to_cart are USER_COMPLETES handoffs → they land under Actions, and the copy says so.
+    expect(r.summary).toMatch(/2 drafts staged in Actions/);
+    expect(r.summary).not.toMatch(/Approv/);
+  });
+
+  it('labels each staged bucket by where it lands: Approvals (agent executes) vs Actions (you complete)', () => {
+    const actions: AgentAction[] = [
+      { tool: 'delete_event', status: 'requires_confirmation', artifact: { id: 'e1', title: 'Dentist' } },
+      { tool: 'prepare_handoff', status: 'requires_confirmation', artifact: { title: 'Timed-entry pass', url: 'https://recreation.gov/x' } },
+    ];
+    const r = buildAgentActionResult(actions, mkId, stamp);
+    expect(r.ledger).toHaveLength(2);
+    expect(r.summary).toMatch(/1 draft staged — review in Approvals\./);
+    expect(r.summary).toMatch(/1 draft staged in Actions — open & complete\./);
   });
 
   it('drops non-http(s) draft links (no javascript:/data: phishing into the Approve queue)', () => {

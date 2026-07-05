@@ -70,6 +70,11 @@ event suggestions. For each item: **Approve** (it happens), **Modify** (adjust i
 **Dismiss**. Reversible little things (like adding a shopping item you asked for directly) apply
 immediately; anything destructive or self-initiated always queues here.
 
+Two review surfaces, split by **who finishes the work**: **Approvals** holds what the *Copilot*
+executes once you say yes; **Actions** (next to it) holds legwork handed to *you* — booking and
+reservation handoffs you open and complete yourself. The demo household arrives with one suggestion
+already waiting in Approvals, so you can try the approve flow immediately.
+
 ## 6. Chores — with XP, levels, and confetti
 
 ![Chores page](user-guide/05-chores.png)

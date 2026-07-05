@@ -6,6 +6,11 @@ export const APP_NAME = 'Family-Hub';
 // The canonical shopping stores (single source for validation + the quick-add context).
 export const SHOP_STORES = ['Costco', 'Indian Store', 'Grocery Store', 'Other'] as const;
 
+// Handoff-style tools the USER completes externally (open the real page, then finish it) — bookings,
+// reservations, carts. Everything else confirm-tier is an Approval the AGENT executes once OK'd. Single
+// source so the "Actions vs Approvals" split can't drift between the copilot bar and the staged-draft copy.
+export const USER_COMPLETES = new Set<string>(['prepare_handoff', 'reserve', 'add_to_cart']);
+
 // Configurable idle-screensaver timeouts (ms). 0 = Off (never blank).
 export const IDLE_TIMEOUT_OPTIONS: { label: string; ms: number }[] = [
   { label: '5 min', ms: 5 * 60 * 1000 },

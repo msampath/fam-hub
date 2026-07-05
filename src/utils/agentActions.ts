@@ -6,6 +6,7 @@ import type { AgentAction } from './agentClient';
 import type { LedgerEntry, Authored, RiskTier } from '../types';
 import { buildLedgerEntry } from './historyLog';
 import { bookingFromFields, type BookingStub } from './aiActions';
+import { USER_COMPLETES } from '../constants';
 
 const MUTATING = new Set(['create_event', 'add_chore', 'add_shopping_item', 'update_event', 'delete_event', 'reserve', 'add_to_cart', 'move_document', 'delete_document', 'delete_chore', 'clear_chores', 'update_chore', 'delete_shopping_item', 'prepare_handoff']);
 const safeLink = (u: unknown): string | undefined => (typeof u === 'string' && /^https?:\/\//i.test(u) ? u : undefined);
@@ -88,7 +89,13 @@ export function buildAgentActionResult(actions: AgentAction[], mkId: () => strin
   // "saved — refreshing…" not "applied": the write is durable server-side, but the calendar re-renders after
   // the async resync, so don't claim it's already visible.
   if (appliedCount) parts.push(`✓ ${appliedCount} change${appliedCount > 1 ? 's' : ''} saved — refreshing…`);
-  if (ledger.length) parts.push(`🛎️ ${ledger.length} draft${ledger.length > 1 ? 's' : ''} staged — review in Approve.`);
+  // Say WHERE each draft actually lands: handoffs (USER_COMPLETES — you open & finish them) live under
+  // "Actions"; agent-executed drafts live under "Approvals". One combined "review in Approve" line used to
+  // mislabel handoffs.
+  const actionsN = ledger.filter(e => USER_COMPLETES.has(e.tool)).length;
+  const approvalsN = ledger.length - actionsN;
+  if (approvalsN) parts.push(`🛎️ ${approvalsN} draft${approvalsN > 1 ? 's' : ''} staged — review in Approvals.`);
+  if (actionsN) parts.push(`🛎️ ${actionsN} draft${actionsN > 1 ? 's' : ''} staged in Actions — open & complete.`);
   return { appliedCount, ledger, summary: parts.join(' ') };
 }
 
