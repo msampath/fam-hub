@@ -35,10 +35,11 @@
 !/.github/workflows/
 /.github/workflows/*
 !/.github/workflows/appliance-images.yml
-# scripts/: allow ONLY the installer (the dir also holds a Playwright profile + scratch — keep those ignored).
+# scripts/: allow ONLY the installer + the eval runner (the dir also holds a Playwright profile + scratch — keep those ignored).
 !/scripts/
 /scripts/*
 !/scripts/install.sh
+!/scripts/eval-quickpath.ts
 
 # Curated public docs (capstone §9 step 1): all root .md (README + design/plan docs) + the docs/ and
 # planning/ dirs. Raw session scratch (transcripts, external-tool dumps) is re-ignored in section 3.
