@@ -4,7 +4,7 @@
 
 > **Draft for the Kaggle Writeup editor** (AI Agents: Intensive Vibe Coding Capstone · **Track: Concierge Agents**). Paste into the Writeup; attach the cover image + video; set the project links. Word target ≤2,500 (this draft ≈2,300).
 >
-> Links to fill at submission: https://family-hub-web-420776046740.us-central1.run.app (Cloud Run) · `<YOUTUBE_URL>` · repo: https://github.com/msampath/fam-hub
+> Links to fill at submission: https://family-hub-web-420776046740.us-central1.run.app (Cloud Run) · video: https://youtu.be/4S2k9VOpdBc · repo: https://github.com/msampath/fam-hub
 
 ---
 
