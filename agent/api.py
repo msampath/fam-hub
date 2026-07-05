@@ -246,6 +246,12 @@ async def chat(body: ChatIn, authorization: str | None = Header(default=None)):
                 turn_session_id = (await _sessions.create_session(app_name=APP_NAME, user_id=user_id)).id
             try:
                 reply, actions = await _run_turn(model_name, turn_session_id)
+                # Empty-reply backstop (found via the eval harness — a data-less briefing run ended with a
+                # blank final message 3/3 times): never hand the family an empty bubble. Honest filler, no
+                # invented content; the actions list (if any) still tells the real story.
+                if not reply.strip():
+                    reply = ("I couldn't put together an answer for that just now"
+                             + (" — but the actions below did go through." if actions else " — mind trying again or rephrasing?"))
                 resolved_model = model_name or MODEL  # None = primary (CONCIERGE_MODEL); else the fallback that answered
                 if model_name is not None:
                     print(f"[concierge] answered on fallback model {resolved_model!r}", flush=True)

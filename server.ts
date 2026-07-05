@@ -13,7 +13,8 @@ import { createClient, type User } from '@supabase/supabase-js';
 import { buildCopilotPrompt, COPILOT_SYSTEM, COPILOT_HARNESS_SYSTEM, COPILOT_SCHEMA } from './src/utils/copilotPrompt';
 import { buildHarnessUserPrompt, buildConversationBlock, addDaysISO } from './src/utils/copilotHarness';
 import { buildLocalKnowledgeFactsAsync } from './src/utils/localKnowledge';
-import { verifyActions, buildCriticNote } from './src/utils/copilotCritic';
+import { verifyActions, buildCriticNote, verifyActionClaims, unbackedClaimCorrection } from './src/utils/copilotCritic';
+import { verifyQuickAdd, buildQuickAddCriticNote, coerceQuickAdd } from './src/utils/quickAddCritic';
 import { buildRevisePrompt } from './src/utils/reviseDraft';
 import { filterUnrequestedHolidayDeletes } from './src/utils/holidayGuard';
 import { buildBriefing, type Briefing } from './src/utils/briefing';
@@ -1621,6 +1622,46 @@ app.post('/api/revise-draft', requireAuth, aiRateLimit, async (req, res) => {
  * items, or a chore, and return a single structured object the client dispatches to
  * its existing add handlers. Returns { result: { kind, event?, items?, chore? } }.
  */
+// Quick-add response schema — module-level so the critic retry reuses the exact same contract.
+const QUICKADD_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    kind: { type: Type.STRING, description: 'One of: event, shopping, chore' },
+    event: {
+      type: Type.OBJECT,
+      properties: {
+        title: { type: Type.STRING },
+        start: { type: Type.STRING, description: 'YYYY-MM-DD' },
+        end: { type: Type.STRING, description: 'YYYY-MM-DD (optional)' },
+        startTime: { type: Type.STRING, description: "Start time as 24h 'HH:MM' if a time is given (e.g. '4pm' -> '16:00'); omit for all-day." },
+        endTime: { type: Type.STRING, description: "End time as 24h 'HH:MM' (optional)." },
+        category: { type: Type.STRING },
+        members: { type: Type.ARRAY, items: { type: Type.STRING } },
+      },
+    },
+    items: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: { text: { type: Type.STRING }, store: { type: Type.STRING } },
+        required: ['text'],
+      },
+    },
+    chore: {
+      type: Type.OBJECT,
+      properties: {
+        title: { type: Type.STRING },
+        assignedTo: { type: Type.STRING, description: "Who does it. For multi-kid intent keep the phrase VERBATIM — 'both kids', 'all kids', or 'everyone' (do NOT pick a single name); the app expands it to one chore per kid." },
+        points: { type: Type.NUMBER },
+        timesPerDay: { type: Type.NUMBER },
+        repeatType: { type: Type.STRING },
+        scheduleTimeOfDay: { type: Type.STRING },
+      },
+    },
+  },
+  required: ['kind'],
+};
+
 app.post('/api/parse-quickadd', requireAuth, aiRateLimit, async (req, res) => {
   try {
     const { text, members = [], stores = ['Costco', 'Indian Store', 'Grocery Store', 'Other'] } = req.body;
@@ -1644,47 +1685,27 @@ Note: "${text}"`;
     const result = await callGeminiJSON(
       prompt,
       'You convert a single family note into one structured object. Return schema-compliant JSON with the relevant sub-object populated for the chosen kind.',
-      {
-        type: Type.OBJECT,
-        properties: {
-          kind: { type: Type.STRING, description: 'One of: event, shopping, chore' },
-          event: {
-            type: Type.OBJECT,
-            properties: {
-              title: { type: Type.STRING },
-              start: { type: Type.STRING, description: 'YYYY-MM-DD' },
-              end: { type: Type.STRING, description: 'YYYY-MM-DD (optional)' },
-              startTime: { type: Type.STRING, description: "Start time as 24h 'HH:MM' if a time is given (e.g. '4pm' -> '16:00'); omit for all-day." },
-              endTime: { type: Type.STRING, description: "End time as 24h 'HH:MM' (optional)." },
-              category: { type: Type.STRING },
-              members: { type: Type.ARRAY, items: { type: Type.STRING } },
-            },
-          },
-          items: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: { text: { type: Type.STRING }, store: { type: Type.STRING } },
-              required: ['text'],
-            },
-          },
-          chore: {
-            type: Type.OBJECT,
-            properties: {
-              title: { type: Type.STRING },
-              assignedTo: { type: Type.STRING, description: "Who does it. For multi-kid intent keep the phrase VERBATIM — 'both kids', 'all kids', or 'everyone' (do NOT pick a single name); the app expands it to one chore per kid." },
-              points: { type: Type.NUMBER },
-              timesPerDay: { type: Type.NUMBER },
-              repeatType: { type: Type.STRING },
-              scheduleTimeOfDay: { type: Type.STRING },
-            },
-          },
-        },
-        required: ['kind'],
-      },
+      QUICKADD_SCHEMA,
       '{}',
     );
-    return res.json({ result });
+    // Critic loop (weak-model hardening): a near-miss parse (unknown member, past date, bad store)
+    // used to return RAW and fail silently client-side. Validate deterministically; on issues,
+    // ONE corrective re-prompt at low temperature (adopted only if it strictly improves), then
+    // coerce whatever remains fixable. Mirrors the /api/copilot critic (bounded, honest).
+    const qaCtx = { members: (members as string[]).filter(Boolean), stores: (stores as string[]).filter(Boolean), today };
+    let parsedQA = result as any;
+    let qaIssues = verifyQuickAdd(parsedQA, qaCtx);
+    if (qaIssues.length) {
+      const retry: any = await callGeminiJSON(
+        `${prompt}\n\n${buildQuickAddCriticNote(qaIssues)}`,
+        'You convert a single family note into one structured object. Return schema-compliant JSON with the relevant sub-object populated for the chosen kind.',
+        QUICKADD_SCHEMA, '{}', undefined, { temperature: 0.3 },
+      ).catch(() => null);
+      const retryIssues = retry ? verifyQuickAdd(retry, qaCtx) : qaIssues;
+      if (retry && retryIssues.length < qaIssues.length) { parsedQA = retry; qaIssues = retryIssues; }
+    }
+    parsedQA = coerceQuickAdd(parsedQA, qaCtx);
+    return res.json({ result: parsedQA, criticIssues: qaIssues.length ? qaIssues : undefined });
   } catch (error: any) {
     console.error('Error parsing quick-add: ', error);
     return aiErrorResponse(res, error, 'An error occurred while interpreting that note');
@@ -1890,8 +1911,16 @@ app.post('/api/copilot', requireAuth, aiRateLimit, async (req, res) => {
     // it fixes them — rather than letting sanitizeCopilotActions silently drop the near-miss into a no-op.
     // Each pass must STRICTLY reduce the issue count to be adopted (monotonic → the loop can't thrash), and
     // the loop exits the moment the actions verify clean. KAGGLE_EVAL: self-correction as an iterative loop.
-    if (useHarness && Array.isArray(parsed.actions) && parsed.actions.length) {
-      let issues = verifyActions(parsed.actions, { memberNames, today });
+    if (useHarness) {
+      // Two issue classes feed ONE bounded corrective loop: malformed actions (verifyActions) and
+      // UNBACKED CLAIMS — a reply that says "I've added…" with no matching action (found live via the
+      // eval harness on gemini-2.5-flash; per-eval it hit ~30% of explicit commands). The retry gives
+      // the model a chance to emit the missing action; the backstop below refuses to let a lie stand.
+      const allIssues = (p: any) => [
+        ...verifyActions(Array.isArray(p.actions) ? p.actions : [], { memberNames, today }),
+        ...verifyActionClaims(String(p.reply || ''), Array.isArray(p.actions) ? p.actions : []),
+      ];
+      let issues = allIssues(parsed);
       for (let pass = 0; pass < 2 && issues.length; pass++) {
         // Use a THROWAWAY meta for the critic retry so the reported model/usedFallback isn't overwritten by the
         // retry's model when we don't adopt the retry (else telemetry mislabels the kept first answer).
@@ -1901,13 +1930,17 @@ app.post('/api/copilot', requireAuth, aiRateLimit, async (req, res) => {
         );
         // Keep the retry only if it actually reduced the problems (else keep the current answer and stop —
         // a pass that can't improve won't improve on a rerun either).
-        const retryIssues = retry && Array.isArray(retry.actions) ? verifyActions(retry.actions, { memberNames, today }) : issues;
+        const retryIssues = retry ? allIssues(retry) : issues;
         if (retryIssues.length >= issues.length) break;
         parsed.actions = retry.actions;
         if (retry.reply) parsed.reply = retry.reply;
         meta.model = retryMeta.model; meta.usedFallback = retryMeta.usedFallback; // adopt → report the retry's model
         issues = retryIssues;
       }
+      // Honesty backstop: the loop couldn't recover the action — append the correction so the family
+      // never sees a confident "I've added it" with nothing behind it (agent-path convention).
+      const correction = unbackedClaimCorrection(String(parsed.reply || ''), Array.isArray(parsed.actions) ? parsed.actions : []);
+      if (correction) parsed.reply = `${String(parsed.reply || '')}\n\n${correction}`;
     }
 
     const sanitized = dedupeActions(sanitizeCopilotActions(parsed.actions, upcomingEvents));

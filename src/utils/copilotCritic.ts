@@ -58,3 +58,54 @@ export function buildCriticNote(issues: ActionIssue[]): string {
     + `Re-emit the SAME reply, fixing ONLY these actions — use a real family member name for chores, valid `
     + `YYYY-MM-DD dates today or later, and drop any action you cannot fix. Return the corrected JSON.`;
 }
+
+// ── Unbacked-claim check (weak-model hardening, Phase 3) ─────────────────────────────────────────
+// Found live via the eval harness — on gemini-2.5-flash the quick path answers an explicit command
+// with "I've added milk to your shopping list." while emitting actions: []. Nothing is saved and the
+// reply is a lie. The agent path has detectUnbackedClaims (agentActions.ts); this is the quick-path
+// equivalent, phrased as critic ISSUES so the existing corrective-re-prompt loop can recover the
+// action instead of merely censoring the claim. Targets COMPLETED claims only — "I can add…" /
+// "Want me to add…?" must not trip it. Pure → unit-tested.
+// A completion claim comes in two safe-to-match shapes (futures/offers like "I'll put…" or
+// "I can schedule…" must NOT trip this):
+//   A. perfect tense with any self-reference — "I've added…", "I have scheduled…", and the
+//      third-person voice found live: "Okay, the family's copilot has added milk…"
+//   B. simple past IMMEDIATELY after "I" — "I added milk…" (no room for a modal in between)
+const claim = (verbs: string, obj: string) => new RegExp(
+  `(?:(?:i'?ve|i have|(?:the |your )?(?:family'?s )?copilot has|assistant has)[^.!?]{0,50}\\b(?:${verbs})` +
+  `|\\bi (?:just )?(?:${verbs}))\\b[^.!?]{0,70}\\b(?:${obj})\\b`, 'i');
+const CLAIM_FAMILIES: { re: RegExp; action: string; label: string }[] = [
+  { re: claim('added|put', 'shopping|list'), action: 'add_shopping_item', label: 'adding a shopping item' },
+  { re: claim('added|created|assigned|set up', 'chores?'), action: 'add_chore', label: 'adding a chore' },
+  { re: claim('added|created|scheduled|put|booked', 'calendar|appointments?|events?'), action: 'create_event', label: 'creating a calendar event' },
+  { re: claim('scheduled|booked', 'for|at|on'), action: 'create_event', label: 'scheduling something' },
+];
+
+// Returns critic issues for every completed-action claim the reply makes that actions[] doesn't back.
+export function verifyActionClaims(reply: string, actions: { type?: string }[]): ActionIssue[] {
+  const text = String(reply || '');
+  const have = new Set((Array.isArray(actions) ? actions : []).map(a => a?.type));
+  const issues: ActionIssue[] = [];
+  for (const fam of CLAIM_FAMILIES) {
+    if (fam.re.test(text) && !have.has(fam.action)) {
+      issues.push({
+        index: -1, type: fam.action,
+        // No "or just soften the wording" escape hatch: given the choice, 2.5-flash rewrote the reply
+        // into an offer and STILL emitted no action (seen live). The parent gave an explicit command —
+        // demand the action; the honesty backstop handles a model that still won't comply.
+        reason: `the reply CLAIMS ${fam.label} was completed, but "actions" does not contain ${fam.action}. `
+          + `The parent gave an explicit command — you MUST include the matching ${fam.action} action in "actions" this time`,
+      });
+      break; // one claim issue per pass is enough signal for the retry
+    }
+  }
+  return issues;
+}
+
+// Final backstop when the critic loop couldn't recover the action: refuse to let the false claim
+// stand (same convention as the agent path's detectUnbackedClaims — append an honest correction).
+export function unbackedClaimCorrection(reply: string, actions: { type?: string }[]): string | null {
+  return verifyActionClaims(reply, actions).length
+    ? '⚠️ Correction: that isn\'t saved yet — nothing was actually added this turn. Say it as a command again and I\'ll stage it for real.'
+    : null;
+}
