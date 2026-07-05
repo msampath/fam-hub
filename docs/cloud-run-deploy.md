@@ -74,7 +74,9 @@ gcloud run deploy concierge-agent \
   --min-instances 1 \
   --set-env-vars GOOGLE_GENAI_USE_VERTEXAI=FALSE \
   --set-env-vars COPILOT_MODEL=gemini-2.5-flash \
+  --set-env-vars CONCIERGE_FALLBACK=gemini-flash-lite-latest,gemini-2.5-flash-lite \
   --set-env-vars GEMINI_API_KEY=YOUR_GEMINI_KEY \
+  --set-env-vars GOOGLE_MAPS_API_KEY=YOUR_MAPS_KEY \
   --set-env-vars SUPABASE_URL=https://YOURPROJ.supabase.co \
   --set-env-vars SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
 ```
@@ -83,7 +85,16 @@ Why these flags:
 - **`--memory 2Gi --cpu 2 --concurrency 4`** — each `/chat` spawns **7 Node MCP children** (one per specialist). High concurrency × 7 children would exhaust memory; cap it.
 - **`--min-instances 1`** — keeps one instance warm so the MCP children don't cold-start mid-demo (the documented session-timeout risk). **Set back to 0 after the demo to stop paying for idle.**
 - **`--timeout 300`** — multi-agent runs make 3–5 model calls; the default 60s can clip a slow outings loop.
+- **`CONCIERGE_FALLBACK`** — comma-separated model chain tried in order when the primary throws a
+  transient 503/429 (Gemini flash capacity spikes are real; without a chain, one spike 502s the agent —
+  found live).
 - **`SUPABASE_URL` + `SUPABASE_ANON_KEY`** — forwarded to the MCP child so writes persist under the visitor's JWT (RLS-scoped). Without them the agent runs validate-only.
+- **`GOOGLE_MAPS_API_KEY`** — ALSO forwarded to the MCP child (it inherits the full service env): it powers
+  `find_places` name lookup via Places Text Search. Without it the tool degrades to a keyless OSM fallback
+  that is **category-only** — a name ask like "dinner at Din Tai Fung" finds nothing (found live: the agent
+  answered "couldn't find it near Sammamish" while the web service, which had the key, grounded fine).
+  Optional extras the MCP `web_search` chain will use if present: `TAVILY_API_KEY`, `BRAVE_API_KEY`,
+  `GOOGLE_CSE_KEY`+`GOOGLE_CSE_ID` (absent all three it falls back to a fragile keyless scrape).
 
 **Copy the service URL** it prints, e.g. `https://concierge-agent-abc123-uc.a.run.app`. You need it in step 3.
 
@@ -129,6 +140,8 @@ gcloud run deploy family-hub-web \
   --memory 1Gi \
   --min-instances 1 \
   --set-env-vars GEMINI_API_KEY=YOUR_GEMINI_KEY \
+  --set-env-vars GOOGLE_MAPS_API_KEY=YOUR_MAPS_KEY \
+  --set-env-vars TICKETMASTER_API_KEY=YOUR_TICKETMASTER_KEY \
   --set-env-vars VITE_SUPABASE_URL=https://YOURPROJ.supabase.co \
   --set-env-vars VITE_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY \
   --set-env-vars AGENT_BASE_URL=https://concierge-agent-abc123-uc.a.run.app \
@@ -148,6 +161,11 @@ to boot (found live; Cloud Run kept serving the last healthy revision, which mas
 gcloud run services update family-hub-web --region us-central1 \
   --update-env-vars APP_URL=https://family-hub-web-xyz789-uc.a.run.app
 ```
+
+Grounding keys (the copilot degrades honestly without them, but the demo loses its teeth):
+- **`GOOGLE_MAPS_API_KEY`** — real nearby venues + drive times in the quick-path FACTS. Same key the agent
+  service needs (see step 1) — setting it on ONE service does not cover the other.
+- **`TICKETMASTER_API_KEY`** — real ticketed events in the FACTS (web service only; the agent has no events tool).
 
 What each digest var does (all three required to actually send mail):
 - **`DIGEST_TRIGGER_SECRET`** — enables `POST /internal/run-digest` **and auto-disables** the in-process 5-min interval (so multi-instance Cloud Run won't send duplicates).

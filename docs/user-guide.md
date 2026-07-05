@@ -179,6 +179,7 @@ The ⚙ gear opens Manage:
 | I want to… | Do this |
 | --- | --- |
 | Plan a weekend outing | Ask the Copilot: *"plan a zoo day Saturday"* — real venues, drive times, weather |
+| Book a table at a restaurant | *"Dinner reservation at Din Tai Fung"* — it finds the real place near you and stages the handoff |
 | Get help booking | Ask for the plan; open **Actions** → the handoff opens the real page + your details |
 | Cook something | Tell the Copilot the dish — ingredients appear on the right store lists |
 | Give a kid a new chore | *"Add a chore for Ava to feed the fish every morning"* or ＋ Add chore |
