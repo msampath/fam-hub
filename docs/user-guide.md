@@ -138,6 +138,8 @@ Things to know:
   because no payment capability exists anywhere in the system.
 - **Attachments:** the 📎 button turns a photo of a flyer or schedule into event suggestions.
 - **History & Modify:** past turns are kept per device; staged items can be modified before approval.
+- **It stays in its lane:** ask it for homework help, code, or trivia and it politely declines and steers
+  back to family plans — it's the household's copilot, not a general chatbot.
 
 ## 10. Email scans — bills, packages, kids' events
 

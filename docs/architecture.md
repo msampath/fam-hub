@@ -122,6 +122,9 @@ Security is **server-authoritative**, never trusted to the model:
 - **Untrusted content** — fetched web pages and stored documents are sanitized and treated as data, never as instructions.
 - **SSRF guard** — the scraper resolves + pins IPs and blocks internal ranges (incl. redirects/rebinding).
 - **Honesty guard** — the agent can't claim it did something a tool didn't actually do that turn.
+- **Scope guard** — both engines uniformly decline off-domain asks (code, homework, general math, essays)
+  with a one-line redirect back to household work, and only ever speak as "the family's copilot" (or the
+  name the family gave it) — never as a model or an internal codename.
 - **Kid mode** — a per-device lock that hides Manage/Approvals/Actions/Import and every destructive tap;
   the ask-input stays because destructive tools are confirm-tier by construction (a kid's request can only
   stage a draft a parent reviews). Exit = 3-second hold + the step-up PIN when set.
