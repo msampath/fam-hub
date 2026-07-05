@@ -70,7 +70,7 @@ Cloud Scheduler ─▶ morning agent: digest email + a grounded planner pass tha
 | **Agent CLI** | [`agent/README.md`](./agent/README.md) | `adk run concierge` / `adk web` |
 | **Antigravity** | (build loop) | Ran an **early dev pass**, then a detailed **code review of the shipped dark-mode shell** (UI/UX · responsive design · accessibility) — the project started as a Google AI Studio app; the main dev loop later ran in Claude Code; shown in the demo video |
 
-> **More docs:** architecture diagrams → [`docs/architecture.md`](./docs/architecture.md).
+> **More docs:** illustrated user guide (every feature, with screenshots) → [`docs/user-guide.md`](./docs/user-guide.md) · architecture diagrams → [`docs/architecture.md`](./docs/architecture.md).
 
 ---
 
