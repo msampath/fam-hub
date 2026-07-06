@@ -175,6 +175,23 @@ export interface Goal extends Authored {
                                  // "Continue" can resume self-sufficiently even after a reload/new session
 }
 
+// The weekly dinner plan (agentic meal planner). ONE plan per weekStart — set_meal_plan upserts by
+// week (replace, not merge) so "swap Thursday to rajma" is a clean re-issue. `source` marks whether
+// the family dictated the dish ('given') or the agent proposed it ('generated' — ✨ in the strip).
+// Deliberately NOT calendar events (owner decision): dinners live in a Today strip + the briefing.
+export interface MealPlanDay {
+  date: string;                   // YYYY-MM-DD
+  dish: string;                   // "Paneer butter masala"
+  note?: string;                  // "we're out" / "quick — soccer night"
+  source?: 'given' | 'generated';
+}
+export interface MealPlan extends Authored {
+  id: string;
+  weekStart: string;              // Monday of the week, YYYY-MM-DD — the upsert key
+  days: MealPlanDay[];            // ≤7, unique dates, sorted
+  status: 'active' | 'archived';
+}
+
 export interface Chore extends Authored {
   id: string;
   title: string;

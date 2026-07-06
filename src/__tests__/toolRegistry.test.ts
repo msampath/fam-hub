@@ -19,7 +19,7 @@ describe('toolRegistry allowlist parity', () => {
   });
   it('registers exactly the known tools (home_control deferred to C2 — not registered yet)', () => {
     expect([...ALLOWED_COPILOT_ACTIONS].sort()).toEqual(
-      ['add_chore', 'add_shopping_item', 'add_to_cart', 'clear_chores', 'create_event', 'delete_chore', 'delete_document', 'delete_event', 'delete_shopping_item', 'move_document', 'reserve', 'set_goal', 'update_chore', 'update_event'],
+      ['add_chore', 'add_shopping_item', 'add_to_cart', 'clear_chores', 'create_event', 'delete_chore', 'delete_document', 'delete_event', 'delete_shopping_item', 'move_document', 'reserve', 'set_goal', 'set_meal_plan', 'update_chore', 'update_event'],
     );
   });
   it('doc tools: move = auto (reversible), delete = confirm (destructive)', () => {
@@ -81,6 +81,41 @@ describe('set_goal tool (A6 — goals as tracked objects, auto tier, client-owne
   it('carries the gathered `context` (so Continue resumes without re-asking)', () => {
     const goal = TOOL_REGISTRY.set_goal.validate({ id: 'goal-x', text: 'Rainier trip', context: 'Date: Jul 6; venue: Paradise; party 4' }, ctx) as any;
     expect(goal.context).toBe('Date: Jul 6; venue: Paradise; party 4');
+  });
+});
+
+describe('set_meal_plan tool (weekly dinner planner, auto tier, client-owned)', () => {
+  it('is auto-tier auto-apply', () => {
+    expect(TOOL_REGISTRY.set_meal_plan.riskTier).toBe('auto');
+    expect(TOOL_REGISTRY.set_meal_plan.applyMode).toBe('auto');
+  });
+  it('builds a sorted week, weekStart = Monday of the earliest day, clamps + drops garbage', () => {
+    const plan = TOOL_REGISTRY.set_meal_plan.validate({ days: [
+      { date: '2026-06-24', dish: 'Tacos', note: 'quick — soccer night' },        // Wed
+      { date: '2026-06-22', dish: 'Paneer butter masala', source: 'given' },      // Mon
+      { date: '2026-06-23', dish: 'X'.repeat(200), source: 'nonsense' },          // dish clamped, source dropped
+      { date: '2026-09-01', dish: 'Too far out' },                                // outside today+21 → dropped
+      { date: 'garbage', dish: 'Bad date' },
+      { date: '2026-06-24', dish: 'Rajma', source: 'generated' },                 // dupe date — LAST wins
+    ] }, ctx) as any;
+    expect(plan.weekStart).toBe('2026-06-22');
+    expect(plan.status).toBe('active');
+    expect(plan.id).toMatch(/^meal-/);
+    expect(plan.days.map((d: any) => d.date)).toEqual(['2026-06-22', '2026-06-23', '2026-06-24']);
+    expect(plan.days[0]).toEqual({ date: '2026-06-22', dish: 'Paneer butter masala', source: 'given' });
+    expect(plan.days[1].dish).toHaveLength(80);
+    expect(plan.days[1].source).toBeUndefined();
+    expect(plan.days[2]).toMatchObject({ dish: 'Rajma', source: 'generated' });
+  });
+  it('weekStart lands on Monday even when the earliest day is a Sunday', () => {
+    const plan = TOOL_REGISTRY.set_meal_plan.validate({ days: [{ date: '2026-06-21', dish: 'Roast chicken' }] }, ctx) as any;
+    expect(plan.weekStart).toBe('2026-06-15'); // 2026-06-21 is a Sunday → its week's Monday
+  });
+  it('null when nothing valid survives (empty, garbage, or all out-of-window)', () => {
+    expect(TOOL_REGISTRY.set_meal_plan.validate({}, ctx)).toBeNull();
+    expect(TOOL_REGISTRY.set_meal_plan.validate({ days: [] }, ctx)).toBeNull();
+    expect(TOOL_REGISTRY.set_meal_plan.validate({ days: [{ date: '2025-01-01', dish: 'Ancient' }] }, ctx)).toBeNull();
+    expect(TOOL_REGISTRY.set_meal_plan.validate({ days: [{ date: '2026-06-24' }] }, ctx)).toBeNull(); // no dish
   });
 });
 

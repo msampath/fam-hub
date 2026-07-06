@@ -39,6 +39,7 @@ import type {
   LibraryDoc,
   Bill,
   Goal,
+  MealPlan,
   DigestPrefs,
   HiddenEvent,
   HouseholdSettings,
@@ -338,6 +339,12 @@ export default function App() {
   // through and stay visible. Household-scoped, persisted; the copilot adds them via the set_goal action.
   const [goalsList, setGoalsList] = useState<Goal[]>(() => {
     const saved = localStorage.getItem('famplan_goals');
+    return safeParseArray(saved);
+  });
+  // Weekly dinner plans (the meal planner) — one per weekStart; the agent writes them via
+  // set_meal_plan. Household-scoped, persisted; surfaces: DinnersStrip, the briefing, MEALS facts.
+  const [mealPlans, setMealPlans] = useState<MealPlan[]>(() => {
+    const saved = localStorage.getItem('famplan_mealplan');
     return safeParseArray(saved);
   });
   // Bills parsed from email by the autonomous auto-scan and PERSISTED so the agent's get_bills can read them.
@@ -703,6 +710,8 @@ export default function App() {
     { dataKey: 'bills',        localKey: 'famplan_bills',           value: billsList,          set: setBillsList,          countsAsLocal: false },
     // Goals the concierge tracks (A6) — household-scoped, not member-keyed.
     { dataKey: 'goals',        localKey: 'famplan_goals',           value: goalsList,          set: setGoalsList,          countsAsLocal: false },
+    // Weekly dinner plans (meal planner) — household-scoped, not member-keyed.
+    { dataKey: 'mealplan',     localKey: 'famplan_mealplan',        value: mealPlans,          set: setMealPlans,          countsAsLocal: false },
     // Daily-briefing email prefs (single-element blob) — household-scoped, not member-keyed.
     { dataKey: 'digestprefs',  localKey: 'famplan_digestprefs',     value: digestPrefs,        set: setDigestPrefs,        countsAsLocal: false },
     // Append-only audit/RL logs — not member-keyed, not "local" (don't pollute a join), persisted.
@@ -731,6 +740,7 @@ export default function App() {
   usePersistedCollection('famplan_documents', 'documents', libraryDocs, householdId, suppressSync);
   usePersistedCollection('famplan_bills', 'bills', billsList, householdId, suppressSync);
   usePersistedCollection('famplan_goals', 'goals', goalsList, householdId, suppressSync);
+  usePersistedCollection('famplan_mealplan', 'mealplan', mealPlans, householdId, suppressSync);
   usePersistedCollection('famplan_digestprefs', 'digestprefs', digestPrefs, householdId, suppressSync);
   usePersistedCollection('famplan_copilotlog', 'copilotlog', copilotLog, householdId, suppressSync);
   usePersistedCollection('famplan_quickaddlog', 'quickaddlog', quickAddLog, householdId, suppressSync);
@@ -768,6 +778,16 @@ export default function App() {
         return next;
       }
       return [{ ...goal, ...authorStamp() }, ...prev].slice(0, 50);
+    });
+  };
+  // Upsert the week's dinner plan (set_meal_plan): REPLACE by weekStart — an adjustment turn re-issues
+  // the whole week, so merge semantics would resurrect swapped-out dishes. Newest week first, cap 8.
+  const upsertMealPlan = (plan: MealPlan) => {
+    setMealPlans(prev => {
+      const rest = prev.filter(p => p.weekStart !== plan.weekStart);
+      return [{ ...plan, ...authorStamp() }, ...rest]
+        .sort((a, b) => b.weekStart.localeCompare(a.weekStart))
+        .slice(0, 8);
     });
   };
   // When a goal-tied action is STAGED for approval, mark the goal's next pending step "blocked" (waiting on
@@ -2916,6 +2936,11 @@ export default function App() {
     const goals = (Array.isArray(actions) ? actions : [])
       .filter(a => a?.tool === 'set_goal' && a.artifact)
       .map(a => a.artifact as Goal);
+    // Meal plans ride the same client-owned channel as goals: set_meal_plan is auto-tier, the
+    // validated MealPlan comes back as the artifact, and the client upserts it (replace-by-week).
+    const plans = (Array.isArray(actions) ? actions : [])
+      .filter(a => a?.tool === 'set_meal_plan' && a.artifact)
+      .map(a => a.artifact as MealPlan);
     const { appliedCount, ledger, summary } = buildAgentActionResult(actions, () => 'led-' + uuid(), authorStamp());
     // Tie this turn's staged approvals to the goal it serves (Phase 1: same-turn association) so approving
     // one ADVANCES the goal's plan (the resume hook in resolveLedgerUpdate). Only the EXTERNAL/booking drafts
@@ -2931,6 +2956,7 @@ export default function App() {
     // So: await the refresh FIRST (pulls the server-applied write), THEN layer the goal + ledger on top.
     if (appliedCount) await refreshHouseholdData(); // auto-tier writes already persisted server-side → resync local
     for (const g of goals) upsertGoal(g);
+    for (const p of plans) upsertMealPlan(p);
     if (staged.length) setActionLedger(prev => [...prev, ...staged].slice(-LEDGER_CAP));
     // (The agent's create_event writes reach the parent's real Google Calendar via the silent auto-push effect
     // when a Push rule is connected — so we no longer stage a redundant "Push N events?" approval here. See the
@@ -2938,12 +2964,13 @@ export default function App() {
     // Each goal-step approval marks the goal's next pending step "waiting on you" (zips in order).
     if (goalId) staged.forEach(e => { if (GOAL_STEP_TOOLS.has(e.tool)) blockGoalStep(goalId, e.id); });
     const goalNote = goals.length ? `🎯 Tracking goal: ${goals[goals.length - 1].text}` : '';
+    const mealNote = plans.length ? `🍽 Dinner plan set — ${plans[plans.length - 1].days.length} day${plans[plans.length - 1].days.length === 1 ? '' : 's'} on the Today strip.` : '';
     // suggest_event is auto-tier + client-owned (like set_goal): the agent's outings picks ride back as
     // tap-to-add chips on this turn's assistant message (rendered by CopilotBar), NOT Approve-queue rows.
     const suggestions = (Array.isArray(actions) ? actions : [])
       .filter(a => a?.tool === 'suggest_event' && a.artifact)
       .map(a => a.artifact as CopilotSuggestion);
-    return { summary: [summary, goalNote].filter(Boolean).join(' '), suggestions };
+    return { summary: [summary, goalNote, mealNote].filter(Boolean).join(' '), suggestions };
   };
 
   // Cloud-agent turn (Gemini ADK multi-agent over MCP). Returns true if it HANDLED the turn; false → the
@@ -3219,6 +3246,7 @@ export default function App() {
     isScanningPantry, pantryScan, handleScanPantryPhoto, confirmPantryScan, dismissPantryScan,
     shoppingAiError, setShoppingAiError,
     goalsList, toggleGoal, deleteGoal, toggleStep,
+    mealPlans,
     choresList, setChoresList,
     authorStamp,
     familyMembers,

@@ -229,6 +229,33 @@ const REGISTRY_TOOL_DEFS: Omit<McpToolDef, 'run'>[] = [
     },
   },
   {
+    name: 'set_meal_plan',
+    description: 'Record the week\'s DINNER PLAN — one entry per day the family gave you (or you '
+      + 'proposed). Auto-applied, reversible; re-issue the WHOLE week to change it (it replaces by '
+      + 'week, so "swap Thursday to rajma" = send the full updated week). Call it FIRST on a meal-plan '
+      + 'ask, before deriving the shopping items. Dates are near-term YYYY-MM-DD; mark days you '
+      + 'proposed yourself source:"generated" (days the family dictated are "given").',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        days: {
+          type: 'array',
+          description: 'One entry per planned day (≤7).',
+          items: {
+            type: 'object',
+            properties: {
+              date: { type: 'string', description: 'The day, YYYY-MM-DD.' },
+              dish: { type: 'string', description: 'The dinner, e.g. "Paneer butter masala".' },
+              note: { type: 'string', description: 'Optional — "we\'re out", "quick — soccer night".' },
+              source: { type: 'string', description: '"given" (family dictated) | "generated" (you proposed).' },
+            },
+          },
+        },
+      },
+      required: ['days'],
+    },
+  },
+  {
     name: 'reserve',
     description: 'Stage a reservation DRAFT — a booking deep-link the parent opens to book themselves. NEVER books or pays (no-payment invariant). Confirm tier.',
     inputSchema: {

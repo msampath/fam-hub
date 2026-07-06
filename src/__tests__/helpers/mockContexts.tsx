@@ -63,6 +63,7 @@ export function makeAppCtx(overrides: Partial<AppCtx> = {}): AppCtx {
     toggleGoal: vi.fn(),
     deleteGoal: vi.fn(),
     toggleStep: vi.fn(),
+    mealPlans: [],
     shoppingAiError: null,
     setShoppingAiError: vi.fn(),
 

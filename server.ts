@@ -864,7 +864,7 @@ export function dedupeActions(actions: any[]): any[] {
 // validation security item. Order-preserving.
 // Exported so a unit test can assert parity with the client Tool Registry (src/utils/toolRegistry.ts
 // ALLOWED_COPILOT_ACTIONS) — the two allowlists must never drift.
-export const ALLOWED_COPILOT_ACTIONS = new Set(['create_event', 'update_event', 'delete_event', 'add_chore', 'add_shopping_item', 'reserve', 'add_to_cart', 'move_document', 'delete_document', 'delete_chore', 'clear_chores', 'update_chore', 'delete_shopping_item', 'set_goal']);
+export const ALLOWED_COPILOT_ACTIONS = new Set(['create_event', 'update_event', 'delete_event', 'add_chore', 'add_shopping_item', 'reserve', 'add_to_cart', 'move_document', 'delete_document', 'delete_chore', 'clear_chores', 'update_chore', 'delete_shopping_item', 'set_goal', 'set_meal_plan']);
 // Collision key for find-vs-create: date + a normalized title (lowercased, punctuation/whitespace
 // collapsed) so a model paraphrase ("Zoo!" vs "zoo") still matches an existing calendar event.
 function eventCollisionKey(start: any, title: any): string {

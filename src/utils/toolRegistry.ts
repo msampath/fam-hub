@@ -18,6 +18,7 @@ import {
   buildShoppingItemRef,
   buildChoreUpdate,
   buildGoalFromPayload,
+  buildMealPlanFromPayload,
   normalizeShoppingItems,
   buildReservationDraft,
   buildCartDraft,
@@ -90,6 +91,14 @@ export const TOOL_REGISTRY: Record<string, ConciergeTool> = {
     riskTier: 'auto',
     applyMode: 'auto',
     validate: (p) => buildGoalFromPayload(p),
+  },
+  // The weekly dinner plan — auto tier (reversible, internal), client-owned like set_goal (NOT in
+  // TOOL_COLLECTION): the client upserts it by weekStart into the mealplan collection on ingest.
+  set_meal_plan: {
+    name: 'set_meal_plan',
+    riskTier: 'auto',
+    applyMode: 'auto',
+    validate: (p, ctx) => buildMealPlanFromPayload(p, ctx.today),
   },
   add_shopping_item: {
     name: 'add_shopping_item',

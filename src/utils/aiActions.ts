@@ -2,9 +2,10 @@
 // These are the trust boundary for model output: they clamp/coerce every field before
 // it becomes app data. Kept pure (no React/state) so they're unit-testable; the App
 // handlers are thin glue that call these then the state setters.
-import type { CalendarEvent, Chore, Category, FamilyMember, ShoppingItem, Goal, GoalStep, CopilotSuggestion } from '../types';
+import type { CalendarEvent, Chore, Category, FamilyMember, ShoppingItem, Goal, GoalStep, CopilotSuggestion, MealPlan, MealPlanDay } from '../types';
 import { uuid } from './uuid';
 import { fallbackStore } from '../constants';
+import { parseLocalDate, toLocalDateStr } from './dates';
 
 const VALID_CATEGORIES: Category[] = ['School', 'Camp', 'Sports', 'Arts', 'Holiday', 'Other'];
 
@@ -255,6 +256,36 @@ export function buildGoalFromPayload(p: any): Goal | null {
   // The gathered facts (chosen date, itinerary, decisions) so Continue can resume self-sufficiently. Clamped.
   if (p.context && String(p.context).trim()) goal.context = String(p.context).slice(0, 1000);
   return goal;
+}
+
+// Build a validated MealPlan from an AI `set_meal_plan` payload (the weekly dinner planner). Same
+// contract as set_goal: pure + clamped, client-applied via upsertMealPlan (replace-by-weekStart).
+// Days must be REAL ISO dates inside [today−7 .. today+21] (a dinner plan is near-term by nature —
+// anything else is a model hallucination); dupes collapse (last wins — an adjustment turn re-issues
+// the week), output sorted. Null when nothing valid survives.
+export function buildMealPlanFromPayload(p: any, todayStr: string): MealPlan | null {
+  if (!p || typeof p !== 'object' || !Array.isArray(p.days)) return null;
+  const today = parseLocalDate(todayStr);
+  const lo = new Date(today); lo.setDate(lo.getDate() - 7);
+  const hi = new Date(today); hi.setDate(hi.getDate() + 21);
+  const byDate = new Map<string, MealPlanDay>();
+  for (const d of p.days.slice(0, 14)) {
+    const date = String(d?.date || '').slice(0, 10);
+    const dish = String(d?.dish || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !dish) continue;
+    const t = parseLocalDate(date);
+    if (Number.isNaN(t.getTime()) || toLocalDateStr(t) !== date || t < lo || t > hi) continue;
+    const day: MealPlanDay = { date, dish: dish.slice(0, 80) };
+    if (d?.note && String(d.note).trim()) day.note = String(d.note).trim().slice(0, 200);
+    if (d?.source === 'given' || d?.source === 'generated') day.source = d.source;
+    byDate.set(date, day);
+  }
+  const days = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date)).slice(0, 7);
+  if (!days.length) return null;
+  // weekStart = the Monday of the earliest day (getDay(): 0=Sun → back 6; 1=Mon → back 0).
+  const first = parseLocalDate(days[0].date);
+  first.setDate(first.getDate() - ((first.getDay() + 6) % 7));
+  return { id: 'meal-' + uuid(), weekStart: toLocalDateStr(first), days, status: 'active' };
 }
 
 // Stable key for a copilot suggestion (date + lowercased title) — used to mark which suggestions

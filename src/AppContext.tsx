@@ -1,5 +1,5 @@
 import React, { createContext, useContext } from 'react';
-import type { ShoppingItem, PantryItem, Chore, Reward, Redemption, XpBankEntry, FamilyMember, Category, Authored, LedgerEntry, CopilotSuggestion, DigestPrefs, Goal, Routine } from './types';
+import type { ShoppingItem, PantryItem, Chore, Reward, Redemption, XpBankEntry, FamilyMember, Category, Authored, LedgerEntry, CopilotSuggestion, DigestPrefs, Goal, MealPlan, Routine } from './types';
 import type { PantryDiff } from './utils/visionPantry';
 import type { RoutineCandidate } from './utils/routineMiner';
 import type { GeneratedChore } from './utils/chorePlan';
@@ -73,6 +73,8 @@ export interface AppCtx {
   toggleGoal: (id: string) => void;
   deleteGoal: (id: string) => void;
   toggleStep: (goalId: string, stepIndex: number) => void;
+  // Weekly dinner plans (the meal planner) — newest week first; DinnersStrip reads these.
+  mealPlans: MealPlan[];
   setShoppingAiError: React.Dispatch<React.SetStateAction<string | null>>;
 
   // Chores
