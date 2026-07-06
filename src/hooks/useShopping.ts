@@ -17,8 +17,8 @@ export interface UseShoppingDeps {
   // Household-defined store lists (Phase-5) — already sanitized by App (never empty). Falls back to
   // the SHOP_STORES defaults when omitted (tests / pre-settings render).
   storeList?: string[];
-  // Which list maps to the Kroger cart (the dish-ask auto-offer filter). Default 'Grocery Store'.
-  krogerListStore?: string;
+  // Lists with a Kroger store BOUND to them (the dish-ask auto-offer only fires for these).
+  boundLists?: string[];
 }
 
 export interface UseShopping {
@@ -40,9 +40,9 @@ export interface UseShopping {
   confirmPantryScan: () => void;
   dismissPantryScan: () => void;
   shoppingAiError: string | null; setShoppingAiError: Dispatch<SetStateAction<string | null>>;
-  // Kroger dish-ask auto-offer (step 5): after a recipe/meal-plan ask adds grocery items, offer a
-  // one-tap "send to cart" — the offer only; the cart write still goes through the confirm Approval.
-  krogerOffer: { texts: string[] } | null;
+  // Kroger dish-ask auto-offer (step 5): after a recipe/meal-plan ask adds items to a BOUND list,
+  // offer a one-tap "send to cart" — the offer only; the write still rides the confirm Approval.
+  krogerOffer: { texts: string[]; store: string } | null;
   dismissKrogerOffer: () => void;
   appendShoppingItems: (items: { text?: string; store?: string }[]) => number;
   handleAddPantryItem: () => void;
@@ -55,9 +55,9 @@ export interface UseShopping {
 // Shopping + pantry domain: store list state, the manual add-item form fields, pantry inventory, and
 // the AI helpers (recipe→list, pantry→restock). appendShoppingItems is exposed because the copilot /
 // quick-add path in App also appends shopping items through it.
-export function useShopping({ authorStamp, storeList, krogerListStore }: UseShoppingDeps): UseShopping {
+export function useShopping({ authorStamp, storeList, boundLists }: UseShoppingDeps): UseShopping {
   const VALID_STORES = (storeList && storeList.length ? storeList : SHOP_STORES) as readonly ShopStore[];
-  const krogerStoreList = krogerListStore || 'Grocery Store';
+  const BOUND = boundLists || [];
 
   const [shoppingList, setShoppingList] = useState<ShoppingItem[]>(() => {
     const saved = localStorage.getItem('famplan_shopping');
@@ -81,15 +81,23 @@ export function useShopping({ authorStamp, storeList, krogerListStore }: UseShop
   const [isScanningPantry, setIsScanningPantry] = useState(false);
   const [pantryScan, setPantryScan] = useState<PantryDiff | null>(null); // detected-vs-pantry diff awaiting confirm
   const [shoppingAiError, setShoppingAiError] = useState<string | null>(null);
-  // Kroger dish-ask auto-offer (step 5): the grocery-store texts the last recipe/meal ask just added.
-  const [krogerOffer, setKrogerOffer] = useState<{ texts: string[] } | null>(null);
+  // Kroger dish-ask auto-offer (step 5): the last recipe/meal batch's items on ONE bound list.
+  const [krogerOffer, setKrogerOffer] = useState<{ texts: string[]; store: string } | null>(null);
   const dismissKrogerOffer = () => setKrogerOffer(null);
 
-  // Kroger-carried items from an AI batch — the ones on the household's Kroger-mapped list
-  // (settings.krogerListStore, default 'Grocery Store'). Items routed to OTHER lists (Costco,
-  // Indian Store, custom) deliberately stay on their own lists (the acceptance contract).
-  const groceryTexts = (items: { text?: string; store?: string }[]) =>
-    normalizeShoppingItems(items, VALID_STORES).filter(i => i.store === krogerStoreList).map(i => i.text);
+  // The offerable slice of an AI batch: items on BOUND lists only, grouped by list — the offer takes
+  // the bound list holding the MOST batch items (typically the grocery list); other bound lists keep
+  // their own per-list Send buttons. Unbound lists (Indian Store, custom) stay list-only by design.
+  const offerFor = (items: { text?: string; store?: string }[]): { texts: string[]; store: string } | null => {
+    if (!BOUND.length) return null;
+    const byStore = new Map<string, string[]>();
+    for (const i of normalizeShoppingItems(items, VALID_STORES)) {
+      if (!BOUND.includes(i.store)) continue;
+      byStore.set(i.store, [...(byStore.get(i.store) || []), i.text]);
+    }
+    const best = [...byStore.entries()].sort((a, b) => b[1].length - a[1].length)[0];
+    return best ? { store: best[0], texts: best[1] } : null;
+  };
 
   // Append AI/quick-add items through the merge helper so a batch NEVER duplicates against the live
   // list (a checked-off "milk" gets re-activated, not doubled). Returns added + re-activated so the
@@ -128,8 +136,8 @@ export function useShopping({ authorStamp, storeList, krogerListStore }: UseShop
       const added = appendShoppingItems(data.items || []);
       if (added === 0) throw new Error('No ingredients found — try a more detailed recipe or a clearer dish name.');
       setRecipeInput('');
-      const carried = groceryTexts(data.items || []);
-      if (carried.length) setKrogerOffer({ texts: carried });
+      const offer = offerFor(data.items || []);
+      if (offer) setKrogerOffer(offer);
     } catch (err: any) {
       setShoppingAiError(err.message || 'Recipe parsing failed.');
     } finally {
@@ -182,8 +190,8 @@ export function useShopping({ authorStamp, storeList, krogerListStore }: UseShop
       const data = await res.json();
       const added = appendShoppingItems(data.items || []);
       setMealPlan(Array.isArray(data.meals) ? data.meals.slice(0, 3) : []);
-      const carried = added > 0 ? groceryTexts(data.items || []) : [];
-      if (carried.length) setKrogerOffer({ texts: carried });
+      const offer = added > 0 ? offerFor(data.items || []) : null;
+      if (offer) setKrogerOffer(offer);
     } catch (err: any) {
       setShoppingAiError(err.message || 'Meal planning failed.');
     } finally {

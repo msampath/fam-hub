@@ -125,30 +125,48 @@ describe('ShoppingPage', () => {
     expect(updater(list)[0].completed).toBe(false);
   });
 
-  it('dish-ask auto-offer: sends the offered texts to Kroger and dismisses (step 5)', async () => {
+  const QFC = { locationId: '70100658', name: 'Fred Meyer - Issaquah' };
+
+  it('dish-ask auto-offer: sends the offered texts to the BOUND store and dismisses (step 5)', async () => {
     const user = userEvent.setup();
     const { ctx } = renderWithApp(<ShoppingPage />, {
-      krogerOffer: { texts: ['paneer', 'butter'] }, krogerStoreName: 'QFC',
+      krogerOffer: { texts: ['paneer', 'butter'], store: 'Grocery Store' },
+      storeBindings: { 'Grocery Store': QFC },
     });
-    expect(screen.getByText(/Send the 2 grocery items you just added to your QFC cart/)).toBeInTheDocument();
+    expect(screen.getByText(/Send the 2 Grocery Store items you just added to your Fred Meyer - Issaquah cart/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Send to cart' }));
-    expect(ctx.sendShoppingToKroger).toHaveBeenCalledWith(['paneer', 'butter']);
+    expect(ctx.sendShoppingToKroger).toHaveBeenCalledWith(['paneer', 'butter'], QFC.locationId, QFC.name);
     expect(ctx.dismissKrogerOffer).toHaveBeenCalled();
   });
 
-  it('dish-ask auto-offer stays hidden without a connected store, on dismiss, and in kid mode', async () => {
+  it('dish-ask auto-offer stays hidden without a binding, on dismiss, and in kid mode', async () => {
     const user = userEvent.setup();
-    // No connected store → no banner even with an offer pending.
-    renderWithApp(<ShoppingPage />, { krogerOffer: { texts: ['paneer'] }, krogerStoreName: null });
+    // Offer for a list with NO binding → no banner.
+    renderWithApp(<ShoppingPage />, { krogerOffer: { texts: ['paneer'], store: 'Indian Store' }, storeBindings: { 'Grocery Store': QFC } });
     expect(screen.queryByText(/Send the/)).not.toBeInTheDocument();
     // Kid mode → hidden.
-    renderWithApp(<ShoppingPage />, { krogerOffer: { texts: ['paneer'] }, krogerStoreName: 'QFC', kidMode: true });
+    renderWithApp(<ShoppingPage />, { krogerOffer: { texts: ['paneer'], store: 'Grocery Store' }, storeBindings: { 'Grocery Store': QFC }, kidMode: true });
     expect(screen.queryByText(/Send the/)).not.toBeInTheDocument();
     // "Not now" → dismiss only, no send.
-    const { ctx } = renderWithApp(<ShoppingPage />, { krogerOffer: { texts: ['paneer'] }, krogerStoreName: 'QFC' });
+    const { ctx } = renderWithApp(<ShoppingPage />, { krogerOffer: { texts: ['paneer'], store: 'Grocery Store' }, storeBindings: { 'Grocery Store': QFC } });
     await user.click(screen.getByRole('button', { name: 'Not now' }));
     expect(ctx.dismissKrogerOffer).toHaveBeenCalled();
     expect(ctx.sendShoppingToKroger).not.toHaveBeenCalled();
+  });
+
+  it('a BOUND list gets its own header Send button targeting ITS store; unbound lists get none', async () => {
+    const user = userEvent.setup();
+    const { ctx } = renderWithApp(<ShoppingPage />, {
+      shoppingList: [
+        item({ id: 'g1', text: 'Milk', store: 'Grocery Store' }),
+        item({ id: 'g2', text: 'Done thing', store: 'Grocery Store', completed: true }), // completed → not sent
+        item({ id: 'i1', text: 'Kasuri methi', store: 'Indian Store' }),
+      ],
+      storeBindings: { 'Grocery Store': QFC },
+    });
+    expect(screen.queryByLabelText(/Send the Indian Store list/)).not.toBeInTheDocument();
+    await user.click(screen.getByLabelText('Send the Grocery Store list to Fred Meyer - Issaquah'));
+    expect(ctx.sendShoppingToKroger).toHaveBeenCalledWith(['Milk'], QFC.locationId, QFC.name); // ONLY this list's pending items
   });
 
   it('manually adds an item via the inline form', async () => {

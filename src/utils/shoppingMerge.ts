@@ -7,13 +7,25 @@ import type { ShoppingItem } from '../types';
 
 const norm = (s: string): string => String(s ?? '').trim().toLowerCase();
 
-// The dedupe key is (normalized text + store): the same item on two DIFFERENT store lists is legitimately
-// distinct ("milk" at Costco vs the grocery store), but two "milk" rows on the SAME list never are.
-export const sameItem = (a: { text: string; store: string }, text: string, store: string): boolean =>
-  norm(a.text) === norm(text) && a.store === store;
+// The BASE item: the text with its parenthetical buy-unit(s) stripped — the presence-model key
+// (owner decision). "Garlic (1 head)" ≡ "Garlic (1 bulb)" ≡ "garlic": one garlic row per list,
+// whatever unit wording a model or human used. Falls back to the raw norm when stripping would
+// leave nothing (an item that IS only a parenthetical is garbage anyway, but never keys as '').
+export const baseItem = (text: string): string => {
+  const stripped = String(text ?? '').replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+  return stripped || norm(text);
+};
 
-export const findDuplicate = (list: ShoppingItem[], text: string, store: string): ShoppingItem | undefined =>
-  (list || []).find(i => sameItem(i, text, store));
+// The dedupe key is (BASE item + store): the same item on two DIFFERENT store lists is legitimately
+// distinct ("milk" at Costco vs the grocery store), but two garlic rows on the SAME list never are —
+// regardless of "(1 bulb)" vs "(1 head)" wording.
+export const sameItem = (a: { text: string; store: string }, text: string, store: string): boolean =>
+  baseItem(a.text) === baseItem(text) && a.store === store;
+
+export const findDuplicate = (list: ShoppingItem[], text: string, store: string): ShoppingItem | undefined => {
+  if (!baseItem(text)) return undefined; // a textless/garbage row can never be a duplicate of anything
+  return (list || []).find(i => sameItem(i, text, store));
+};
 
 export type MergeOutcome = 'added' | 'reactivated' | 'exists';
 
@@ -25,9 +37,20 @@ export function mergeShoppingItem(
 ): { list: ShoppingItem[]; outcome: MergeOutcome; item: ShoppingItem } {
   const dup = findDuplicate(list, incoming.text, incoming.store);
   if (!dup) return { list: [incoming, ...list], outcome: 'added', item: incoming };
+  // Presence model: keep the EXISTING row's text (no churn) — except when the incoming carries a
+  // buy-unit parenthetical and the existing doesn't (adopt the more informative wording).
+  const moreInformative = /\(/.test(incoming.text) && !/\(/.test(dup.text);
   if (dup.completed) {
-    const reactivated: ShoppingItem = { ...dup, completed: false, quantity: incoming.quantity || dup.quantity };
+    const reactivated: ShoppingItem = {
+      ...dup, completed: false,
+      text: moreInformative ? incoming.text : dup.text,
+      quantity: incoming.quantity || dup.quantity,
+    };
     return { list: [reactivated, ...list.filter(i => i.id !== dup.id)], outcome: 'reactivated', item: reactivated };
+  }
+  if (moreInformative) {
+    const upgraded: ShoppingItem = { ...dup, text: incoming.text };
+    return { list: list.map(i => (i.id === dup.id ? upgraded : i)), outcome: 'exists', item: upgraded };
   }
   return { list, outcome: 'exists', item: dup }; // already active → nothing to do
 }

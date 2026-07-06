@@ -21,7 +21,8 @@ export default function ShoppingPage() {
     handleSuggestRestock, isSuggestingRestock, shoppingAiError, familyMembers,
     handlePlanMeals, isPlanningMeals, mealPlan,
     handleScanPantryPhoto, isScanningPantry, pantryScan, confirmPantryScan, dismissPantryScan,
-    sendShoppingToKroger, krogerBusy, krogerStoreName,
+    sendShoppingToKroger, krogerBusy,
+    storeBindings,
     krogerOffer, dismissKrogerOffer,
     storeList,
     kidMode,
@@ -107,18 +108,7 @@ export default function ShoppingPage() {
             >
               <ChefHat size={15} /> Recipes
             </button>
-            {!kidMode && krogerStoreName && left > 0 && (
-              <button
-                type="button"
-                disabled={krogerBusy}
-                onClick={() => sendShoppingToKroger(shoppingList.filter(i => !i.completed).map(i => i.text))}
-                className="flex items-center gap-1.5 rounded-[10px] px-3.5 py-1.5 text-sm font-extrabold disabled:opacity-50"
-                style={{ border: `2px solid ${C.emerald}`, background: `${C.emerald}14`, color: C.emerald }}
-                title={`Match your list to products at ${krogerStoreName} and stage a cart for approval`}
-              >
-                🛒 {krogerBusy ? 'Matching…' : `Send to ${krogerStoreName}`}
-              </button>
-            )}
+            {/* Sends live on each BOUND list's header now (one list ↔ one store) — no global send. */}
             {!kidMode && hasCompletedNonStaple && (
               <button
                 type="button"
@@ -135,18 +125,18 @@ export default function ShoppingPage() {
           </div>
         </div>
 
-        {/* Kroger dish-ask auto-offer (step 5): a recipe/meal ask just added grocery items — offer the
-            one-tap send. The actual cart write still stages ONE confirm-tier Approval. */}
-        {!kidMode && krogerOffer && krogerOffer.texts.length > 0 && krogerStoreName && (
+        {/* Kroger dish-ask auto-offer (step 5): a recipe/meal ask just added items to a BOUND list —
+            offer the one-tap send to THAT list's store. The write still stages ONE confirm Approval. */}
+        {!kidMode && krogerOffer && krogerOffer.texts.length > 0 && storeBindings[krogerOffer.store] && (
           <div className="flex flex-wrap items-center justify-between gap-2.5 rounded-[14px] p-3" style={{ border: `2px solid ${C.emerald}`, background: `${C.emerald}0a` }}>
             <span className="text-[13px] font-bold" style={{ color: C.primary }}>
-              🛒 Send the {krogerOffer.texts.length} grocery item{krogerOffer.texts.length === 1 ? '' : 's'} you just added to your {krogerStoreName} cart? You approve the exact cart first.
+              🛒 Send the {krogerOffer.texts.length} {krogerOffer.store} item{krogerOffer.texts.length === 1 ? '' : 's'} you just added to your {storeBindings[krogerOffer.store].name} cart? You approve the exact cart first.
             </span>
             <div className="flex gap-2">
               <button
                 type="button"
                 disabled={krogerBusy}
-                onClick={() => { sendShoppingToKroger(krogerOffer.texts); dismissKrogerOffer(); }}
+                onClick={() => { const b = storeBindings[krogerOffer.store]; sendShoppingToKroger(krogerOffer.texts, b.locationId, b.name); dismissKrogerOffer(); }}
                 className="rounded-[10px] px-3.5 py-1.5 text-[13px] font-extrabold disabled:opacity-50"
                 style={{ border: `2px solid ${C.emerald}`, background: `${C.emerald}14`, color: C.emerald }}
               >
@@ -351,6 +341,20 @@ export default function ShoppingPage() {
               <div key={group.id} className="rounded-[20px] p-5" style={{ border: `2px solid ${C.elevated}`, background: C.card }}>
                 <div className="mb-3.5 flex items-center gap-2.5 pb-3 text-sm font-extrabold uppercase tracking-[0.08em]" style={{ color: C.primary, borderBottom: `2px solid ${C.elevated}` }}>
                   <span>{group.icon}</span>{group.id}
+                  {/* Per-list SEND (the binding model): this list's pending items → ITS bound store. */}
+                  {!kidMode && storeBindings[group.id] && group.items.some(i => !i.completed) && (
+                    <button
+                      type="button"
+                      disabled={krogerBusy}
+                      onClick={() => sendShoppingToKroger(group.items.filter(i => !i.completed).map(i => i.text), storeBindings[group.id].locationId, storeBindings[group.id].name)}
+                      aria-label={`Send the ${group.id} list to ${storeBindings[group.id].name}`}
+                      title={`Match this list to products at ${storeBindings[group.id].name} and stage a cart for approval`}
+                      className="ml-auto rounded-[8px] px-2.5 py-1 text-[11px] font-extrabold normal-case tracking-normal disabled:opacity-50"
+                      style={{ border: `2px solid ${C.emerald}`, background: `${C.emerald}14`, color: C.emerald }}
+                    >
+                      🛒 {krogerBusy ? 'Matching…' : `Send to ${storeBindings[group.id].name}`}
+                    </button>
+                  )}
                   {/* Per-store Clear — ALWAYS present (empties this store's list; staples stay). Kid mode hides it. */}
                   {!kidMode && group.items.some(i => !i.staple) && (
                     <button

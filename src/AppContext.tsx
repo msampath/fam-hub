@@ -15,15 +15,16 @@ export interface AppCtx {
   setShoppingList: React.Dispatch<React.SetStateAction<ShoppingItem[]>>;
   // Kroger cart: match the given item texts to products at the connected store and stage a
   // confirm-tier cart-write approval. krogerStore is set (null when not connected/configured).
-  sendShoppingToKroger: (items: string[]) => void;
-  // Dish-ask auto-offer (step 5): grocery items the last recipe/meal ask added, offered for one-tap
-  // send-to-cart (the write itself still rides the confirm Approval).
-  krogerOffer: { texts: string[] } | null;
+  // Send ONE list's items to ITS bound Kroger store (per-list sends — the binding model).
+  sendShoppingToKroger: (items: string[], locationId: string, storeName: string) => void;
+  // Dish-ask auto-offer (step 5): grocery items the last recipe/meal ask added to a BOUND list,
+  // offered for one-tap send-to-cart (the write itself still rides the confirm Approval).
+  krogerOffer: { texts: string[]; store: string } | null;
   dismissKrogerOffer: () => void;
   krogerBusy: boolean;
-  krogerStoreName: string | null;
-  krogerStoreId: string | null;
-  setKrogerStore: (storeId: string | null, storeName: string | null) => void;
+  // Store ↔ list bindings (list name → Kroger location); legacy single-store config reads through.
+  storeBindings: Record<string, { locationId: string; name: string }>;
+  setStoreBinding: (list: string, binding: { locationId: string; name: string } | null) => void;
   // Household-defined store lists (Phase-5): sanitized, never empty (defaults to SHOP_STORES).
   storeList: string[];
   setStoreList: (stores: string[]) => void;

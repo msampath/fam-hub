@@ -12,6 +12,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { McpToolResult } from './conciergeTools';
 import { familyDataRow, FAMILY_DATA_CONFLICT } from '../utils/familyData';
+import { mergeShoppingItems } from '../utils/shoppingMerge';
 import { getSqliteAdapter, type SqliteAdapter } from '../storage';
 import { getOrCreateHouseholdId } from '../storage/boxConfig';
 import {
@@ -25,6 +26,14 @@ const TOOL_COLLECTION: Record<string, string> = {
   add_chore: 'chores',
   add_shopping_item: 'shopping',
 };
+
+// Collection-aware append builder (runs INSIDE casWrite, on the freshest blob): the `shopping`
+// collection goes through the presence-model MERGE — an agent's "garlic" must never duplicate the
+// list's "Garlic (1 bulb)" (base-item dedupe), and a checked-off match re-activates instead of
+// doubling. Everything else appends raw. This is the server-side half of the client's shoppingMerge
+// contract — the meal-planner's consolidated week lands clean because of it.
+const appendBuild = (dataKey: string, items: any[]) => (cur: any[]): any[] =>
+  dataKey === 'shopping' ? mergeShoppingItems(cur, items).list : [...cur, ...items];
 
 export interface Persistence {
   loadCollection(dataKey: string): Promise<any[]>;       // current blob (for ctx + read-modify-write)
@@ -153,7 +162,7 @@ export class SupabasePersistence implements Persistence {
   // under the lock every append must merge into the FRESHEST blob, and a preloaded snapshot is stale by
   // definition for every call after the first in a parallel burst.
   async append(dataKey: string, items: any[], _current?: any[]): Promise<number> {
-    return this.locked(dataKey, async () => (await this.casWrite(dataKey, cur => [...cur, ...items])).length);
+    return this.locked(dataKey, async () => (await this.casWrite(dataKey, appendBuild(dataKey, items))).length);
   }
 
   async replace(dataKey: string, items: any[]): Promise<void> {
@@ -245,7 +254,7 @@ export class SqlitePersistence implements Persistence {
 
   // `current` (the preloaded blob) is intentionally ignored — CAS needs a fresh versioned load each attempt.
   async append(dataKey: string, items: any[], _current?: any[]): Promise<number> {
-    return (await this.casWrite(dataKey, cur => [...cur, ...items])).length;
+    return (await this.casWrite(dataKey, appendBuild(dataKey, items))).length;
   }
 
   // CAS read-modify-write (move_document / folder-clear): reads the current collection, applies `transform`,

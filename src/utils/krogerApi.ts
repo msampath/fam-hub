@@ -45,6 +45,23 @@ export function shapeLocations(apiJson: any): KrogerStore[] {
   })).filter((s: KrogerStore) => s.locationId && s.name);
 }
 
+// ── Store ↔ list bindings ────────────────────────────────────────────────────────────────────────
+
+export type StoreBindings = Record<string, { locationId: string; name: string }>;
+
+// The ONE reader for "which Kroger store does this LIST send to". Prefers the explicit bindings;
+// falls back to the legacy single-store config (pre-bindings households) as a 'Grocery Store'
+// binding — a pure view, no data migration/rewrite needed.
+export function effectiveBindings(settings?: {
+  storeBindings?: StoreBindings; krogerStoreId?: string; krogerStoreName?: string;
+} | null): StoreBindings {
+  if (settings?.storeBindings && Object.keys(settings.storeBindings).length) return settings.storeBindings;
+  if (settings?.krogerStoreId) {
+    return { 'Grocery Store': { locationId: settings.krogerStoreId, name: settings.krogerStoreName || 'Kroger' } };
+  }
+  return {};
+}
+
 // ── Search terms ─────────────────────────────────────────────────────────────────────────────────
 
 // Root cause of the 2026-07-06 all-unmatched failure: our own buy-unit parentheticals poison Kroger's
@@ -189,6 +206,9 @@ export function buildCartDraftSummary(store: string, matched: MatchedItem[], unm
   const total = matched.reduce((a, m) => a + (m.price || 0), 0);
   const lines = matched.map(m => `${m.text} → ${m.description} (${m.size}${m.price != null ? `, $${m.price.toFixed(2)}` : ''})`);
   let s = `Add ${matched.length} item${matched.length === 1 ? '' : 's'} to your ${store} cart (~$${total.toFixed(2)}): ${lines.join('; ')}`;
+  // Presence-model flag (owner decision): the list carries generic buy-units, not counts — say so
+  // exactly where the parent approves the cart.
+  if (matched.length) s += '. Quantities default to 1 of each — bump any in the Kroger cart before checkout';
   if (unmatched.length) {
     const failed = unmatched.filter(i => reasons?.[i] === 'search-failed');
     const noMatch = unmatched.filter(i => reasons?.[i] !== 'search-failed');

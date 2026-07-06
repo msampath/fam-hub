@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   buildKrogerAuthUrl, authCodeTokenBody, refreshTokenBody, clientCredentialsBody,
   shapeLocations, shapeProductCandidates, buildMatchPrompt, validateMatchSelections,
-  buildCartAddBody, buildCartDraftSummary, krogerSearchTerm, krogerFallbackTerm, type ProductCandidate,
+  buildCartAddBody, buildCartDraftSummary, krogerSearchTerm, krogerFallbackTerm, effectiveBindings, type ProductCandidate,
 } from '../utils/krogerApi';
 
 const PANEER_CANDS: ProductCandidate[] = [
@@ -63,6 +63,22 @@ describe('search terms (the parenthetical bug)', () => {
       { 'unicorn fruit': 'no-products', butter: 'search-failed' });
     expect(s).toContain('no match at this store: unicorn fruit');
     expect(s).toContain('search failed for: butter');
+    // Presence-model flag: the parent is told quantities default to 1 exactly where they approve.
+    expect(s).toContain('Quantities default to 1 of each');
+  });
+});
+
+// Store ↔ list bindings: explicit bindings win; the legacy single-store config reads through as a
+// 'Grocery Store' binding (no data migration); nothing configured → no bindings.
+describe('effectiveBindings', () => {
+  it('prefers explicit bindings, falls back to legacy, else empty', () => {
+    const explicit = { 'Indian Store': { locationId: '123', name: 'Apna Bazar' } };
+    expect(effectiveBindings({ storeBindings: explicit, krogerStoreId: '999', krogerStoreName: 'Old' })).toEqual(explicit);
+    expect(effectiveBindings({ krogerStoreId: '70100658', krogerStoreName: 'FRED Fred Meyer - Issaquah' }))
+      .toEqual({ 'Grocery Store': { locationId: '70100658', name: 'FRED Fred Meyer - Issaquah' } });
+    expect(effectiveBindings({})).toEqual({});
+    expect(effectiveBindings(null)).toEqual({});
+    expect(effectiveBindings({ storeBindings: {} })).toEqual({}); // empty object ≠ configured
   });
 });
 

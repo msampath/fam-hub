@@ -77,6 +77,7 @@ import type { NormalizedMessage } from './utils/email';
 import { matchOwnProfileIndex, healMemberLink } from './utils/identity';
 import { buildDemoSeed } from './utils/demoSeed';
 import { krogerCartAdd } from './utils/krogerClient';
+import { effectiveBindings } from './utils/krogerApi';
 import { LEDGER_APPLIERS } from './utils/ledgerAppliers';
 import { mineShoppingRoutines } from './utils/routineMiner';
 import { isAgentConfigured, askConciergeAgent, type AgentAction } from './utils/agentClient';
@@ -388,8 +389,10 @@ export default function App() {
   // Household-defined store lists (Phase-5): sanitized once here, threaded everywhere (hook, context,
   // AI prompt bodies, the copilot apply path). Never empty — defaults to SHOP_STORES.
   const storeList = useMemo(() => sanitizeStoreList(settings[0]?.storeList), [settings]);
+  // Store ↔ list bindings (each Kroger store ties to ONE list); legacy single-store config reads through.
+  const storeBindings = useMemo(() => effectiveBindings(settings[0]), [settings]);
   // Shopping + pantry domain (state + recipe/restock AI + shared appendShoppingItems) → useShopping.
-  const shopping = useShopping({ authorStamp, storeList, krogerListStore: settings[0]?.krogerListStore });
+  const shopping = useShopping({ authorStamp, storeList, boundLists: Object.keys(storeBindings) });
   const {
     shoppingList, setShoppingList, newShopText, setNewShopText, newShopStore, setNewShopStore,
     newShopQty, setNewShopQty, newShopNotes, setNewShopNotes,
@@ -791,31 +794,31 @@ export default function App() {
   // at the household's chosen store, then stage ONE confirm-tier approval whose summary lists exactly
   // what will be added (+ what couldn't be matched). Approving it writes the cart (the applier above).
   const [krogerBusy, setKrogerBusy] = useState(false);
-  const sendShoppingToKroger = async (items: string[]) => {
-    const store = settings[0]?.krogerStoreId;
-    if (!store) { setCopilotMessages(prev => [...prev, { role: 'assistant', text: 'Connect a Kroger store in Manage first.' }]); return; }
+  // Per-LIST send (the binding model): the caller names the target store — one list, one store.
+  const sendShoppingToKroger = async (items: string[], locationId: string, storeName: string) => {
+    if (!locationId) { setCopilotMessages(prev => [...prev, { role: 'assistant', text: 'Link this list to a Kroger store in Manage → Groceries first.' }]); return; }
     if (!items.length) return;
     setKrogerBusy(true);
     try {
       const { matchKrogerItems } = await import('./utils/krogerClient');
-      const { matched, unmatched, reasons } = await matchKrogerItems(items, store);
+      const { matched, unmatched, reasons } = await matchKrogerItems(items, locationId);
       if (!matched.length) {
         // Distinguish "the store doesn't carry these" from a transient search failure (honest reasons
         // came back per item — the flat message here hid a real outage on 2026-07-06).
         const failed = unmatched.filter(i => reasons?.[i] === 'search-failed');
         const text = failed.length === unmatched.length
-          ? `⚠️ Product search failed at ${settings[0]?.krogerStoreName || 'your store'} — nothing was matched; try again in a bit.`
-          : `Couldn't find any of those at ${settings[0]?.krogerStoreName || 'your store'} — ${unmatched.join(', ')} stay on your lists.`;
+          ? `⚠️ Product search failed at ${storeName} — nothing was matched; try again in a bit.`
+          : `Couldn't find any of those at ${storeName} — ${unmatched.join(', ')} stay on your lists.`;
         setCopilotMessages(prev => [...prev, { role: 'assistant', text }]);
         return;
       }
       const { buildCartDraftSummary } = await import('./utils/krogerApi');
       const entry = buildLedgerEntry('ledg-' + uuid(), 'kroger_cart_write', 'confirm', 'pending', {
-        summary: buildCartDraftSummary(settings[0]?.krogerStoreName || 'Kroger', matched, unmatched, reasons),
+        summary: buildCartDraftSummary(storeName, matched, unmatched, reasons),
         payload: { items: matched.map(m => ({ upc: m.upc, quantity: 1, text: m.text })) },
       }, authorStamp());
       setActionLedger(prev => [...prev, entry].slice(-LEDGER_CAP));
-      setCopilotMessages(prev => [...prev, { role: 'assistant', text: `🛒 Staged ${matched.length} item${matched.length === 1 ? '' : 's'} for your ${settings[0]?.krogerStoreName || 'Kroger'} cart — review in Approvals.` }]);
+      setCopilotMessages(prev => [...prev, { role: 'assistant', text: `🛒 Staged ${matched.length} item${matched.length === 1 ? '' : 's'} for your ${storeName} cart — review in Approvals.` }]);
     } catch (err: any) {
       setCopilotMessages(prev => [...prev, { role: 'assistant', text: `⚠️ ${err?.message || 'Kroger matching failed.'}` }]);
     } finally {
@@ -2672,8 +2675,15 @@ export default function App() {
   const setCopilotName = (name: string) =>
     setSettings(prev => [{ ...(prev[0] || {}), copilotName: name.trim().slice(0, 24) }]);
   // Kroger chosen store (household config; the OAuth token stays per-device in localStorage).
-  const setKrogerStore = (storeId: string | null, storeName: string | null) =>
-    setSettings(prev => [{ ...(prev[0] || {}), krogerStoreId: storeId || undefined, krogerStoreName: storeName || undefined }]);
+  // Bind/unbind ONE list ↔ ONE Kroger store. Materializes the effective view (so a legacy
+  // single-store config becomes explicit on first edit) and clears the legacy fields — one source
+  // of truth from then on.
+  const setStoreBinding = (list: string, binding: { locationId: string; name: string } | null) =>
+    setSettings(prev => {
+      const cur = { ...effectiveBindings(prev[0]) };
+      if (binding) cur[list] = binding; else delete cur[list];
+      return [{ ...(prev[0] || {}), storeBindings: cur, krogerStoreId: undefined, krogerStoreName: undefined, krogerListStore: undefined }];
+    });
   // Household store-list editor (Phase-5): sanitize on the way IN so the shared blob never carries junk.
   const setStoreList = (stores: string[]) =>
     setSettings(prev => [{ ...(prev[0] || {}), storeList: sanitizeStoreList(stores) }]);
@@ -3145,7 +3155,8 @@ export default function App() {
 
   const ctx: AppCtx = {
     shoppingList, setShoppingList,
-    sendShoppingToKroger, krogerBusy, krogerStoreName: settings[0]?.krogerStoreName || null,
+    sendShoppingToKroger, krogerBusy,
+    storeBindings, setStoreBinding,
     krogerOffer, dismissKrogerOffer,
     storeList, setStoreList,
     routineCandidates, routines, setRoutines,
@@ -3218,7 +3229,6 @@ export default function App() {
     // The family's name for the copilot (synced household setting)
     copilotName, setCopilotName,
     clearCopilotHistory,
-    setKrogerStore, krogerStoreId: settings[0]?.krogerStoreId || null,
     homeLat: settings[0]?.homeLat ?? null, homeLng: settings[0]?.homeLng ?? null,
 
     // Email scans (B1 bills / B2 packages / B3 kids) + shared suggestion-create (also used by the copilot panel)

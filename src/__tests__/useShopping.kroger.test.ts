@@ -11,24 +11,35 @@ vi.mock('../supabase', () => ({ apiFetch: (...a: any[]) => apiFetch(...a) }));
 import { useShopping } from '../hooks/useShopping';
 
 const json = (body: any, ok = true) => Promise.resolve({ ok, json: () => Promise.resolve(body) });
-const setup = () => renderHook(() => useShopping({ authorStamp: () => ({}) }));
+// Bind ONLY the Grocery Store list (the owner's model: one store ↔ one list); Indian Store/Costco
+// items must never be offered to it.
+const setup = (boundLists: string[] = ['Grocery Store']) =>
+  renderHook(() => useShopping({ authorStamp: () => ({}), boundLists }));
 
 beforeEach(() => { localStorage.clear(); apiFetch.mockReset(); });
 
 describe('useShopping — Kroger dish-ask auto-offer', () => {
-  it('offers ONLY the grocery-store texts after a successful recipe parse (default store counts)', async () => {
+  it('offers ONLY the bound list\'s texts after a successful recipe parse (default store counts)', async () => {
     apiFetch.mockImplementation(() => json({ items: [
-      { text: 'paneer', store: 'Indian Store' },       // stays on its list — NOT offered
+      { text: 'paneer', store: 'Indian Store' },       // unbound list — NOT offered
       { text: 'butter', store: 'Grocery Store' },
       { text: 'tomatoes' },                            // no store → defaults to Grocery Store → offered
-      { text: 'basmati rice 10lb', store: 'Costco' },  // NOT offered
+      { text: 'basmati rice 10lb', store: 'Costco' },  // unbound — NOT offered
     ] }));
     const { result } = setup();
     act(() => result.current.setRecipeInput('paneer butter masala'));
     await act(async () => { await result.current.handleParseRecipe(); });
-    expect(result.current.krogerOffer?.texts).toEqual(['butter', 'tomatoes']);
+    expect(result.current.krogerOffer).toEqual({ store: 'Grocery Store', texts: ['butter', 'tomatoes'] });
     expect(result.current.recipeInput).toBe(''); // the ask itself still completes normally
     act(() => result.current.dismissKrogerOffer());
+    expect(result.current.krogerOffer).toBeNull();
+  });
+
+  it('NO offer at all when no list is bound', async () => {
+    apiFetch.mockImplementation(() => json({ items: [{ text: 'butter', store: 'Grocery Store' }] }));
+    const { result } = setup([]);
+    act(() => result.current.setRecipeInput('toast'));
+    await act(async () => { await result.current.handleParseRecipe(); });
     expect(result.current.krogerOffer).toBeNull();
   });
 
@@ -46,7 +57,7 @@ describe('useShopping — Kroger dish-ask auto-offer', () => {
     const { result } = setup();
     act(() => { result.current.setPantryList([{ id: 'p1', text: 'rice' }]); });
     await act(async () => { await result.current.handlePlanMeals(); });
-    expect(result.current.krogerOffer?.texts).toEqual(['lentils']);
+    expect(result.current.krogerOffer).toEqual({ store: 'Grocery Store', texts: ['lentils'] });
     expect(result.current.mealPlan).toEqual(['Dal', 'Tacos', 'Pasta']);
   });
 });

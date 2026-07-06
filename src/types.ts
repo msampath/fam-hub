@@ -257,14 +257,18 @@ export interface HouseholdSettings {
   // Kroger cart integration — the chosen store is HOUSEHOLD config (shared), but the OAuth refresh
   // token is a per-DEVICE secret kept in localStorage (famplan_kroger_refresh), never in this shared
   // RLS collection — the exact Google-refresh-token precedent.
+  // LEGACY single-store Kroger config (pre-bindings): kept so existing households keep working —
+  // effectiveBindings() reads it as a 'Grocery Store' binding when storeBindings is absent.
   krogerStoreId?: string;
   krogerStoreName?: string;
   // Household-defined store lists (Phase-5): replaces the hardcoded Costco/Indian Store/Grocery/Other
   // set everywhere. Unset → constants.SHOP_STORES defaults (sanitizeStoreList is the shared gate).
   storeList?: string[];
-  // Which of the household's lists maps to the Kroger cart (send-to-cart + the dish-ask auto-offer).
-  // Unset → 'Grocery Store'.
+  // LEGACY (pre-bindings): which list mapped to the single Kroger store. Superseded by storeBindings.
   krogerListStore?: string;
+  // Store ↔ list BINDINGS (owner's model: each store, when added, ties to exactly ONE shopping list).
+  // Keyed by the list name; Kroger-only today, the value shape extends to other retailers later.
+  storeBindings?: Record<string, { locationId: string; name: string }>;
   // Pattern-4 routines the PARENT enabled (mined from the quick-add log, surfaced as Manage toggles —
   // never silently injected). An enabled routine stages a confirm-tier draft on its weekday's digest.
   routines?: Routine[];

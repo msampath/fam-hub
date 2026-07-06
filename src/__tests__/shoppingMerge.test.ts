@@ -1,7 +1,7 @@
 // The "never duplicate" contract: every add path folds through mergeShoppingItem(s). A checked-off
 // match re-activates in place, an active match is a no-op, a different store is distinct.
 import { describe, it, expect } from 'vitest';
-import { mergeShoppingItem, mergeShoppingItems, findDuplicate } from '../utils/shoppingMerge';
+import { mergeShoppingItem, mergeShoppingItems, findDuplicate, baseItem } from '../utils/shoppingMerge';
 import type { ShoppingItem } from '../types';
 
 const item = (over: Partial<ShoppingItem> & { id: string }): ShoppingItem =>
@@ -13,6 +13,29 @@ describe('findDuplicate', () => {
     expect(findDuplicate(list, '  milk ', 'Grocery Store')?.id).toBe('g1');
     expect(findDuplicate(list, 'Milk', 'Costco')).toBeUndefined();
     expect(findDuplicate(list, 'Bread', 'Grocery Store')).toBeUndefined();
+  });
+
+  it('keys on the BASE item — buy-unit parentheticals never make a "different" item (the garlic contract)', () => {
+    const list = [item({ id: 'g1', text: 'Garlic (1 bulb)', store: 'Grocery Store' })];
+    expect(findDuplicate(list, 'Garlic (1 head)', 'Grocery Store')?.id).toBe('g1');
+    expect(findDuplicate(list, 'garlic', 'Grocery Store')?.id).toBe('g1');
+    expect(findDuplicate(list, 'Garlic (4 cloves)', 'Grocery Store')?.id).toBe('g1');
+    expect(baseItem('Garlic (1 bulb)')).toBe('garlic');
+    expect(baseItem('Heavy cream (500 ml carton)')).toBe('heavy cream');
+    expect(baseItem('(weird)')).toBe('(weird)'); // stripping to nothing falls back to the raw norm
+  });
+});
+
+describe('presence-model text rules', () => {
+  it('an active dup keeps ONE row; a more-informative incoming (has a buy-unit) upgrades the text', () => {
+    const bare = [item({ id: 'g1', text: 'garlic' })];
+    const upgraded = mergeShoppingItem(bare, item({ id: 'n', text: 'Garlic (1 head)' }));
+    expect(upgraded.outcome).toBe('exists');
+    expect(upgraded.list).toHaveLength(1);
+    expect(upgraded.list[0].text).toBe('Garlic (1 head)'); // adopted the informative wording
+    // But unit-vs-unit never churns the existing text.
+    const unit = [item({ id: 'g1', text: 'Garlic (1 bulb)' })];
+    expect(mergeShoppingItem(unit, item({ id: 'n', text: 'Garlic (1 head)' })).list[0].text).toBe('Garlic (1 bulb)');
   });
 });
 
