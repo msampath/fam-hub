@@ -18,7 +18,7 @@ import { verifyQuickAdd, buildQuickAddCriticNote, coerceQuickAdd } from './src/u
 import {
   buildKrogerAuthUrl, authCodeTokenBody, refreshTokenBody, clientCredentialsBody,
   shapeLocations, shapeProductCandidates, buildMatchPrompt, validateMatchSelections,
-  buildCartAddBody, KROGER_MATCH_SCHEMA, type ProductCandidate,
+  buildCartAddBody, KROGER_MATCH_SCHEMA, krogerSearchTerm, krogerFallbackTerm, type ProductCandidate,
 } from './src/utils/krogerApi';
 import { buildRevisePrompt } from './src/utils/reviseDraft';
 import { validateExtractedEvents } from './src/utils/extractedEvents';
@@ -2302,18 +2302,37 @@ app.post('/api/kroger/match', requireAuth, aiRateLimit, async (req, res) => {
   try {
     const tok = await getKrogerAppToken();
     if (!tok) return res.status(502).json({ error: 'Kroger is unavailable right now.' });
+    // Search with the CLEANED term — the raw "(1 bulb)"/"(400g pack)" buy-units returned zero/junk
+    // candidates and every item silently unmatched (root-caused live 2026-07-06; probe-verified the
+    // bare nouns match). Zero hits on a >2-word term get ONE simpler retry (last two words). Search
+    // failures are logged per item and carried into the response as honest reasons.
     const candidates: Record<string, ProductCandidate[]> = {};
-    for (const item of items) {
-      const q = new URLSearchParams({ 'filter.term': item, 'filter.locationId': locationId, 'filter.limit': '5' });
+    const searchFailed = new Set<string>();
+    const searchProducts = async (term: string): Promise<ProductCandidate[] | null> => {
+      const q = new URLSearchParams({ 'filter.term': term, 'filter.locationId': locationId, 'filter.limit': '5' });
       const r = await fetchWithTimeout(`https://api.kroger.com/v1/products?${q}`, 10000, { headers: { Authorization: `Bearer ${tok}` } });
-      candidates[item] = r.ok ? shapeProductCandidates(await r.json().catch(() => ({}))) : [];
+      if (!r.ok) { console.warn(`[kroger] product search HTTP ${r.status} for term "${term}"`); return null; }
+      return shapeProductCandidates(await r.json().catch(() => ({})));
+    };
+    for (const item of items) {
+      const term = krogerSearchTerm(item);
+      let found = term ? await searchProducts(term) : [];
+      if (found && !found.length) {
+        const retry = krogerFallbackTerm(term);
+        if (retry) found = await searchProducts(retry);
+      }
+      if (found === null) { searchFailed.add(item); candidates[item] = []; }
+      else {
+        candidates[item] = found;
+        if (!found.length) console.warn(`[kroger] zero candidates for "${item}" (term "${term}") at ${locationId}`);
+      }
     }
     const parsed = await callGeminiJSON(
       buildMatchPrompt(items, candidates),
       'You match grocery-list items to store products. Choose ONLY from the listed candidates; -1 when none truly is the item.',
       KROGER_MATCH_SCHEMA, '{}', undefined, { temperature: 0.2 },
     ).catch(() => null);
-    return res.json(validateMatchSelections(parsed, items, candidates));
+    return res.json(validateMatchSelections(parsed, items, candidates, searchFailed));
   } catch (err) {
     console.error('[kroger] match error:', err);
     return res.status(500).json({ error: 'Product matching failed.' });

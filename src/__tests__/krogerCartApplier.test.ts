@@ -15,7 +15,7 @@ describe('kroger cart write — staged draft ↔ sent body', () => {
     expect(s).toContain('Add 2 items to your QFC Pine Lake cart');
     expect(s).toContain('paneer → Nanak Paneer Cubes');
     expect(s).toContain('basmati rice → Royal Basmati Rice');
-    expect(s).toContain("couldn't match: kasuri methi");
+    expect(s).toContain('no match at this store: kasuri methi');
   });
 
   it('the payload staged from matched items produces a clean cart body (qty defaulted, UPCs intact)', () => {

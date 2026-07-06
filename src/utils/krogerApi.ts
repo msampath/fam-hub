@@ -45,6 +45,30 @@ export function shapeLocations(apiJson: any): KrogerStore[] {
   })).filter((s: KrogerStore) => s.locationId && s.name);
 }
 
+// ── Search terms ─────────────────────────────────────────────────────────────────────────────────
+
+// Root cause of the 2026-07-06 all-unmatched failure: our own buy-unit parentheticals poison Kroger's
+// filter.term — "Garlic (1 bulb)" returns green ONION bulbs (matched on "bulb") and "Paneer (400g
+// pack)" returns NOTHING, while the bare nouns return the right products (probe-verified live at Fred
+// Meyer Issaquah 70100658). So: SEARCH with the clean noun; the parenthetical stays only in the
+// human-facing item text.
+export function krogerSearchTerm(text: string): string {
+  return String(text ?? '')
+    .replace(/\([^)]*\)/g, ' ')  // strip (…) buy-units wherever they sit
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+    .slice(0, 60);
+}
+
+// Second-pass term when the full cleaned term finds nothing: the LAST TWO words usually carry the
+// product noun ("green cardamom pods" → "cardamom pods", "kashmiri red chili powder" → "chili
+// powder"). Null when there's no simpler form to try (≤2 words) — two passes max, no cleverness.
+export function krogerFallbackTerm(term: string): string | null {
+  const words = String(term ?? '').split(' ').filter(Boolean);
+  return words.length > 2 ? words.slice(-2).join(' ') : null;
+}
+
 // ── Product candidates ───────────────────────────────────────────────────────────────────────────
 
 export interface ProductCandidate {
@@ -108,14 +132,22 @@ ${blocks}`;
 }
 
 export interface MatchedItem { text: string; upc: string; description: string; size: string; price: number | null }
-export interface MatchResult { matched: MatchedItem[]; unmatched: string[] }
+// Why an item DIDN'T match — so the Approvals summary can be honest instead of a flat "couldn't
+// match": 'no-products' = the store's search found nothing; 'search-failed' = the search REQUEST
+// failed (transient — retry later); 'rejected' = candidates existed but none truly was the item
+// (the frying-pan defense) or the only pick was out of stock.
+export type UnmatchedReason = 'no-products' | 'search-failed' | 'rejected';
+export interface MatchResult { matched: MatchedItem[]; unmatched: string[]; reasons?: Record<string, UnmatchedReason> }
 
 // Deterministic validation of the model's selections: only REAL indexes for REAL items count; every
 // item ends up exactly once in matched or unmatched (dupes/hallucinated items are ignored).
+// `searchFailed` (from the server's per-item fetch loop) distinguishes a transient search failure
+// from a genuine no-products store.
 export function validateMatchSelections(
   parsed: any,
   items: string[],
   candidates: Record<string, ProductCandidate[]>,
+  searchFailed?: Set<string>,
 ): MatchResult {
   const byItem = new Map<string, number>();
   for (const s of Array.isArray(parsed?.selections) ? parsed.selections : []) {
@@ -124,6 +156,7 @@ export function validateMatchSelections(
   }
   const matched: MatchedItem[] = [];
   const unmatched: string[] = [];
+  const reasons: Record<string, UnmatchedReason> = {};
   for (const item of items) {
     const idx = byItem.get(item);
     const cands = candidates[item] || [];
@@ -132,9 +165,10 @@ export function validateMatchSelections(
       matched.push({ text: item, upc: c.upc, description: c.description, size: c.size, price: c.price });
     } else {
       unmatched.push(item);
+      reasons[item] = searchFailed?.has(item) ? 'search-failed' : cands.length ? 'rejected' : 'no-products';
     }
   }
-  return { matched, unmatched };
+  return { matched, unmatched, reasons };
 }
 
 // ── Cart ─────────────────────────────────────────────────────────────────────────────────────────
@@ -149,10 +183,17 @@ export function buildCartAddBody(items: { upc: string; quantity?: number }[]): {
 }
 
 // Human summary for the confirm-tier Approvals card — the parent approves EXACTLY this text.
-export function buildCartDraftSummary(store: string, matched: MatchedItem[], unmatched: string[]): string {
+// Unmatched items are grouped by their honest reason ("no match at this store" ≠ "search failed —
+// try again"); everything unmatched stays on the lists either way.
+export function buildCartDraftSummary(store: string, matched: MatchedItem[], unmatched: string[], reasons?: Record<string, UnmatchedReason>): string {
   const total = matched.reduce((a, m) => a + (m.price || 0), 0);
   const lines = matched.map(m => `${m.text} → ${m.description} (${m.size}${m.price != null ? `, $${m.price.toFixed(2)}` : ''})`);
   let s = `Add ${matched.length} item${matched.length === 1 ? '' : 's'} to your ${store} cart (~$${total.toFixed(2)}): ${lines.join('; ')}`;
-  if (unmatched.length) s += ` — couldn't match: ${unmatched.join(', ')} (left on your lists)`;
+  if (unmatched.length) {
+    const failed = unmatched.filter(i => reasons?.[i] === 'search-failed');
+    const noMatch = unmatched.filter(i => reasons?.[i] !== 'search-failed');
+    if (noMatch.length) s += ` — no match at this store: ${noMatch.join(', ')} (left on your lists)`;
+    if (failed.length) s += ` — search failed for: ${failed.join(', ')} (try again in a bit)`;
+  }
   return s.slice(0, 900);
 }

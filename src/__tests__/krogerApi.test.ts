@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   buildKrogerAuthUrl, authCodeTokenBody, refreshTokenBody, clientCredentialsBody,
   shapeLocations, shapeProductCandidates, buildMatchPrompt, validateMatchSelections,
-  buildCartAddBody, buildCartDraftSummary, type ProductCandidate,
+  buildCartAddBody, buildCartDraftSummary, krogerSearchTerm, krogerFallbackTerm, type ProductCandidate,
 } from '../utils/krogerApi';
 
 const PANEER_CANDS: ProductCandidate[] = [
@@ -24,6 +24,45 @@ describe('oauth builders', () => {
     expect(authCodeTokenBody('c0de', 'http://x/cb')).toBe('grant_type=authorization_code&code=c0de&redirect_uri=http%3A%2F%2Fx%2Fcb');
     expect(refreshTokenBody('rt')).toBe('grant_type=refresh_token&refresh_token=rt');
     expect(clientCredentialsBody('product.compact')).toBe('grant_type=client_credentials&scope=product.compact');
+  });
+});
+
+// The 2026-07-06 all-unmatched failure: raw buy-unit parentheticals in filter.term returned zero/junk
+// candidates at the real store. These pin the cleaner + the one-retry fallback + the honest reasons.
+describe('search terms (the parenthetical bug)', () => {
+  it('strips buy-unit parentheticals, collapses, lowercases', () => {
+    expect(krogerSearchTerm('Garlic (1 bulb)')).toBe('garlic');
+    expect(krogerSearchTerm('Heavy cream (500 ml carton)')).toBe('heavy cream');
+    expect(krogerSearchTerm('Kashmiri red chili powder (small pack)')).toBe('kashmiri red chili powder');
+    expect(krogerSearchTerm('  Paneer   (400g pack) ')).toBe('paneer');
+    expect(krogerSearchTerm('')).toBe('');
+  });
+
+  it('fallback = last two words, only when the term has more than two', () => {
+    expect(krogerFallbackTerm('green cardamom pods')).toBe('cardamom pods');
+    expect(krogerFallbackTerm('kashmiri red chili powder')).toBe('chili powder');
+    expect(krogerFallbackTerm('heavy cream')).toBeNull();
+    expect(krogerFallbackTerm('garlic')).toBeNull();
+  });
+
+  it('validateMatchSelections carries honest per-item reasons', () => {
+    const items = ['paneer', 'unicorn fruit', 'butter'];
+    const candidates = { paneer: PANEER_CANDS, 'unicorn fruit': [], butter: PANEER_CANDS };
+    const searchFailed = new Set(['butter']); // the butter SEARCH failed (HTTP error), not the store
+    const r = validateMatchSelections(
+      { selections: [{ item: 'paneer', candidateIndex: -1 }] }, // model rejected all paneer candidates
+      items, candidates, searchFailed,
+    );
+    expect(r.unmatched).toEqual(items);
+    expect(r.reasons).toEqual({ paneer: 'rejected', 'unicorn fruit': 'no-products', butter: 'search-failed' });
+  });
+
+  it('buildCartDraftSummary separates "no match at this store" from "search failed"', () => {
+    const matched = [{ text: 'garlic', upc: '0001', description: 'Garlic Bulbs', size: '1 ct', price: 0.99 }];
+    const s = buildCartDraftSummary('Fred Meyer - Issaquah', matched, ['unicorn fruit', 'butter'],
+      { 'unicorn fruit': 'no-products', butter: 'search-failed' });
+    expect(s).toContain('no match at this store: unicorn fruit');
+    expect(s).toContain('search failed for: butter');
   });
 });
 
@@ -102,6 +141,6 @@ describe('cart body + draft summary', () => {
       ['kasuri methi']);
     expect(s).toMatch(/Add 1 item to your QFC Pine Lake cart \(~\$6\.49\)/);
     expect(s).toMatch(/paneer → Nanak Paneer Cubes \(14 oz, \$6\.49\)/);
-    expect(s).toMatch(/couldn't match: kasuri methi \(left on your lists\)/);
+    expect(s).toMatch(/no match at this store: kasuri methi \(left on your lists\)/);
   });
 });

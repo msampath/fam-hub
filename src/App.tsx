@@ -798,14 +798,20 @@ export default function App() {
     setKrogerBusy(true);
     try {
       const { matchKrogerItems } = await import('./utils/krogerClient');
-      const { matched, unmatched } = await matchKrogerItems(items, store);
+      const { matched, unmatched, reasons } = await matchKrogerItems(items, store);
       if (!matched.length) {
-        setCopilotMessages(prev => [...prev, { role: 'assistant', text: `Couldn't find any of those at ${settings[0]?.krogerStoreName || 'your store'} — ${unmatched.join(', ')} stay on your lists.` }]);
+        // Distinguish "the store doesn't carry these" from a transient search failure (honest reasons
+        // came back per item — the flat message here hid a real outage on 2026-07-06).
+        const failed = unmatched.filter(i => reasons?.[i] === 'search-failed');
+        const text = failed.length === unmatched.length
+          ? `⚠️ Product search failed at ${settings[0]?.krogerStoreName || 'your store'} — nothing was matched; try again in a bit.`
+          : `Couldn't find any of those at ${settings[0]?.krogerStoreName || 'your store'} — ${unmatched.join(', ')} stay on your lists.`;
+        setCopilotMessages(prev => [...prev, { role: 'assistant', text }]);
         return;
       }
       const { buildCartDraftSummary } = await import('./utils/krogerApi');
       const entry = buildLedgerEntry('ledg-' + uuid(), 'kroger_cart_write', 'confirm', 'pending', {
-        summary: buildCartDraftSummary(settings[0]?.krogerStoreName || 'Kroger', matched, unmatched),
+        summary: buildCartDraftSummary(settings[0]?.krogerStoreName || 'Kroger', matched, unmatched, reasons),
         payload: { items: matched.map(m => ({ upc: m.upc, quantity: 1, text: m.text })) },
       }, authorStamp());
       setActionLedger(prev => [...prev, entry].slice(-LEDGER_CAP));
