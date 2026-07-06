@@ -1,9 +1,9 @@
 # Contributing to Family-Hub
 
 Thanks for looking under the hood. Family-Hub is AGPL-3.0-or-later; by contributing you agree your
-changes land under the same license. Direction lives in [`planning/roadmap.md`](./planning/roadmap.md)
-(the single roadmap SSOT — check the **non-goals** list before proposing a feature), and the current
-shipped state lives in [`PROJECT_STATUS.md`](./PROJECT_STATUS.md).
+changes land under the same license. Direction is tracked by the maintainer — open an issue to discuss
+a feature before building it (this is a personal two-parent household app; general-purpose task-manager
+features are out of scope).
 
 **Branches:** all work lands on `main` via PR. `initial-push` is the frozen capstone submission
 (tag `capstone-submitted`) — don't target it.
@@ -71,7 +71,7 @@ npm run eval:local    # local Ollama (gpt-oss:20b) — the Decision A numbers
 
 The runner replays golden prompts through the real `/api/copilot` pipeline against a throwaway
 appliance-mode server (no Supabase needed; results land in git-ignored `eval-results/`). The two
-go/no-go gates, defined in [`planning/roadmap.md`](./planning/roadmap.md):
+go/no-go gates:
 
 - **Decision A — quick path.** May a local model serve the Express quick path? **Currently PASS**
   (local 18/18 vs the Gemini baseline's 13/18, scope+safety perfect). Don't regress it.
@@ -90,7 +90,7 @@ go/no-go gates, defined in [`planning/roadmap.md`](./planning/roadmap.md):
 
 - **Tests for behavior changes.** New behavior gets a test; a bug fix gets a test that reproduces it.
 - **No drive-by refactors.** Surgical diffs only — every changed line should trace to the PR's
-  purpose. Standalone refactor sprints are explicitly demoted (see the roadmap's non-goals);
+  purpose. Standalone refactor sprints are explicitly out of scope;
   behavior-preserving cleanups ride along only when a feature already touches that code.
 - Update the docs your change invalidates (README, `docs/`, `.env.example`) in the same PR.
 - Safety invariants are non-negotiable: the no-payment invariant and the server-side risk tiers

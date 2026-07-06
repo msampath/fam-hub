@@ -20,8 +20,7 @@ effort after that. Coordinated disclosure appreciated; you'll be credited unless
 
 ## Security model — what's actually enforced
 
-The full adversarial review is in [`docs/security-review.md`](./docs/security-review.md); the short
-version:
+The short version of the security model:
 
 - **No-payment invariant, by architecture.** The agent never holds payment credentials and has no
   tool that can complete a purchase or transfer. Carts and reservations are **drafts** the parent
@@ -50,10 +49,9 @@ public internet — they are deliberately deferred, not unknown: refresh-token-t
 DNS-rebinding residual, server-side invite-join validation, PIN brute-force throttling, and digest
 endpoint ingress gating, among others.
 
-If you intend a **public or multi-tenant deploy**, read the *"Public-deploy security hardening
-bundle"* in [`planning/roadmap.md`](./planning/roadmap.md) and the findings table in
-[`docs/security-review.md`](./docs/security-review.md) first — and treat that list as gating work,
-not suggestions.
+If you intend a **public or multi-tenant deploy**, treat the deferred items above as gating work,
+not suggestions — and open a security advisory first so the maintainer can share the current
+hardening status.
 
 ## In scope
 

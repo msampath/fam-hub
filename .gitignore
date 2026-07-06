@@ -49,9 +49,13 @@
 /.claude/*
 !/.claude/skills/
 
-# Curated public docs (capstone §9 step 1): all root .md (README + design/plan docs) + the docs/ and
-# planning/ dirs. Raw session scratch (transcripts, external-tool dumps) is re-ignored in section 3.
-!/*.md
+# Public docs, EXPLICITLY allow-listed (never a blanket !/*.md — internal planning/review notes
+# must not be trackable by accident; they live in the git-ignored internal-docs/ instead).
+!/README.md
+!/CHANGELOG.md
+!/CONTRIBUTING.md
+!/SECURITY.md
+!/CLAUDE.md
 !/docs/
 !/planning/
 

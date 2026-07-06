@@ -14,5 +14,5 @@ assignees: ''
 **Alternatives considered**
 
 **Roadmap check**
-<!-- Skim planning/roadmap.md first — is this already queued, or on the explicit non-goals list
+<!-- This is a personal two-parent household app — is your idea in scope for that, or a general-purpose
      (e.g. multi-household/teams/billing, social feeds, full task-manager)? Link the relevant line. -->

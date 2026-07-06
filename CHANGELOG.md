@@ -4,8 +4,8 @@ All notable changes to Family-Hub are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows
 [SemVer](https://semver.org/spec/v2.0.0.html) — pre-1.0, minor releases may change behavior.
-Current shipped state lives in [`PROJECT_STATUS.md`](./PROJECT_STATUS.md); direction lives in
-[`planning/roadmap.md`](./planning/roadmap.md).
+Current shipped state and direction are tracked by the maintainer outside the repo; this file is
+the public record.
 
 ## [Unreleased]
 
@@ -68,8 +68,6 @@ Cloud Run services, their env, and the Supabase config stay frozen until Kaggle 
   email-scan `confidence` field (drop <0.5) + local-slot genConfig, a `requireCloud` flag for the
   OCR/revise-draft paths, and a briefing-compose cross-check of names/dates against the
   deterministic facts.
-- **Roadmap consolidated** — `planning/roadmap.md` is now the single roadmap SSOT, superseding
-  `planning/post-capstone-plan.md` and the roadmap half of `future_ideas.md`.
 
 ### Fixed
 - **Photo-file traversal guard made platform-independent** — `photoPathFor` relied on
@@ -86,9 +84,9 @@ Cloud Run services, their env, and the Supabase config stay frozen until Kaggle 
   `scripts/eval-quickpath.ts`; it now ships (and CONTRIBUTING documents the gotcha).
 
 ### Docs
-- Restored and committed the planning/SSOT corpus (~50 files — `PROJECT_STATUS.md` history,
-  `future_ideas.md`, agent-harness notes, review reports) that had only ever existed untracked in
-  the original dev checkout; secret/PII-scanned first. The corpus now travels with the repo.
+- **Repo docs curated to what a reader needs** — setup + feature documentation (`docs/`) and the
+  capstone assets; internal planning/review notes stay out of the repo by policy (the allow-list
+  `.gitignore` enforces it).
 - **Kroger loop documented end to end** — new `docs/kroger-setup.md` (developer app, per-origin
   redirect URIs, env, the two-level model, the send pipeline, troubleshooting); user-guide/README/
   INSTALL refreshed to the shipped flow; the Kaggle writeup gained an in-window "Added agentic
