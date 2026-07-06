@@ -104,3 +104,19 @@ export function selectAutoPushEvents<T extends { id: string; start?: string }>(
     return start >= fromDate && start <= toDate;
   });
 }
+
+// Auto-PULL gate (W8): should the once-per-session sign-in pull fire? Only when (a) the app runs in
+// CLOUD mode — the LAN appliance's pseudo-user ({id:'local'}, no email) has no Google identity to pull
+// with; (b) a Google account is signed in; (c) it hasn't already run this session; and (d) this account
+// has at least one ACTIVE pull rule its token can actually read (its own, or a legacy rule with no
+// accountEmail — mirroring the manual sync loop's account-scoping skip). Pure → tested.
+export function shouldAutoPull(state: {
+  backendMode: string;
+  email?: string | null;
+  alreadyRan: boolean;
+  connected: { direction: 'pull' | 'push'; active: boolean; accountEmail?: string }[];
+}): boolean {
+  if (state.backendMode !== 'supabase' || !state.email || state.alreadyRan) return false;
+  return (Array.isArray(state.connected) ? state.connected : [])
+    .some(c => c.direction === 'pull' && c.active && (!c.accountEmail || c.accountEmail === state.email));
+}

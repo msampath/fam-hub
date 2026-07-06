@@ -84,7 +84,7 @@ import { buildAgentActionResult, detectUnbackedClaims } from './utils/agentActio
 import { filterUnrequestedHolidayDeletes } from './utils/holidayGuard';
 import { resolveDoc, normalizeFolder } from './utils/docActions';
 import { upsertVisit } from './utils/historyFacts';
-import { buildGoogleEventBody, googleEventMarker, findGoogleEventByMarker, summarizePushResult, selectPushTargets, pushableLocalEvents, isFamilyHubMarked, selectAutoPushEvents } from './utils/googleEvent';
+import { buildGoogleEventBody, googleEventMarker, findGoogleEventByMarker, summarizePushResult, selectPushTargets, pushableLocalEvents, isFamilyHubMarked, selectAutoPushEvents, shouldAutoPull } from './utils/googleEvent';
 import { LOG_CAP, LEDGER_CAP, appendCapped, buildCopilotLogEntry, buildQuickAddLogEntry, buildLedgerEntry } from './utils/historyLog';
 import { TOOL_REGISTRY } from './utils/toolRegistry';
 import { resolveLedgerEntry } from './utils/ledger';
@@ -2029,6 +2029,23 @@ export default function App() {
       }
     })();
   }, [googleUser?.email, connectedCalendars, googleCalendarsList, events]);
+
+  // Auto-PULL on sign-in (W8, owner ask): the family's Google events appear without a manual Sync click.
+  // ONCE per session (ref-guarded like autoPushInFlightRef above), PULL-only (never pushes, never opens
+  // export confirms), cloud mode only, and only when this account has an active pull rule — all decided
+  // by shouldAutoPull (pure, tested). Token is fetched first and a missing one skips SILENTLY (no alert
+  // from inside syncGoogleCalendars) — the manual Sync button stays the recovery path.
+  const autoPullDoneRef = useRef(false);
+  useEffect(() => {
+    if (!shouldAutoPull({ backendMode: appMode, email: googleUser?.email, alreadyRan: autoPullDoneRef.current, connected: connectedCalendars })) return;
+    autoPullDoneRef.current = true; // one attempt per session, even if the token below turns out missing
+    (async () => {
+      const token = await getGoogleToken();
+      if (!token) return;
+      await syncGoogleCalendars(token, undefined, undefined, true);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appMode, googleUser?.email, connectedCalendars]);
 
   // Handle addition of Custom Source Url via server-side scraper API
   const handleAddSource = async (e: React.FormEvent) => {

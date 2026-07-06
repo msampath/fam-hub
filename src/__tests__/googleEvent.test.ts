@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildGoogleEventBody, googleEventMarker, findGoogleEventByMarker, summarizePushResult, selectPushTargets, pushableLocalEvents, isFamilyHubMarked, selectAutoPushEvents } from '../utils/googleEvent';
+import { buildGoogleEventBody, googleEventMarker, findGoogleEventByMarker, summarizePushResult, selectPushTargets, pushableLocalEvents, isFamilyHubMarked, selectAutoPushEvents, shouldAutoPull } from '../utils/googleEvent';
 import { APP_NAME } from '../constants';
 import type { CalendarEvent } from '../types';
 
@@ -151,5 +151,35 @@ describe('summarizePushResult', () => {
   it('appends the failure count when any failed', () => {
     expect(summarizePushResult(1, 1)).toBe('Pushed to 1 calendar, 1 failed.');
     expect(summarizePushResult(2, 3)).toBe('Pushed to 2 calendars, 3 failed.');
+  });
+});
+
+describe('shouldAutoPull (W8 sign-in auto-pull gate)', () => {
+  const pullConn = { direction: 'pull' as const, active: true, accountEmail: 'mom@x.com' };
+  const base = { backendMode: 'supabase', email: 'mom@x.com', alreadyRan: false, connected: [pullConn] };
+
+  it('fires exactly when cloud + signed in + not yet run + an active pull rule for this account', () => {
+    expect(shouldAutoPull(base)).toBe(true);
+  });
+
+  it('never fires on the LAN appliance (sqlite mode / pseudo-user without an email)', () => {
+    expect(shouldAutoPull({ ...base, backendMode: 'sqlite' })).toBe(false);
+    expect(shouldAutoPull({ ...base, backendMode: 'unknown' })).toBe(false);
+    expect(shouldAutoPull({ ...base, email: undefined })).toBe(false);
+  });
+
+  it('is once-per-session: alreadyRan suppresses it', () => {
+    expect(shouldAutoPull({ ...base, alreadyRan: true })).toBe(false);
+  });
+
+  it('requires an ACTIVE pull rule — push-only, deactivated, or no connections do not trigger it', () => {
+    expect(shouldAutoPull({ ...base, connected: [] })).toBe(false);
+    expect(shouldAutoPull({ ...base, connected: [{ direction: 'push', active: true, accountEmail: 'mom@x.com' }] })).toBe(false);
+    expect(shouldAutoPull({ ...base, connected: [{ ...pullConn, active: false }] })).toBe(false);
+  });
+
+  it("skips another parent's pull rule (their session syncs it) but accepts a legacy rule with no accountEmail", () => {
+    expect(shouldAutoPull({ ...base, connected: [{ ...pullConn, accountEmail: 'dad@x.com' }] })).toBe(false);
+    expect(shouldAutoPull({ ...base, connected: [{ direction: 'pull', active: true }] })).toBe(true);
   });
 });
