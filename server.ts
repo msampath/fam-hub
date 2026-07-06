@@ -25,7 +25,20 @@ import { validateExtractedEvents } from './src/utils/extractedEvents';
 import { filterUnrequestedHolidayDeletes } from './src/utils/holidayGuard';
 import { buildBriefing, type Briefing } from './src/utils/briefing';
 import { buildProactiveLedger, buildGoalNudges } from './src/utils/proactiveBriefing';
-import { MORNING_PLANNER_SYSTEM, MORNING_PLANNER_SCHEMA, MORNING_GENCONFIG, buildMorningFacts, validateMorningProposals, toLedgerEntries } from './src/utils/morningAgent';
+import { MORNING_PLANNER_SYSTEM, buildMorningPlannerSchema, MORNING_GENCONFIG, buildMorningFacts, validateMorningProposals, toLedgerEntries } from './src/utils/morningAgent';
+import { sanitizeStoreList } from './src/constants';
+
+// Household store routing for the shopping-AI prompts (Phase-5): name the family's exact lists, and
+// keep the specialty/bulk hints ONLY when the default store names they refer to are actually present.
+const storeRoutingLine = (stores: string[]): string => {
+  const quoted = stores.map(s => `"${s}"`).join(', ');
+  const hints = [
+    stores.includes('Indian Store') ? 'Use "Indian Store" for Indian/South-Asian spices and specialty items.' : '',
+    stores.includes('Costco') ? 'Use "Costco" for bulk staples.' : '',
+    stores.includes('Grocery Store') ? 'Otherwise use "Grocery Store".' : '',
+  ].filter(Boolean).join(' ');
+  return `Assign each to the most likely store from exactly: ${quoted}.${hints ? ' ' + hints : ''}`;
+};
 import { LEDGER_CAP } from './src/utils/historyLog';
 import { shouldRunDigestNow } from './src/utils/digest';
 import { sendDigestEmail } from './src/utils/mailer';
@@ -1424,8 +1437,11 @@ app.post('/api/parse-recipe', requireAuth, aiRateLimit, async (req, res) => {
     if (!text || text.trim().length === 0) {
       return res.status(400).json({ error: 'A dish name or recipe text is required.' });
     }
+    // Household-defined store lists (Phase-5): the client sends its live list; junk/absent → defaults.
+    const stores = sanitizeStoreList(req.body?.stores);
+    const storeLine = storeRoutingLine(stores);
 
-    const prompt = `Extract the grocery ingredients needed for the following dish or recipe. Return each ingredient as a concise shopping-list item. Quantities must be BUY units a store actually sells — package sizes ("400 g pack", "small bag", "1 lb", "a dozen", "1 bunch", "small jar", "500 ml carton") — NEVER cook-measure units like cups/tbsp/tsp (a recipe's "2 tbsp coriander seeds" becomes "Coriander seeds (small bag)"; "1/2 cup heavy cream" becomes "Heavy cream (small carton)"). Assign each to the most likely store from exactly: "Costco", "Indian Store", "Grocery Store", "Other". Use "Indian Store" for Indian/South-Asian spices and specialty items, "Costco" for bulk staples, otherwise "Grocery Store".
+    const prompt = `Extract the grocery ingredients needed for the following dish or recipe. Return each ingredient as a concise shopping-list item. Quantities must be BUY units a store actually sells — package sizes ("400 g pack", "small bag", "1 lb", "a dozen", "1 bunch", "small jar", "500 ml carton") — NEVER cook-measure units like cups/tbsp/tsp (a recipe's "2 tbsp coriander seeds" becomes "Coriander seeds (small bag)"; "1/2 cup heavy cream" becomes "Heavy cream (small carton)"). ${storeLine}
 
 Dish or recipe:
 ---
@@ -1442,7 +1458,7 @@ ${text}
           type: Type.OBJECT,
           properties: {
             text: { type: Type.STRING, description: "Ingredient as a shopping-list item." },
-            store: { type: Type.STRING, description: "One of: Costco, Indian Store, Grocery Store, Other" }
+            store: { type: Type.STRING, description: `One of: ${stores.join(', ')}` }
           },
           required: ["text"]
         }
@@ -1467,8 +1483,9 @@ app.post('/api/pantry-restock', requireAuth, aiRateLimit, async (req, res) => {
       return res.status(400).json({ error: 'Pantry contents are required.' });
     }
 
+    const stores = sanitizeStoreList(req.body?.stores);
     const alreadyListed = Array.isArray(recipes) && recipes.length > 0;
-    const prompt = `A family tracks their pantry inventory as freeform notes (what they have and roughly how much). Based on the pantry state below${alreadyListed ? ' and the items already on their shopping list' : ''}, suggest what they should RESTOCK — items that are low, depleted, or commonly needed staples that appear to be missing. Do NOT suggest items they clearly already have in good supply. Assign each to the most likely store from exactly: "Costco", "Indian Store", "Grocery Store", "Other".
+    const prompt = `A family tracks their pantry inventory as freeform notes (what they have and roughly how much). Based on the pantry state below${alreadyListed ? ' and the items already on their shopping list' : ''}, suggest what they should RESTOCK — items that are low, depleted, or commonly needed staples that appear to be missing. Do NOT suggest items they clearly already have in good supply. ${storeRoutingLine(stores)}
 
 Pantry state:
 ---
@@ -1486,7 +1503,7 @@ ${alreadyListed ? `Already on the shopping list (don't duplicate these):\n---\n$
           type: Type.OBJECT,
           properties: {
             text: { type: Type.STRING, description: "Restock item as a shopping-list entry." },
-            store: { type: Type.STRING, description: "One of: Costco, Indian Store, Grocery Store, Other" }
+            store: { type: Type.STRING, description: `One of: ${stores.join(', ')}` }
           },
           required: ["text"]
         }
@@ -1510,7 +1527,8 @@ app.post('/api/meal-plan', requireAuth, aiRateLimit, async (req, res) => {
     if (!Array.isArray(pantry) || pantry.length === 0) {
       return res.status(400).json({ error: 'Pantry contents are required.' });
     }
-    const prompt = `A family tracks their pantry as freeform notes. Plan 3 simple, varied DINNERS they can mostly cook from what they already have. Then, comparing each meal's ingredients against the pantry, list ONLY the ADDITIONAL grocery items they still need to buy (the gap — skip anything the pantry already covers). Assign each buy-item to the most likely store from exactly: "Costco", "Indian Store", "Grocery Store", "Other".
+    const stores = sanitizeStoreList(req.body?.stores);
+    const prompt = `A family tracks their pantry as freeform notes. Plan 3 simple, varied DINNERS they can mostly cook from what they already have. Then, comparing each meal's ingredients against the pantry, list ONLY the ADDITIONAL grocery items they still need to buy (the gap — skip anything the pantry already covers). ${storeRoutingLine(stores)}
 
 Pantry state:
 ---
@@ -1530,7 +1548,7 @@ ${(pantry as string[]).join('\n')}
               type: Type.OBJECT,
               properties: {
                 text: { type: Type.STRING, description: 'Item as a shopping-list entry.' },
-                store: { type: Type.STRING, description: 'One of: Costco, Indian Store, Grocery Store, Other' },
+                store: { type: Type.STRING, description: `One of: ${stores.join(', ')}` },
               },
               required: ['text'],
             },
@@ -1559,9 +1577,10 @@ app.post('/api/vision-scan-pantry', requireAuth, aiRateLimit, async (req, res) =
     const cleanBase64 = String(imageBase64).replace(/^data:[^;]+;base64,/, '');
     const mt = typeof mimeType === 'string' && /^image\//.test(mimeType) ? mimeType : 'image/jpeg';
     const have = (Array.isArray(pantry) ? pantry : []).map((p: any) => String(p)).filter(Boolean).join(', ');
+    const stores = sanitizeStoreList(req.body?.stores);
     const imagePart = { inlineData: { mimeType: mt, data: cleanBase64 } };
     const textPart = {
-      text: `This photo shows either the inside of a fridge/cupboard or a grocery receipt. List the distinct GROCERY items you can identify. For each, set "inPantry": true if it already appears in the family's current pantry list below (else false), and assign the most likely store from exactly: "Costco", "Indian Store", "Grocery Store", "Other". Ignore non-grocery clutter. Do not invent items you cannot see.\n\nCurrent pantry: ${have || '(empty)'}`,
+      text: `This photo shows either the inside of a fridge/cupboard or a grocery receipt. List the distinct GROCERY items you can identify. For each, set "inPantry": true if it already appears in the family's current pantry list below (else false). ${storeRoutingLine(stores)} Ignore non-grocery clutter. Do not invent items you cannot see.\n\nCurrent pantry: ${have || '(empty)'}`,
     };
     const data = await callGeminiJSON(
       { parts: [imagePart, textPart] },
@@ -1577,7 +1596,7 @@ app.post('/api/vision-scan-pantry', requireAuth, aiRateLimit, async (req, res) =
               properties: {
                 text: { type: Type.STRING, description: 'The item as a short grocery name.' },
                 inPantry: { type: Type.BOOLEAN, description: 'True if already in the pantry list.' },
-                store: { type: Type.STRING, description: 'One of: Costco, Indian Store, Grocery Store, Other' },
+                store: { type: Type.STRING, description: `One of: ${stores.join(', ')}` },
               },
               required: ['text'],
             },
@@ -1684,7 +1703,8 @@ const QUICKADD_SCHEMA = {
 
 app.post('/api/parse-quickadd', requireAuth, aiRateLimit, async (req, res) => {
   try {
-    const { text, members = [], stores = ['Costco', 'Indian Store', 'Grocery Store', 'Other'] } = req.body;
+    const { text, members = [] } = req.body;
+    const stores = sanitizeStoreList(req.body?.stores); // household lists; junk/absent → defaults
     if (!text || text.trim().length === 0) {
       return res.status(400).json({ error: 'Some text is required.' });
     }
@@ -2864,9 +2884,10 @@ app.post('/api/morning-briefing', requireAuth, aiRateLimit, async (req, res) => 
       const shList = (Array.isArray(shopping) ? shopping : []).slice(0, 100);
       const glList = (Array.isArray(goals) ? goals : []).slice(0, 20);
       const lgList = (Array.isArray(ledger) ? ledger : []).slice(-100);
+      const plannerStores = sanitizeStoreList(req.body?.stores); // household lists (Phase-5)
       const facts = buildMorningFacts({ today, agendaText: briefingToText(briefing), chores: chList, shopping: shList, goals: glList, pendingLedger: lgList });
-      const raw = await callGeminiJSON(facts, MORNING_PLANNER_SYSTEM, MORNING_PLANNER_SCHEMA, '{"proposals":[]}', undefined, MORNING_GENCONFIG);
-      proposals = validateMorningProposals(raw?.proposals, { today, shopping: shList, pendingLedger: lgList, goals: glList, factsText: facts });
+      const raw = await callGeminiJSON(facts, MORNING_PLANNER_SYSTEM, buildMorningPlannerSchema(plannerStores), '{"proposals":[]}', undefined, MORNING_GENCONFIG);
+      proposals = validateMorningProposals(raw?.proposals, { today, shopping: shList, pendingLedger: lgList, goals: glList, factsText: facts, stores: plannerStores });
     } catch (e: any) {
       console.warn('[morning-briefing] planner skipped:', e?.message || e);
     }
@@ -3138,9 +3159,10 @@ async function runDailyDigest(): Promise<void> {
         try {
           const shopping = asTypedArray<ShoppingItem>(sh.data?.data);
           const chores = asTypedArray<Chore>(ch.data?.data);
+          const plannerStores = sanitizeStoreList(home.storeList); // household lists from settings (Phase-5)
           const facts = buildMorningFacts({ today, agendaText: briefingToText(briefing, weatherLine), weatherLine, chores, shopping, goals, pendingLedger: [...ledger, ...staged] });
-          const raw = await callGeminiJSON(facts, MORNING_PLANNER_SYSTEM, MORNING_PLANNER_SCHEMA, '{"proposals":[]}', undefined, MORNING_GENCONFIG);
-          const proposals = validateMorningProposals(raw?.proposals, { today, shopping, pendingLedger: [...ledger, ...staged], goals, factsText: facts });
+          const raw = await callGeminiJSON(facts, MORNING_PLANNER_SYSTEM, buildMorningPlannerSchema(plannerStores), '{"proposals":[]}', undefined, MORNING_GENCONFIG);
+          const proposals = validateMorningProposals(raw?.proposals, { today, shopping, pendingLedger: [...ledger, ...staged], goals, factsText: facts, stores: plannerStores });
           planned = toLedgerEntries(proposals, today, () => 'ledg-' + randomUUID(), stamp);
         } catch (e: any) {
           console.warn('[digest] morning planner skipped (deterministic nudges still staged):', e?.message || e);

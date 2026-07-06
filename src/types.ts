@@ -140,7 +140,10 @@ export interface ShoppingItem extends Authored {
   id: string;
   text: string;
   completed: boolean;
-  store: 'Costco' | 'Indian Store' | 'Grocery Store' | 'Other';
+  // Household-defined (Phase-5): one of settings.storeList — defaults in constants.SHOP_STORES.
+  // Was a hardcoded union; validation now happens where items are created (sanitizeStoreList +
+  // normalizeShoppingItems against the live list), not in the type.
+  store: string;
   quantity?: string;
   notes?: string;
   staple?: boolean; // recurring household staple — re-addable after being checked off
@@ -256,6 +259,12 @@ export interface HouseholdSettings {
   // RLS collection — the exact Google-refresh-token precedent.
   krogerStoreId?: string;
   krogerStoreName?: string;
+  // Household-defined store lists (Phase-5): replaces the hardcoded Costco/Indian Store/Grocery/Other
+  // set everywhere. Unset → constants.SHOP_STORES defaults (sanitizeStoreList is the shared gate).
+  storeList?: string[];
+  // Which of the household's lists maps to the Kroger cart (send-to-cart + the dish-ask auto-offer).
+  // Unset → 'Grocery Store'.
+  krogerListStore?: string;
 }
 
 // A "last visited" tracker per place (venue/outing), NOT a full event history — bounded and

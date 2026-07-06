@@ -18,6 +18,8 @@ export function makeAppCtx(overrides: Partial<AppCtx> = {}): AppCtx {
     sendShoppingToKroger: vi.fn(),
     krogerOffer: null,
     dismissKrogerOffer: vi.fn(),
+    storeList: ['Costco', 'Indian Store', 'Grocery Store', 'Other'],
+    setStoreList: vi.fn(),
     krogerBusy: false,
     krogerStoreName: null,
     krogerStoreId: null,

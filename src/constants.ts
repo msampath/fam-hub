@@ -3,8 +3,31 @@
 // Centralized app name — render this instead of hardcoding the brand string.
 export const APP_NAME = 'Family-Hub';
 
-// The canonical shopping stores (single source for validation + the quick-add context).
+// The DEFAULT shopping stores (Phase-5 stores decoupling): households customize their own list in
+// settings.storeList; every consumer goes through sanitizeStoreList so an unset/garbage setting
+// always resolves to these defaults. SHOP_STORES stays the single fallback source.
 export const SHOP_STORES = ['Costco', 'Indian Store', 'Grocery Store', 'Other'] as const;
+
+// The ONE gate between raw settings.storeList and every consumer (client hooks, server prompts,
+// MCP validation, the morning planner): trim/collapse, drop empties, dedupe case-insensitively,
+// clamp name length + list size, and fall back to the defaults when nothing valid remains.
+export const sanitizeStoreList = (raw: unknown): string[] => {
+  const cleaned = (Array.isArray(raw) ? raw : [])
+    .map(s => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, 24))
+    .filter(Boolean);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const s of cleaned) {
+    const k = s.toLowerCase();
+    if (!seen.has(k)) { seen.add(k); out.push(s); }
+  }
+  return out.length ? out.slice(0, 8) : [...SHOP_STORES];
+};
+
+// Where AI-routed items land when the model names an unknown store: the household's general-grocery
+// list when it exists, else the LAST list (the "Other"-position by convention).
+export const fallbackStore = (stores: readonly string[]): string =>
+  stores.includes('Grocery Store') ? 'Grocery Store' : (stores[stores.length - 1] || 'Other');
 
 // Handoff-style tools the USER completes externally (open the real page, then finish it) — bookings,
 // reservations, carts. Everything else confirm-tier is an Approval the AGENT executes once OK'd. Single

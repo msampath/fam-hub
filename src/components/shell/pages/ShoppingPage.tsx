@@ -4,12 +4,11 @@ import { useApp } from '../../../AppContext';
 import { uuid } from '../../../utils/uuid';
 import { exampleDish } from '../../../utils/shoppingHints';
 import type { ShoppingItem } from '../../../types';
-import { SHOP_STORES } from '../../../constants';
 import { C, brutShadow } from '../theme';
 
-// One source of truth for the store SET (constants.ts SHOP_STORES); this only owns the icons + render order.
+// Icons for the well-known default stores; any household-defined store falls back to 📦. The store
+// SET itself is household-defined (settings.storeList via useApp().storeList) since Phase-5.
 const STORE_ICON: Record<string, string> = { 'Costco': '🛒', 'Grocery Store': '🥦', 'Indian Store': '🌶️', 'Other': '📦' };
-const STORES: { id: string; icon: string }[] = SHOP_STORES.map(id => ({ id, icon: STORE_ICON[id] ?? '📦' }));
 
 export default function ShoppingPage() {
   const {
@@ -23,9 +22,16 @@ export default function ShoppingPage() {
     handleScanPantryPhoto, isScanningPantry, pantryScan, confirmPantryScan, dismissPantryScan,
     sendShoppingToKroger, krogerBusy, krogerStoreName,
     krogerOffer, dismissKrogerOffer,
+    storeList,
     kidMode,
   } = useApp();
   const [showRecipes, setShowRecipes] = useState(false);
+  // Household store lists + any ORPHAN stores still on items (a list was removed in Manage while
+  // items remained) — orphans render after the configured lists so nothing silently disappears.
+  const STORES: { id: string; icon: string }[] = [
+    ...storeList,
+    ...Array.from(new Set(shoppingList.map(i => i.store).filter(s => s && !storeList.includes(s)))),
+  ].map(id => ({ id, icon: STORE_ICON[id] ?? '📦' }));
 
   const toggle = (id: string) =>
     setShoppingList(prev => prev.map(i => (i.id === id ? { ...i, completed: !i.completed } : i)));
@@ -48,7 +54,8 @@ export default function ShoppingPage() {
     const text = newShopText.trim();
     if (!text) return;
     const item: ShoppingItem = {
-      id: 'shop-' + uuid(), text, completed: false, store: newShopStore,
+      // Clamp a stale selection (a store renamed/removed in Manage after this select initialized).
+      id: 'shop-' + uuid(), text, completed: false, store: storeList.includes(newShopStore) ? newShopStore : storeList[0],
       quantity: newShopQty.trim() || undefined, ...authorStamp(),
     };
     setShoppingList(prev => [item, ...prev]);

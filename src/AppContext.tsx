@@ -2,7 +2,8 @@ import React, { createContext, useContext } from 'react';
 import type { ShoppingItem, PantryItem, Chore, Reward, Redemption, XpBankEntry, FamilyMember, Category, Authored, LedgerEntry, CopilotSuggestion, DigestPrefs, Goal } from './types';
 import type { PantryDiff } from './utils/visionPantry';
 
-export type ShopStore = 'Costco' | 'Indian Store' | 'Grocery Store' | 'Other';
+// Household-defined since Phase-5 (settings.storeList) — any store name the household configured.
+export type ShopStore = string;
 
 // Shared state/handlers exposed to extracted feature components. Grown as more of the
 // UI is pulled out of App.tsx — each field is consumed by at least one component.
@@ -21,6 +22,9 @@ export interface AppCtx {
   krogerStoreName: string | null;
   krogerStoreId: string | null;
   setKrogerStore: (storeId: string | null, storeName: string | null) => void;
+  // Household-defined store lists (Phase-5): sanitized, never empty (defaults to SHOP_STORES).
+  storeList: string[];
+  setStoreList: (stores: string[]) => void;
   homeLat: number | null;
   homeLng: number | null;
   newShopText: string;

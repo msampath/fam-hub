@@ -51,7 +51,7 @@ import type {
   GoogleCalendarListEntry,
   LedgerEntry,
 } from './types';
-import { APP_NAME, MEMBER_COLORS_LIST, MEMBER_COLORS_MAP, FAMILY_COLOR_THEME, SHOP_STORES } from './constants';
+import { APP_NAME, MEMBER_COLORS_LIST, MEMBER_COLORS_MAP, FAMILY_COLOR_THEME, sanitizeStoreList } from './constants';
 import {
   buildMonthWindow,
   buildRollingWindow,
@@ -75,6 +75,7 @@ import type { NormalizedMessage } from './utils/email';
 import { matchOwnProfileIndex, healMemberLink } from './utils/identity';
 import { buildDemoSeed } from './utils/demoSeed';
 import { krogerCartAdd } from './utils/krogerClient';
+import { LEDGER_APPLIERS } from './utils/ledgerAppliers';
 import { isAgentConfigured, askConciergeAgent, type AgentAction } from './utils/agentClient';
 import { routeTurn } from './utils/copilotRouter';
 import { buildAgentActionResult, detectUnbackedClaims } from './utils/agentActions';
@@ -375,8 +376,11 @@ export default function App() {
   // Main navigation tabs state
   const [activeMainTab, setActiveMainTab] = useState<'calendar' | 'shopping' | 'chores' | 'inbox'>('calendar');
 
+  // Household-defined store lists (Phase-5): sanitized once here, threaded everywhere (hook, context,
+  // AI prompt bodies, the copilot apply path). Never empty — defaults to SHOP_STORES.
+  const storeList = useMemo(() => sanitizeStoreList(settings[0]?.storeList), [settings]);
   // Shopping + pantry domain (state + recipe/restock AI + shared appendShoppingItems) → useShopping.
-  const shopping = useShopping({ authorStamp });
+  const shopping = useShopping({ authorStamp, storeList, krogerListStore: settings[0]?.krogerListStore });
   const {
     shoppingList, setShoppingList, newShopText, setNewShopText, newShopStore, setNewShopStore,
     newShopQty, setNewShopQty, newShopNotes, setNewShopNotes,
@@ -2169,7 +2173,7 @@ export default function App() {
   };
 
   // ── Pantry + AI shopping (recipe→list, pantry→restock) ───────────────────────
-  const VALID_STORES = SHOP_STORES as readonly ShoppingItem['store'][];
+  const VALID_STORES = storeList as readonly ShoppingItem['store'][];
 
   // (appendShoppingItems + pantry/recipe/restock handlers now live in useShopping; exposed via the
   // `shopping` hook above. appendShoppingItems is destructured for the copilot/quick-add path below.)
@@ -2439,147 +2443,21 @@ export default function App() {
       setCopilotMessages(prev => [...prev, { role: 'assistant', text: '🔒 That action needs your security PIN — approve it from the copilot bar.' }]);
       return;
     }
-    // Library doc deletion (confirm-tier): on approve, remove the doc(s) by id; on reject, keep them.
-    // A folder-clear stages many ids in refIds; a single delete uses refId — handle both.
-    if (entry.tool === 'delete_document') {
-      const s0 = authorStamp();
-      const ids = new Set([...(entry.refIds || []), ...(entry.refId ? [entry.refId] : [])]);
-      if (approve && ids.size) setLibraryDocs(prev => prev.filter(d => !ids.has(d.id)));
-      markLedger(id, approve, s0);
-      setCopilotMessages(prev => [...prev, { role: 'assistant', text: approve ? `🗑️ Deleted ${(entry.summary || '').replace(/^Delete /, '') || 'the document'}.` : 'Okay, kept the document.' }]);
-      return;
-    }
-    // Proactive shopping draft (#1, confirm-tier): on approve, actually append the staged item to the
-    // shopping list (the morning agent stages these closed-app; they apply only on the parent's approval).
-    if (entry.tool === 'add_shopping_item' && entry.payload) {
-      const s0 = authorStamp();
-      let added = 0;
-      if (approve) added = appendShoppingItems([entry.payload as { text?: string; store?: string }]);
-      markLedger(id, approve, s0);
-      setCopilotMessages(prev => [...prev, { role: 'assistant', text: approve ? (added ? `🛒 Added "${(entry.payload as any).text}" to the shopping list.` : 'That item was already on the list.') : 'Okay, skipped it.' }]);
-      return;
-    }
-    // Chore delete / bulk clear (confirm-tier, destructive): resolve the target(s) against the LIVE
-    // chores by refId or title (clear_chores = all), then remove on approve. Resolving from the closure
-    // (not inside the state updater) keeps the result reliable for the confirmation message.
-    if (entry.tool === 'delete_chore' || entry.tool === 'clear_chores') {
-      const s0 = authorStamp();
-      const refId = entry.refId;
-      const wantTitle = String((entry.payload as { title?: string } | undefined)?.title || '').trim().toLowerCase();
-      const victims = entry.tool === 'clear_chores'
-        ? choresList
-        : choresList.filter(c => (refId ? c.id === refId : (!!wantTitle && String(c.title).trim().toLowerCase() === wantTitle)));
-      if (approve && victims.length) {
-        const ids = new Set(victims.map(c => c.id));
-        setChoresList(prev => prev.filter(c => !ids.has(c.id)));
-      }
-      markLedger(id, approve, s0);
-      setCopilotMessages(prev => [...prev, { role: 'assistant', text: approve
-        ? (victims.length
-            ? (entry.tool === 'clear_chores' ? `🗑️ Cleared all ${victims.length} chore${victims.length > 1 ? 's' : ''}.` : `🗑️ Deleted ${victims.length} chore${victims.length > 1 ? 's' : ''}.`)
-            : (entry.tool === 'clear_chores' ? `The chore list was already empty.` : `⚠️ Couldn't find that chore to delete.`))
-        : 'Okay, kept the chores.' }]);
-      return;
-    }
-    // Event delete (confirm-tier, destructive): resolve against the LIVE events by refId, else by exact
-    // title (+ optional start to disambiguate same-named events), then remove on approve. Mirrors
-    // delete_chore (events are client-owned). Early-return so it never reaches the goal-step resume hook.
-    if (entry.tool === 'delete_event') {
-      const s0 = authorStamp();
-      const pay = (entry.payload as { title?: string; start?: string } | undefined) || {};
-      const { victims, ambiguous } = resolveEventDeletion(events, { refId: entry.refId, title: pay.title, start: pay.start });
-      // A title-ONLY reference that matches several events (e.g. a recurring "Soccer practice") is NOT
-      // bulk-deleted on a single approval — the parent only saw one title. Refuse + ask for a date so the
-      // actual scope is never larger than what was approved (destructive-action invariant).
-      const blocked = approve && ambiguous;
-      if (approve && !ambiguous && victims.length) {
-        const ids = new Set(victims.map(e => e.id));
-        setEvents(prev => prev.filter(e => !ids.has(e.id)));
-      }
-      markLedger(id, approve, s0, blocked);
-      const msg = !approve
-        ? 'Okay, kept the event.'
-        : blocked
-          ? `⚠️ There are ${victims.length} events named "${victims[0].title}" — tell me which date to delete.`
-          : victims.length
-            ? (victims.length > 1 ? `🗑️ Deleted ${victims.length} events named "${victims[0].title}".` : `🗑️ Deleted the event "${victims[0].title}".`)
-            : `⚠️ Couldn't find that event to delete.`;
-      setCopilotMessages(prev => [...prev, { role: 'assistant', text: msg }]);
-      return;
-    }
-    // Shopping-item delete (confirm-tier): remove by refId or by text against the LIVE list.
-    if (entry.tool === 'delete_shopping_item') {
-      const s0 = authorStamp();
-      const refId = entry.refId;
-      const wantText = String((entry.payload as { text?: string } | undefined)?.text || '').trim().toLowerCase();
-      const victims = shoppingList.filter(i => (refId ? i.id === refId : (!!wantText && String(i.text).trim().toLowerCase() === wantText)));
-      if (approve && victims.length) {
-        const ids = new Set(victims.map(i => i.id));
-        setShoppingList(prev => prev.filter(i => !ids.has(i.id)));
-      }
-      markLedger(id, approve, s0);
-      setCopilotMessages(prev => [...prev, { role: 'assistant', text: approve
-        ? (victims.length ? `🗑️ Removed ${victims.length > 1 ? `${victims.length} "${victims[0].text}" entries` : `"${victims[0].text}"`} from the shopping list.` : `⚠️ Couldn't find that item to remove.`)
-        : 'Okay, kept it on the list.' }]);
-      return;
-    }
-    // Chore edit (confirm-tier): resolve the target by refId/matchTitle, merge the clamped changes.
-    if (entry.tool === 'update_chore') {
-      const s0 = authorStamp();
-      const ref = (entry.payload as { ref?: { id?: string; matchTitle?: string } } | undefined)?.ref || {};
-      const changes = (entry.changes || {}) as Partial<Chore>;
-      const wantTitle = String(ref.matchTitle || '').trim().toLowerCase();
-      const target = choresList.find(c => (ref.id ? c.id === ref.id : (!!wantTitle && String(c.title).trim().toLowerCase() === wantTitle)));
-      if (approve && target) setChoresList(prev => prev.map(c => (c.id === target.id ? { ...c, ...changes } : c)));
-      markLedger(id, approve, s0);
-      setCopilotMessages(prev => [...prev, { role: 'assistant', text: approve
-        ? (target ? `✏️ Updated the chore "${target.title}".` : `⚠️ Couldn't find that chore to update.`)
-        : 'Okay, left the chore as is.' }]);
-      return;
-    }
-    // Push to Google (3d, confirm-tier): on approve, push the referenced event(s) to the parent's connected
-    // PUSH-rule calendar(s) (else the writable primary) via the existing infra.
-    if (entry.tool === 'push_to_google') {
-      const s0 = authorStamp();
-      const ids = new Set([...(entry.refIds || []), ...(entry.refId ? [entry.refId] : [])]);
-      const evs = events.filter(e => ids.has(e.id));
-      if (approve) {
-        const targets = selectPushTargets(connectedCalendars, googleCalendarsList, googleUser?.email);
-        if (!targets.length) {
-          // Keep the entry PENDING so the parent can approve again after connecting a Push calendar (there's
-          // no other way to re-stage it). Don't transition the ledger row here.
-          setCopilotMessages(prev => [...prev, { role: 'assistant', text: `To push to Google, connect a **Push** calendar in Manage → Google sync first, then approve this again.` }]);
-          return;
-        }
-        if (evs.length) {
-          for (const ev of evs) void pushEventToGoogleCalendars(ev, targets).catch(() => { /* push reports its own result/errors in the sync log */ });
-          setCopilotMessages(prev => [...prev, { role: 'assistant', text: `📤 Pushing ${evs.length} event${evs.length > 1 ? 's' : ''} to your Google Calendar…` }]);
-        } else {
-          setCopilotMessages(prev => [...prev, { role: 'assistant', text: `⚠️ Those events no longer exist — nothing to push.` }]);
-        }
-      }
-      markLedger(id, approve, s0);
-      return;
-    }
-    // Kroger cart write (confirm-tier): on approve, add the matched products to the parent's real
-    // Kroger cart via the device's refresh token, then check the added items off the shopping list.
-    // On failure keep the entry PENDING (like push_to_google) so the parent can reconnect + retry.
-    if (entry.tool === 'kroger_cart_write') {
-      if (!approve) { markLedger(id, approve, authorStamp()); return; }
-      const payload = entry.payload as { items?: { upc: string; quantity?: number; text?: string }[] } | undefined;
-      const items = Array.isArray(payload?.items) ? payload!.items : [];
-      krogerCartAdd(items.map(i => ({ upc: i.upc, quantity: i.quantity })))
-        .then(added => {
-          markLedger(id, true, authorStamp());
-          // Check off the shopping items that made it into the cart (match by the text we staged).
-          const carted = new Set(items.map(i => String(i.text || '').trim().toLowerCase()).filter(Boolean));
-          if (carted.size) setShoppingList(prev => prev.map(i => (carted.has(String(i.text).trim().toLowerCase()) ? { ...i, completed: true } : i)));
-          setCopilotMessages(prev => [...prev, { role: 'assistant', text: `🛒 Added ${added} item${added === 1 ? '' : 's'} to your Kroger cart — open the Kroger app to check out.` }]);
-        })
-        .catch(err => {
-          // Leave the entry pending; surface the reason so the parent can reconnect Kroger and re-approve.
-          setCopilotMessages(prev => [...prev, { role: 'assistant', text: `⚠️ ${err?.message || 'Could not update your Kroger cart.'}` }]);
-        });
+    // Tool-specific appliers live in the REGISTRY (src/utils/ledgerAppliers.ts) — one testable applier
+    // per approvable tool, dispatched with the live collections + injected effects. Registry tools
+    // resolve fully in their applier (including deliberate keep-pending retries) and never reach the
+    // goal-resume hook below (behavior identical to the former inline early-return blocks).
+    const applier = LEDGER_APPLIERS[entry.tool];
+    if (applier) {
+      applier({
+        entry, approve,
+        events, choresList, shoppingList,
+        connectedCalendars, googleCalendarsList, googleUserEmail: googleUser?.email,
+        markLedger: (entryId, ok, blocked = false) => markLedger(entryId, ok, authorStamp(), blocked),
+        say: (text) => setCopilotMessages(prev => [...prev, { role: 'assistant', text }]),
+        setEvents, setChoresList, setShoppingList, setLibraryDocs,
+        appendShoppingItems, pushEventToGoogleCalendars, krogerCartAdd,
+      });
       return;
     }
     const res = resolveLedgerEntry(entry, events, approve);
@@ -2699,6 +2577,9 @@ export default function App() {
   // Kroger chosen store (household config; the OAuth token stays per-device in localStorage).
   const setKrogerStore = (storeId: string | null, storeName: string | null) =>
     setSettings(prev => [{ ...(prev[0] || {}), krogerStoreId: storeId || undefined, krogerStoreName: storeName || undefined }]);
+  // Household store-list editor (Phase-5): sanitize on the way IN so the shared blob never carries junk.
+  const setStoreList = (stores: string[]) =>
+    setSettings(prev => [{ ...(prev[0] || {}), storeList: sanitizeStoreList(stores) }]);
   const handleSetStepUpPin = async (pin: string): Promise<{ ok: boolean; error?: string }> => {
     try {
       const { hash, salt } = await apiSetStepUpPin(pin);
@@ -2892,7 +2773,7 @@ export default function App() {
         .filter(g => g.status !== 'done' && g.status !== 'abandoned')
         .slice(0, 5)
         .map(g => ({ id: g.id, text: g.text, status: g.status, ...(g.nextAction ? { nextAction: g.nextAction } : {}), steps: (g.steps || []).map(s => ({ title: s.title, status: s.status })) }));
-      r = await askConciergeAgent(jwt, agentSessionId, query, { history, family, goals, copilotName });
+      r = await askConciergeAgent(jwt, agentSessionId, query, { history, family, goals, copilotName, stores: storeList });
     } catch (e) {
       console.warn('Agent turn failed; falling back to local copilot.', e);
       return false;
@@ -3125,6 +3006,7 @@ export default function App() {
     shoppingList, setShoppingList,
     sendShoppingToKroger, krogerBusy, krogerStoreName: settings[0]?.krogerStoreName || null,
     krogerOffer, dismissKrogerOffer,
+    storeList, setStoreList,
     newShopText, setNewShopText,
     newShopStore, setNewShopStore,
     newShopQty, setNewShopQty,

@@ -13,6 +13,7 @@ import { findPlaces } from '../utils/placesFetch';
 import { buildHandoffDraft, normHandoffUrl, isLinkObserved } from '../utils/handoff';
 import { READ_TOOL_DEFS, shapeEvents, shapeUpcoming, shapeChores, shapeBills, shapeKnowledgeAsync } from './readTools';
 import { resolveDoc, normalizeFolder } from '../utils/docActions';
+import { sanitizeStoreList } from '../constants';
 import { searchWeb, fetchPage, trustedBookingLinks } from '../utils/webResearch';
 import { sanitizeForPrompt } from '../utils/promptSafety';
 
@@ -336,11 +337,14 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     let ctx = buildToolCtx(today);
     let preloaded: Record<string, any[]> | undefined;
     if (persistence) {
-      const [familyMembers, events] = await Promise.all([
+      const [familyMembers, events, settings] = await Promise.all([
         persistence.loadCollection('members').catch(() => []),
         persistence.loadCollection('events').catch(() => []),
+        persistence.loadCollection('settings').catch(() => []),
       ]);
-      ctx = buildToolCtx(today, { familyMembers: familyMembers as any, events: events as any });
+      // Household-defined store lists (Phase-5): validate add_shopping_item stores against THEIR lists.
+      const validStores = sanitizeStoreList((settings as any[])[0]?.storeList);
+      ctx = buildToolCtx(today, { familyMembers: familyMembers as any, events: events as any, validStores });
       preloaded = { members: familyMembers, events };
     }
     const result = await persistResult(tool.run(args, ctx), persistence, preloaded);

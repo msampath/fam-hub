@@ -37,7 +37,8 @@ export const MORNING_PLANNER_SYSTEM = `You are the family's morning planner. Fro
 - Do NOT repeat anything already on the shopping list or already pending approval. Do NOT propose payments, bookings, or purchases — only list items and calendar suggestions.`;
 
 // @google/genai Type.* form (the Gemini SDK's schema dialect — same pattern as COPILOT_SCHEMA).
-export const MORNING_PLANNER_SCHEMA = {
+// Built per household since Phase-5: the store enum reflects THEIR lists (defaults = SHOP_STORES).
+export const buildMorningPlannerSchema = (stores: readonly string[] = SHOP_STORES) => ({
   type: Type.OBJECT,
   properties: {
     proposals: {
@@ -48,7 +49,7 @@ export const MORNING_PLANNER_SCHEMA = {
         properties: {
           kind: { type: Type.STRING, enum: ['shopping', 'event'], description: 'What to stage: a shopping-list item or a calendar suggestion.' },
           text: { type: Type.STRING, description: 'kind "shopping": the item to buy (short).' },
-          store: { type: Type.STRING, enum: [...SHOP_STORES], description: 'kind "shopping": which store list (optional; defaults to Other).' },
+          store: { type: Type.STRING, enum: [...stores], description: 'kind "shopping": which store list (optional; defaults to the last list).' },
           title: { type: Type.STRING, description: 'kind "event": the activity title (short).' },
           start: { type: Type.STRING, description: 'kind "event": YYYY-MM-DD, today or later.' },
           startTime: { type: Type.STRING, description: 'kind "event": optional HH:MM start time.' },
@@ -60,7 +61,9 @@ export const MORNING_PLANNER_SCHEMA = {
     },
   },
   required: ['proposals'],
-};
+});
+// Default-store schema (back-compat export for existing imports/tests).
+export const MORNING_PLANNER_SCHEMA = buildMorningPlannerSchema();
 
 // Compact, bounded FACTS block — the planner reasons ONLY over these (never told to fetch anything).
 export function buildMorningFacts(input: {
@@ -132,6 +135,7 @@ export function validateMorningProposals(
     pendingLedger?: LedgerEntry[];   // pending entries (don't re-stage what's already waiting)
     goals?: Goal[];                  // open goals (goalId allowlist)
     factsText?: string;              // the exact FACTS block the model saw → rationale cross-check
+    stores?: readonly string[];      // household store lists (Phase-5); defaults to SHOP_STORES
   },
 ): StagedProposal[] {
   const list = Array.isArray(raw) ? raw : [];
@@ -166,7 +170,12 @@ export function validateMorningProposals(
       const text = String(prop.text || '').trim().slice(0, 60);
       if (!text || seenShopping.has(norm(text))) continue;
       seenShopping.add(norm(text));
-      const store = SHOP_STORES.includes(prop.store as (typeof SHOP_STORES)[number]) ? (prop.store as string) : 'Other';
+      // Unknown store → 'Other' when the household has it (the planner's documented default), else
+      // their LAST list (the Other-position by convention). NOT the grocery fallback — a planner
+      // nudge ("buy a gift") is misc-shaped, not grocery-shaped.
+      const stores = ctx.stores && ctx.stores.length ? ctx.stores : SHOP_STORES;
+      const store = stores.includes(prop.store as string) ? (prop.store as string)
+        : (stores.includes('Other') ? 'Other' : stores[stores.length - 1]);
       out.push({ tool: 'add_shopping_item', summary: rationale, payload: { text, store }, goalId });
     } else if (prop.kind === 'event') {
       const title = String(prop.title || '').trim().slice(0, 80);

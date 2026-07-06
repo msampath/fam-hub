@@ -10,6 +10,7 @@ import {
 } from '../../constants';
 import GoogleSyncPanel from '../calendar/GoogleSyncPanel';
 import KrogerPanel from './KrogerPanel';
+import StoreListEditor from './StoreListEditor';
 import { getBackendMode, localChangePassphrase } from '../../supabase';
 import { C, memberHex } from './theme';
 
@@ -270,8 +271,9 @@ export default function Manage({ account, onClose }: ManageProps) {
           </div>
         </Section>
 
-        {/* Grocery cart integration */}
+        {/* The household's own store lists (Phase-5) + grocery cart integration */}
         <Section title="Groceries">
+          <StoreListEditor />
           <KrogerPanel />
         </Section>
 

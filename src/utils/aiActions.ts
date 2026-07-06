@@ -4,6 +4,7 @@
 // handlers are thin glue that call these then the state setters.
 import type { CalendarEvent, Chore, Category, FamilyMember, ShoppingItem, Goal, GoalStep, CopilotSuggestion } from '../types';
 import { uuid } from './uuid';
+import { fallbackStore } from '../constants';
 
 const VALID_CATEGORIES: Category[] = ['School', 'Camp', 'Sports', 'Arts', 'Holiday', 'Other'];
 
@@ -417,6 +418,8 @@ export function normalizeShoppingItems(
       id: 'shop-' + uuid(),
       text: i.text!.trim().slice(0, 200),
       completed: false,
-      store: (validStores.includes(i.store as ShoppingItem['store']) ? i.store : 'Grocery Store') as ShoppingItem['store'],
+      // Unknown/model-invented store → the household's general-grocery list when it exists, else the
+      // LAST list (the "Other"-position by convention). Was hardcoded 'Grocery Store' pre-Phase-5.
+      store: validStores.includes(i.store as ShoppingItem['store']) ? (i.store as string) : fallbackStore(validStores),
     }));
 }

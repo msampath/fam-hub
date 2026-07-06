@@ -45,6 +45,8 @@ export interface AgentTurnContext {
   goals?: { id: string; text: string; status: string; nextAction?: string; steps: { title: string; status: string }[] }[];
   // The family's name for the copilot (household setting) — the agent answers to it.
   copilotName?: string;
+  // Household-defined store lists (Phase-5) — so the shopping specialist routes to THEIR lists.
+  stores?: string[];
 }
 
 // Coerce a raw JSON action element into the AgentAction shape. Defense-in-depth at the wire boundary (the
@@ -76,6 +78,7 @@ export async function askConciergeAgent(jwt: string | null, sessionId: string, m
       ...(ctx?.family ? { family: ctx.family } : {}),
       ...(ctx?.goals?.length ? { goals: ctx.goals } : {}),
       ...(ctx?.copilotName && ctx.copilotName !== 'Copilot' ? { copilotName: ctx.copilotName } : {}),
+      ...(ctx?.stores?.length ? { stores: ctx.stores } : {}),
     }),
   });
   if (!res.ok) throw new Error(`The agent is unavailable right now (${res.status}). Try again in a moment.`);

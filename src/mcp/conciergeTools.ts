@@ -153,7 +153,7 @@ const REGISTRY_TOOL_DEFS: Omit<McpToolDef, 'run'>[] = [
       type: 'object',
       properties: {
         text: { type: 'string', description: 'The item.' },
-        store: { type: 'string', description: 'Costco|Indian Store|Grocery Store|Other' },
+        store: { type: 'string', description: "One of the household's store lists (defaults: Costco|Indian Store|Grocery Store|Other); unknown stores are re-routed to their general list." },
       },
       required: ['text'],
     },

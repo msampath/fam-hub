@@ -103,6 +103,7 @@ class ChatIn(BaseModel):
     family: str | None = None           # roster "Leo (8, Kid), Ava (5, Kid)" so the agent doesn't guess ages
     goals: list[dict] | None = None     # the family's CURRENT tracked goals [{id,text,status,nextAction,steps}]
     copilotName: str | None = None      # what the family calls the copilot (kid-pickable) — answer to it
+    stores: list[str] | None = None     # household store lists (Phase-5) — route add_shopping_item to THESE
 
 
 def _visitor_id(jwt: str | None) -> str:
@@ -169,6 +170,12 @@ async def chat(body: ChatIn, authorization: str | None = Header(default=None)):
     if body.family:
         # Use the REAL ages; never assume a child's age.
         context += f" Family members: {body.family}. Use these exact ages — do not guess."
+    if body.stores:
+        # Household-defined store lists (Phase-5): clamp count+length; the shopping specialist routes
+        # items to THESE names instead of the default Costco/Indian Store/Grocery Store/Other set.
+        safe_stores = [" ".join(str(s).split())[:24] for s in body.stores[:8] if str(s).strip()]
+        if safe_stores:
+            context += f" The family's shopping store lists are exactly: {', '.join(safe_stores)}. Use these names for any store list."
     context += ")"
     # Carry the recent local-copilot conversation so an escalated turn hears the user's framing.
     convo = ""

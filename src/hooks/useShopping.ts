@@ -13,6 +13,11 @@ export type ShopStore = ShoppingItem['store'];
 
 export interface UseShoppingDeps {
   authorStamp: () => Authored;
+  // Household-defined store lists (Phase-5) — already sanitized by App (never empty). Falls back to
+  // the SHOP_STORES defaults when omitted (tests / pre-settings render).
+  storeList?: string[];
+  // Which list maps to the Kroger cart (the dish-ask auto-offer filter). Default 'Grocery Store'.
+  krogerListStore?: string;
 }
 
 export interface UseShopping {
@@ -49,8 +54,9 @@ export interface UseShopping {
 // Shopping + pantry domain: store list state, the manual add-item form fields, pantry inventory, and
 // the AI helpers (recipe→list, pantry→restock). appendShoppingItems is exposed because the copilot /
 // quick-add path in App also appends shopping items through it.
-export function useShopping({ authorStamp }: UseShoppingDeps): UseShopping {
-  const VALID_STORES = SHOP_STORES as readonly ShopStore[];
+export function useShopping({ authorStamp, storeList, krogerListStore }: UseShoppingDeps): UseShopping {
+  const VALID_STORES = (storeList && storeList.length ? storeList : SHOP_STORES) as readonly ShopStore[];
+  const krogerStoreList = krogerListStore || 'Grocery Store';
 
   const [shoppingList, setShoppingList] = useState<ShoppingItem[]>(() => {
     const saved = localStorage.getItem('famplan_shopping');
@@ -78,10 +84,11 @@ export function useShopping({ authorStamp }: UseShoppingDeps): UseShopping {
   const [krogerOffer, setKrogerOffer] = useState<{ texts: string[] } | null>(null);
   const dismissKrogerOffer = () => setKrogerOffer(null);
 
-  // Grocery-store items from an AI batch — the ones a Kroger cart could carry. Costco/Indian-Store
-  // routed items deliberately stay on their own lists (the acceptance contract).
+  // Kroger-carried items from an AI batch — the ones on the household's Kroger-mapped list
+  // (settings.krogerListStore, default 'Grocery Store'). Items routed to OTHER lists (Costco,
+  // Indian Store, custom) deliberately stay on their own lists (the acceptance contract).
   const groceryTexts = (items: { text?: string; store?: string }[]) =>
-    normalizeShoppingItems(items, VALID_STORES).filter(i => i.store === 'Grocery Store').map(i => i.text);
+    normalizeShoppingItems(items, VALID_STORES).filter(i => i.store === krogerStoreList).map(i => i.text);
 
   const appendShoppingItems = (items: { text?: string; store?: string }[]) => {
     const stamp = authorStamp();
@@ -107,7 +114,7 @@ export function useShopping({ authorStamp }: UseShoppingDeps): UseShopping {
     setIsParsingRecipe(true);
     setShoppingAiError(null);
     try {
-      const res = await apiFetch('/api/parse-recipe', { method: 'POST', body: JSON.stringify({ text: recipeInput.trim() }) });
+      const res = await apiFetch('/api/parse-recipe', { method: 'POST', body: JSON.stringify({ text: recipeInput.trim(), stores: VALID_STORES }) });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(aiErrorMessage(res.status, body, 'Could not extract ingredients from that recipe.', 'Add the items to your list manually for now.'));
@@ -136,7 +143,7 @@ export function useShopping({ authorStamp }: UseShoppingDeps): UseShopping {
     try {
       const res = await apiFetch('/api/pantry-restock', {
         method: 'POST',
-        body: JSON.stringify({ pantry: pantryList.map(p => p.text), recipes: shoppingList.map(s => s.text) }),
+        body: JSON.stringify({ pantry: pantryList.map(p => p.text), recipes: shoppingList.map(s => s.text), stores: VALID_STORES }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -162,7 +169,7 @@ export function useShopping({ authorStamp }: UseShoppingDeps): UseShopping {
     setShoppingAiError(null);
     setMealPlan([]);
     try {
-      const res = await apiFetch('/api/meal-plan', { method: 'POST', body: JSON.stringify({ pantry: pantryList.map(p => p.text) }) });
+      const res = await apiFetch('/api/meal-plan', { method: 'POST', body: JSON.stringify({ pantry: pantryList.map(p => p.text), stores: VALID_STORES }) });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(aiErrorMessage(res.status, body, 'Could not plan meals from your pantry.', 'Add items to your list manually for now.'));
@@ -188,7 +195,7 @@ export function useShopping({ authorStamp }: UseShoppingDeps): UseShopping {
       const payload = await fileToScanPayload(file);
       const res = await apiFetch('/api/vision-scan-pantry', {
         method: 'POST',
-        body: JSON.stringify({ ...payload, pantry: pantryList.map(p => p.text) }),
+        body: JSON.stringify({ ...payload, pantry: pantryList.map(p => p.text), stores: VALID_STORES }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
