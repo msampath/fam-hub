@@ -265,7 +265,13 @@ export interface HouseholdSettings {
   // Which of the household's lists maps to the Kroger cart (send-to-cart + the dish-ask auto-offer).
   // Unset → 'Grocery Store'.
   krogerListStore?: string;
+  // Pattern-4 routines the PARENT enabled (mined from the quick-add log, surfaced as Manage toggles —
+  // never silently injected). An enabled routine stages a confirm-tier draft on its weekday's digest.
+  routines?: Routine[];
 }
+
+// A weekday shopping routine (Pattern-4). weekday: 0=Sun … 6=Sat. Lives in settings.routines.
+export interface Routine { text: string; store?: string; weekday: number; enabled: boolean }
 
 // A "last visited" tracker per place (venue/outing), NOT a full event history — bounded and
 // concrete. Captured via the one-tap "We went" button on a past event; the server turns it into a

@@ -50,6 +50,7 @@ import type {
   Authored,
   GoogleCalendarListEntry,
   LedgerEntry,
+  Routine,
 } from './types';
 import { APP_NAME, MEMBER_COLORS_LIST, MEMBER_COLORS_MAP, FAMILY_COLOR_THEME, sanitizeStoreList } from './constants';
 import {
@@ -76,6 +77,7 @@ import { matchOwnProfileIndex, healMemberLink } from './utils/identity';
 import { buildDemoSeed } from './utils/demoSeed';
 import { krogerCartAdd } from './utils/krogerClient';
 import { LEDGER_APPLIERS } from './utils/ledgerAppliers';
+import { mineShoppingRoutines } from './utils/routineMiner';
 import { isAgentConfigured, askConciergeAgent, type AgentAction } from './utils/agentClient';
 import { routeTurn } from './utils/copilotRouter';
 import { buildAgentActionResult, detectUnbackedClaims } from './utils/agentActions';
@@ -2580,6 +2582,12 @@ export default function App() {
   // Household store-list editor (Phase-5): sanitize on the way IN so the shared blob never carries junk.
   const setStoreList = (stores: string[]) =>
     setSettings(prev => [{ ...(prev[0] || {}), storeList: sanitizeStoreList(stores) }]);
+  // Pattern-4 routines: mined CANDIDATES (from the quick-add log, client-side) + the parent-enabled
+  // set persisted in settings. Enabling one is what authorizes its weekday digest draft — never silent.
+  const routineCandidates = useMemo(() => mineShoppingRoutines(quickAddLog), [quickAddLog]);
+  const routines = settings[0]?.routines || [];
+  const setRoutines = (r: Routine[]) =>
+    setSettings(prev => [{ ...(prev[0] || {}), routines: r.slice(0, 12) }]);
   const handleSetStepUpPin = async (pin: string): Promise<{ ok: boolean; error?: string }> => {
     try {
       const { hash, salt } = await apiSetStepUpPin(pin);
@@ -3007,6 +3015,7 @@ export default function App() {
     sendShoppingToKroger, krogerBusy, krogerStoreName: settings[0]?.krogerStoreName || null,
     krogerOffer, dismissKrogerOffer,
     storeList, setStoreList,
+    routineCandidates, routines, setRoutines,
     newShopText, setNewShopText,
     newShopStore, setNewShopStore,
     newShopQty, setNewShopQty,

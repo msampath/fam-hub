@@ -59,7 +59,9 @@ import { buildBillQuery, billToSuggestion, buildBillParsePrompt, type ParsedBill
 import { buildNewsletterQuery, buildNewsletterClassifyPrompt } from './src/utils/newsletters';
 import { buildPackageQuery, packageToSuggestion, buildPackageParsePrompt, type ParsedPackage } from './src/utils/packages';
 import { buildKidsActivityQuery, activityToSuggestion, buildKidsActivityParsePrompt, type ParsedActivity } from './src/utils/kidsActivities';
-import type { CalendarEvent, Chore, LedgerEntry, Goal, ShoppingItem } from './src/types';
+import type { CalendarEvent, Chore, FamilyMember, LedgerEntry, Goal, ShoppingItem } from './src/types';
+import { buildMemberSections, buildRichNudges } from './src/utils/personalDigest';
+import { buildRoutineDrafts } from './src/utils/routineMiner';
 // Single-click LAN appliance: local SQLite storage + local household auth (no Supabase). See src/storage/.
 import { storageMode, getSqliteAdapter } from './src/storage';
 import { handleDataGet, handleDataSave, handleDataLoadAll } from './src/storage/dataApi';
@@ -3121,16 +3123,18 @@ async function runDailyDigest(): Promise<void> {
     // missed digest on a send failure over a duplicate. (True multi-instance safety needs an atomic claim /
     // Cloud Scheduler; the in-process reentrancy guard below covers the single-instance overlap.)
     await admin.from('family_data').upsert(familyDataRow(row.household_id, 'digestprefs', [{ ...prefs, lastRunDate: today }]), { onConflict: FAMILY_DATA_CONFLICT });
-    const [ev, ch, st, lg, gl, sh] = await Promise.all([
+    const [ev, ch, st, lg, gl, sh, mb] = await Promise.all([
       admin.from('family_data').select('data').eq('household_id', row.household_id).eq('data_key', 'events').maybeSingle(),
       admin.from('family_data').select('data').eq('household_id', row.household_id).eq('data_key', 'chores').maybeSingle(),
       admin.from('family_data').select('data').eq('household_id', row.household_id).eq('data_key', 'settings').maybeSingle(),
       admin.from('family_data').select('data').eq('household_id', row.household_id).eq('data_key', 'actionledger').maybeSingle(),
       admin.from('family_data').select('data').eq('household_id', row.household_id).eq('data_key', 'goals').maybeSingle(),
       admin.from('family_data').select('data').eq('household_id', row.household_id).eq('data_key', 'shopping').maybeSingle(),
+      admin.from('family_data').select('data').eq('household_id', row.household_id).eq('data_key', 'members').maybeSingle(),
     ]);
     const events = asTypedArray<CalendarEvent>(ev.data?.data);
-    const briefing = buildBriefing(events, asTypedArray<Chore>(ch.data?.data), today);
+    const choresArr = asTypedArray<Chore>(ch.data?.data);
+    const briefing = buildBriefing(events, choresArr, today);
 
     // Home location → today's weather + air quality. Fetched once here and reused by BOTH the proactive
     // umbrella nudge and the email's weather line (best-effort; cached; null/empty when no home is set).
@@ -3167,7 +3171,15 @@ async function runDailyDigest(): Promise<void> {
         } catch (e: any) {
           console.warn('[digest] morning planner skipped (deterministic nudges still staged):', e?.message || e);
         }
-        const allStaged = [...staged, ...planned];
+        // Pattern-4 ROUTINES (parent-enabled Manage toggles only — never mined-and-injected silently):
+        // an enabled routine whose weekday is today stages its confirm-tier draft, deduped against
+        // everything already pending/staged and the live shopping list.
+        const routineDrafts = buildRoutineDrafts(
+          home.routines, today, [...ledger, ...staged, ...planned],
+          asTypedArray<ShoppingItem>(sh.data?.data).filter(s => !s.completed).map(s => s.text),
+          () => 'ledg-' + randomUUID(), stamp,
+        );
+        const allStaged = [...staged, ...planned, ...routineDrafts];
         if (allStaged.length) {
           const merged = [...ledger, ...allStaged].slice(-LEDGER_CAP);
           await admin.from('family_data').upsert(familyDataRow(row.household_id, 'actionledger', merged), { onConflict: FAMILY_DATA_CONFLICT });
@@ -3184,6 +3196,12 @@ async function runDailyDigest(): Promise<void> {
     const parts = [briefingToText(briefing, weatherLine)];
     if (stagedCount) parts.push(`🛎️ ${stagedCount} draft${stagedCount === 1 ? '' : 's'} waiting in Approvals — review when you open the app.`);
     if (goalNudges.length) parts.push(`Goals in progress:\n${goalNudges.join('\n')}`);
+    // Personalized sections (W4): each member's own day + the richer calendar-grounded nudge set.
+    // Deterministic facts — the composing agent may rephrase them, never invent beyond them.
+    const memberSections = buildMemberSections(asTypedArray<FamilyMember>(mb.data?.data), events, choresArr, today);
+    if (memberSections.length) parts.push(memberSections.join('\n\n'));
+    const richNudges = buildRichNudges(events, today, asTypedArray<ShoppingItem>(sh.data?.data).filter(s => !s.completed).length);
+    if (richNudges.length) parts.push(`Worth planning ahead:\n${richNudges.map(n => `- ${n}`).join('\n')}`);
     const factsText = parts.join('\n\n');
     // The ADK concierge AUTHORS the briefing from these verified facts (genuinely agent-generated, not
     // template text); falls back to the deterministic facts text if the agent is unreachable.

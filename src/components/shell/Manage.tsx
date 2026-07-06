@@ -11,6 +11,7 @@ import {
 import GoogleSyncPanel from '../calendar/GoogleSyncPanel';
 import KrogerPanel from './KrogerPanel';
 import StoreListEditor from './StoreListEditor';
+import RoutinesPanel from './RoutinesPanel';
 import { getBackendMode, localChangePassphrase } from '../../supabase';
 import { C, memberHex } from './theme';
 
@@ -275,6 +276,11 @@ export default function Manage({ account, onClose }: ManageProps) {
         <Section title="Groceries">
           <StoreListEditor />
           <KrogerPanel />
+        </Section>
+
+        {/* Pattern-4 routines — mined suggestions the parent explicitly enables (never silent) */}
+        <Section title="Routines">
+          <RoutinesPanel />
         </Section>
 
         {/* Family members + dietary/interests */}

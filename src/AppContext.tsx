@@ -1,6 +1,7 @@
 import React, { createContext, useContext } from 'react';
-import type { ShoppingItem, PantryItem, Chore, Reward, Redemption, XpBankEntry, FamilyMember, Category, Authored, LedgerEntry, CopilotSuggestion, DigestPrefs, Goal } from './types';
+import type { ShoppingItem, PantryItem, Chore, Reward, Redemption, XpBankEntry, FamilyMember, Category, Authored, LedgerEntry, CopilotSuggestion, DigestPrefs, Goal, Routine } from './types';
 import type { PantryDiff } from './utils/visionPantry';
+import type { RoutineCandidate } from './utils/routineMiner';
 
 // Household-defined since Phase-5 (settings.storeList) — any store name the household configured.
 export type ShopStore = string;
@@ -25,6 +26,10 @@ export interface AppCtx {
   // Household-defined store lists (Phase-5): sanitized, never empty (defaults to SHOP_STORES).
   storeList: string[];
   setStoreList: (stores: string[]) => void;
+  // Pattern-4 routines: mined candidates (review-only) + the parent-ENABLED set (settings.routines).
+  routineCandidates: RoutineCandidate[];
+  routines: Routine[];
+  setRoutines: (r: Routine[]) => void;
   homeLat: number | null;
   homeLng: number | null;
   newShopText: string;

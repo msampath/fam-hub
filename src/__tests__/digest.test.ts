@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { shouldRunDigestNow } from '../utils/digest';
-import { sendDigestEmail } from '../utils/mailer';
+import { sendDigestEmail, makeMailer, consoleMailer } from '../utils/mailer';
 
 describe('shouldRunDigestNow', () => {
   const at = (h: number) => new Date(2026, 5, 24, h, 0, 0);
@@ -37,5 +37,25 @@ describe('sendDigestEmail', () => {
     expect(url).toBe('https://api.resend.com/emails');
     expect((init.headers as any).Authorization).toBe('Bearer k');
     expect(JSON.parse(init.body).to).toBe('a@b.com');
+  });
+});
+
+describe('mailer port (Phase-6 adapters)', () => {
+  afterEach(() => { vi.unstubAllEnvs(); });
+
+  it('MAILER=console prints instead of sending and reports ok', async () => {
+    const lines: string[] = [];
+    const m = consoleMailer(s => lines.push(s));
+    const r = await m.send('a@b.com', 'Subj', 'Body');
+    expect(r).toEqual({ ok: true });
+    expect(lines[0]).toContain('to=a@b.com');
+    expect(lines[0]).toContain('Subj');
+  });
+
+  it('makeMailer selects by MAILER env, defaulting to resend-with-key else skip-off', () => {
+    expect(makeMailer({ MAILER: 'console' }).name).toBe('console');
+    expect(makeMailer({ MAILER: 'off', RESEND_API_KEY: 'k' }).name).toBe('off');
+    expect(makeMailer({ RESEND_API_KEY: 'k' }).name).toBe('resend');
+    expect(makeMailer({}).name).toBe('off'); // keyless default NEVER silently "sends" anywhere
   });
 });
