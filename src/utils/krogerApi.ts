@@ -57,7 +57,10 @@ export function effectiveBindings(settings?: {
 } | null): StoreBindings {
   if (settings?.storeBindings && Object.keys(settings.storeBindings).length) return settings.storeBindings;
   if (settings?.krogerStoreId) {
-    return { 'Grocery Store': { locationId: settings.krogerStoreId, name: settings.krogerStoreName || 'Kroger' } };
+    // Legacy names were saved as "CHAIN name" ("FRED Fred Meyer - Issaquah") — strip the leading
+    // all-caps chain code for display; freshly-bound stores save the API name alone.
+    const legacy = (settings.krogerStoreName || 'Kroger').replace(/^[A-Z0-9]{2,8}\s+(?=\S)/, '');
+    return { 'Grocery Store': { locationId: settings.krogerStoreId, name: legacy } };
   }
   return {};
 }

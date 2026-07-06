@@ -74,8 +74,9 @@ describe('effectiveBindings', () => {
   it('prefers explicit bindings, falls back to legacy, else empty', () => {
     const explicit = { 'Indian Store': { locationId: '123', name: 'Apna Bazar' } };
     expect(effectiveBindings({ storeBindings: explicit, krogerStoreId: '999', krogerStoreName: 'Old' })).toEqual(explicit);
+    // The legacy stored name carried the chain-code prefix ("FRED …") — the read-through strips it.
     expect(effectiveBindings({ krogerStoreId: '70100658', krogerStoreName: 'FRED Fred Meyer - Issaquah' }))
-      .toEqual({ 'Grocery Store': { locationId: '70100658', name: 'FRED Fred Meyer - Issaquah' } });
+      .toEqual({ 'Grocery Store': { locationId: '70100658', name: 'Fred Meyer - Issaquah' } });
     expect(effectiveBindings({})).toEqual({});
     expect(effectiveBindings(null)).toEqual({});
     expect(effectiveBindings({ storeBindings: {} })).toEqual({}); // empty object ≠ configured
