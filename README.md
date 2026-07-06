@@ -216,12 +216,12 @@ The server binds `0.0.0.0`, so it's reachable at `http://<host-LAN-IP>:4894` fro
 npm test
 ```
 
-**918 tests** across 96 files (Vitest), grouped by area:
+**1,191 tests** across 117 files (Vitest), grouped by area:
 - **Email → suggestions** — provider-agnostic Gmail normalize/decode (`email`) feeding bills / packages / kids' activities (tight filters, sanitized prompts).
 - **Concierge safety** — draft/stepup tool builders (`aiActions`), the MCP toolbelt + registry parity + **no-payment drafts** incl. `prepare_handoff` (`mcpTools`/`toolRegistry`/`mcpPersistence`), the action-ledger + confirm-tier lifecycle (`historyLog`/`ledger`/`agentActions`), and scrypt step-up PIN hashing.
 - **Agentic patterns** — web research + keyless-DDG parse (`webResearch`), loop-closing handoff (`handoff`), critic/verifier (`copilotCritic`), pantry→meal + vision diff (`visionPantry`), HITL Modify (`reviseDraft`), the proactive morning **planner** (`morningAgent` — validator safety properties: everything stages confirm-tier, horizon-clamped, goalId-allowlisted; plus the legacy deterministic nudges, `proactiveBriefing`).
 - **Grounding & calendar logic** — places/events/weather+AQI+pollen FACTS (`placesFacts`/`eventsFacts`/`weatherFacts`), availability + long-weekend + conflicts + recurring-series + ICS + Gemini resilience + the local-model harness.
-- **Component (jsdom + RTL)** — the copilot bar (escalate · markdown links · Approvals + Modify · kid-mode gating + hold-to-exit), the shell pages (`LibraryPage`, `ShoppingPage` incl. photo-scan, `ChoresPage` incl. kid mode/emoji/confetti/delete-confirm, `TodayPage`), `BriefingCard` (planner proposals → client-side staging), `GoalsStrip`, `EventSheet`/`CalendarOverlay`, `ManageAddMember`, `NamePromptModal`, `ErrorBoundary`, `lazyTabs`; mocks in `src/__tests__/helpers/mockContexts.tsx`.
+- **Component (jsdom + RTL)** — the copilot bar (escalate · markdown links · Approvals + Modify · kid-mode gating + hold-to-exit), the shell pages (`LibraryPage`, `ShoppingPage` incl. photo-scan + per-list Kroger sends, `ChoresPage` incl. kid mode/emoji/confetti/delete-confirm, `TodayPage`), `KrogerPanel` (two-level connections — a list row never offers store locations), `BriefingCard` (planner proposals → client-side staging), `GoalsStrip`, `EventSheet`/`CalendarOverlay`, `ManageAddMember`, `NamePromptModal`, `ErrorBoundary`, `lazyTabs`; mocks in `src/__tests__/helpers/mockContexts.tsx`.
 
 The **Python agent eval** (`agent/tests/test_eval.py`) adds offline structural no-payment proofs (always-run) + live refusal/prompt-injection prompts (owner-run). The test files in `src/__tests__/` are the authoritative detail — this is just the map.
 

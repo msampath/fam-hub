@@ -55,8 +55,8 @@ npm run lint && npx vitest run && npm run build
 cd agent && python -m pytest
 ```
 
-That's `tsc --noEmit` (zero errors), the vitest suite (~961 tests across 101 files), a full
-production build, and the Python agent tests (35 pass; 5 live tests self-skip without keys —
+That's `tsc --noEmit` (zero errors), the vitest suite (~1,191 tests across 117 files), a full
+production build, and the Python agent tests (37 pass; 6 live tests self-skip without keys —
 that's expected).
 
 ## Weak-model eval gates

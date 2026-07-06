@@ -9,8 +9,9 @@ Current shipped state lives in [`PROJECT_STATUS.md`](./PROJECT_STATUS.md); direc
 
 ## [Unreleased]
 
-Post-submission work on `main`. The submission itself is frozen on `initial-push` (tag
-`capstone-submitted`) until Kaggle judging ends — no deploys, no env changes, no commits there.
+Post-submission work on `main`, synced to `initial-push` inside the still-open submission window
+(2026-07-06). The as-submitted snapshot is preserved by the `capstone-submitted` tag; the deployed
+Cloud Run services, their env, and the Supabase config stay frozen until Kaggle judging ends.
 
 ### Added
 - **Weak-model eval harness** — `scripts/eval-quickpath.ts` + `src/utils/evalScorers.ts` +
@@ -21,14 +22,23 @@ Post-submission work on `main`. The submission itself is frozen on `initial-push
   @ q4 scores 18/18 with scope+safety perfect, 100% locally served, vs the `gemini-2.5-flash`
   baseline's 13/18; the first run was 94% vs 78%). **Decision B (agent path)** stays gated —
   local never serves the ADK agent unless ≥90% valid tool calls + 0 destructive misfires.
-- **Kroger send-to-cart loop** — connect a QFC / Fred Meyer / Kroger store in Manage → Groceries,
-  hit **Send to cart**, and grocery items are matched to real products (schema-enforced
-  choose-from-candidates matching, because Kroger's fuzzy search returns frying pans for "paneer")
-  and staged as **one confirm-tier `kroger_cart_write` Approval**; approving writes the items to your
-  actual Kroger cart. Payment stays in Kroger's own app — the public Kroger API has **no
-  checkout/payment endpoint**, so the no-payment invariant holds by contract. Includes the pure API
-  module (`src/utils/krogerApi.ts`), six server routes, the connect panel, and the approved-write
-  applier. A dish ask ("I want paneer butter masala") now auto-offers the send-to-cart staging.
+- **Kroger send-to-cart loop — closed and owner-verified E2E at a live store (2026-07-06)** — the
+  project's first fully closed agentic experience: a dish ask → family-scaled buy-unit ingredients →
+  routed store lists → per-list **Send** → LLM-validated matching → one approval → items in the
+  actual Fred Meyer cart. The pieces: **two-level connections** (the Kroger API is connected once and
+  the physical store is the *connection's* "Shop at" choice; lists link to connections — a list row
+  never offers raw store locations); **pick-or-decline matching** (schema-enforced
+  choose-from-candidates, because Kroger's fuzzy search returns frying pans for "paneer"; search
+  terms cleaned of buy-unit parentheticals + a last-two-words retry after the raw terms matched
+  0/13 live; out-of-stock picks dropped; low-confidence declines re-judged once on a focused second
+  pass); **one confirm-tier `kroger_cart_write` Approval** rendered one line per item with honest
+  per-item reasons (*no match at this store* ≠ *couldn't confidently match — try Send again* ≠
+  *search failed*) and a quantities-default-to-1 note (presence-model lists carry buy units, not
+  counts); checked-off duplicates re-activate in place instead of duplicating (base-item dedupe,
+  client + MCP server on both storage backends). Payment stays in Kroger's own app — the public
+  Kroger API has **no checkout/payment endpoint**, so the no-payment invariant holds by contract.
+  Pure API module (`src/utils/krogerApi.ts`), six server routes, the two-section connect panel,
+  the approved-write applier, and a dish-ask auto-offer. Setup guide: `docs/kroger-setup.md`.
 - **Quick-add critic** (`src/utils/quickAddCritic.ts`) — the natural-language quick-add path gets
   the same verify-before-apply treatment the copilot already had.
 - **Model fallback chains** — `GEMINI_FALLBACKS` (Express quick path, may end in `local`) and
@@ -52,6 +62,11 @@ Post-submission work on `main`. The submission itself is frozen on `initial-push
   `planning/post-capstone-plan.md` and the roadmap half of `future_ideas.md`.
 
 ### Fixed
+- **Photo-file traversal guard made platform-independent** — `photoPathFor` relied on
+  `path.basename`, which treats `\` as a separator only on Windows; on Linux a `..\`-style name
+  round-tripped the check and fell through to a 404 instead of the intended 400 rejection (caught by
+  the first CI run of the supertest harness). Both separators are now rejected explicitly before any
+  path call.
 - **Browser-proof Kroger OAuth** — the popup handoff (postMessage / `window.opener` / shared
   localStorage) is browser-fragile: COOP severs the opener, Safari ITP / Brave shields / ad-blockers
   eat the rest. The callback now stashes the refresh token server-side keyed by the single-use
@@ -64,6 +79,11 @@ Post-submission work on `main`. The submission itself is frozen on `initial-push
 - Restored and committed the planning/SSOT corpus (~50 files — `PROJECT_STATUS.md` history,
   `future_ideas.md`, agent-harness notes, review reports) that had only ever existed untracked in
   the original dev checkout; secret/PII-scanned first. The corpus now travels with the repo.
+- **Kroger loop documented end to end** — new `docs/kroger-setup.md` (developer app, per-origin
+  redirect URIs, env, the two-level model, the send pipeline, troubleshooting); user-guide/README/
+  INSTALL refreshed to the shipped flow; the Kaggle writeup gained an in-window "Added agentic
+  scope" section; the video deck gained an "Intent → a real grocery cart" slide with the live
+  approval-card + fredmeyer.com-cart screenshots (10 slides; the recorded video predates it).
 
 ## [0.1.0] - 2026-07-05
 

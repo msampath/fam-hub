@@ -116,7 +116,14 @@ become calendar data, so no separate agent pretends to own them.
 
 Security is **server-authoritative**, never trusted to the model:
 
-- **No-payment invariant** — no tool moves money; bookings/carts are DRAFT links the parent completes themselves.
+- **No-payment invariant** — no tool moves money; bookings are DRAFT links the parent completes themselves,
+  and the one real retailer write (below) is to a cart, never a checkout.
+- **Retailer cart writes (Kroger)** — the household connects the Kroger API once; the physical store is a
+  property of the CONNECTION and shopping lists link to it. A per-list Send matches items against the store's
+  live catalog (schema-enforced pick-or-decline — the model must choose a listed candidate or say no; declines
+  get one focused re-judge), stages ONE confirm-tier Approval with per-item mappings + honest unmatched
+  reasons, and only an approval writes the real cart. The public Kroger API has **no checkout/payment
+  endpoint**, so payment stays in Kroger's own app by contract. Setup: [`kroger-setup.md`](kroger-setup.md).
 - **Risk tiers** — each tool is `auto` (reversible), `confirm` (staged for approval), or `stepup` (confirm + PIN).
 - **Household scoping** — every read/write is scoped to the caller's household (RLS in the cloud; single-tenant on the box).
 - **Untrusted content** — fetched web pages and stored documents are sanitized and treated as data, never as instructions.
