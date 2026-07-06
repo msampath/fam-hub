@@ -35,11 +35,19 @@
 !/.github/workflows/
 /.github/workflows/*
 !/.github/workflows/appliance-images.yml
-# scripts/: allow ONLY the installer + the eval runner (the dir also holds a Playwright profile + scratch — keep those ignored).
+# scripts/: allow ONLY the installer + the eval runner + the voice-bridge PoC (the dir also holds a
+# Playwright profile + scratch — keep those ignored).
 !/scripts/
 /scripts/*
 !/scripts/install.sh
 !/scripts/eval-quickpath.ts
+!/scripts/voice-bridge-poc.mjs
+
+# .claude/: ship ONLY the repo's dev-workflow skills (add-a-specialist / verify-suite /
+# add-copilot-action); local runner config (launch.json, settings.local.json) stays untracked.
+!/.claude/
+/.claude/*
+!/.claude/skills/
 
 # Curated public docs (capstone §9 step 1): all root .md (README + design/plan docs) + the docs/ and
 # planning/ dirs. Raw session scratch (transcripts, external-tool dumps) is re-ignored in section 3.

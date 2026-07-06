@@ -2,6 +2,25 @@
 
 An AI-powered family coordination app for managing schedules, chores, and shopping. Built with React 19 + Express, backed by Supabase for real-time cross-device sync, and powered by Google Gemini for calendar extraction, natural-language quick-add, and an agentic planning copilot.
 
+> Project meta: [`CHANGELOG.md`](./CHANGELOG.md) · [`CONTRIBUTING.md`](./CONTRIBUTING.md) · [`SECURITY.md`](./SECURITY.md)
+
+## Three ways to run it
+
+1. **LAN appliance — SQLite, the recommended self-host path.** One compose command on any always-on
+   Docker box; no accounts beyond a free [Gemini key](https://aistudio.google.com/apikey), data in a
+   local SQLite file. Install guide: [`docs/INSTALL.md`](./docs/INSTALL.md) · architecture + security
+   model: [`docs/lan-appliance.md`](./docs/lan-appliance.md).
+2. **Local dev.** `npm install`, copy `.env.example` → `.env` (a Gemini key is enough — storage
+   defaults to SQLite), then `npm run dev` at `http://localhost:4894`. Add Supabase for cloud sync.
+   Details: the [Setup](#setup) section below.
+3. **Cloud — Supabase + Cloud Run.** Google OAuth + Postgres/RLS via Supabase, two Cloud Run
+   services (web + agent), Cloud Scheduler for the morning agent. Walkthrough:
+   [`docs/cloud-run-deploy.md`](./docs/cloud-run-deploy.md).
+
+> Self-hosters bring their **own** credentials: register your own Google OAuth client (sign-in +
+> Calendar sync, cloud mode) and — optionally — your own Kroger developer app for send-to-cart.
+> Every knob is documented in [`.env.example`](./.env.example).
+
 ---
 
 ## 🏠 Run it on your own LAN (zero-cloud self-host appliance)
