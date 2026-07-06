@@ -297,6 +297,9 @@ function buildChoreFor(p: any, assignedTo: string): Chore {
     timesPerDay: clampInt(p.timesPerDay, 1, 1, 20),
     repeatType: p.repeatType === 'weekly' ? 'weekly' : 'daily',
     scheduleTimeOfDay: p.scheduleTimeOfDay ? String(p.scheduleTimeOfDay) : undefined,
+    // Latent-bug fix (chore-plan spec): every field EXCEPT notes was copied here, so AI-added chores
+    // silently dropped their "how/why" guidance — the most valuable part of a generated plan.
+    notes: p.notes ? String(p.notes).slice(0, 500) : undefined,
   };
 }
 

@@ -185,6 +185,14 @@ export function makeAppCtx(overrides: Partial<AppCtx> = {}): AppCtx {
     // History-log privacy wipe (Manage → Account)
     clearCopilotHistory: vi.fn(),
 
+    // AI starter chore plan (GenerateChoresModal / ChoresPage empty state)
+    isGeneratingChoresOpen: false,
+    setIsGeneratingChoresOpen: vi.fn(),
+    isGeneratingChores: false,
+    choreGenError: null,
+    handleGenerateChores: vi.fn(async () => []),
+    addGeneratedChores: vi.fn(() => ({ added: 0, duplicates: 0 })),
+
     // Email scans (bills/packages/kids) + suggestion create
     scanEmailForBills: vi.fn(async () => ({ suggestions: [], scanned: 0 })),
     scanEmailForPackages: vi.fn(async () => ({ suggestions: [], scanned: 0 })),

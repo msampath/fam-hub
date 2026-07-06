@@ -72,6 +72,7 @@ const PROTECTED_ROUTES: [method: 'get' | 'post', path: string][] = [
   ['post', '/api/photos/upload'],
   ['post', '/api/revise-draft'],
   ['post', '/api/parse-quickadd'],
+  ['post', '/api/generate-chores'],
   ['post', '/api/copilot'],
   ['post', '/api/google-refresh'],
   ['get', '/api/kroger/auth-url'],
@@ -142,6 +143,7 @@ describe('input-validation 4xx (deterministic, pre-AI/pre-network)', () => {
     ['/api/vision-scan-pantry', {}, 'image'],
     ['/api/revise-draft', { tool: 'create_event' }, 'requested change'],
     ['/api/parse-quickadd', { text: '' }, 'text'],
+    ['/api/generate-chores', { kids: [{ name: 'Ava', age: 99 }] }, 'age'],
     ['/api/copilot', {}, 'Prompt'],
     ['/api/google-refresh', {}, 'Refresh token'],
   ] as [string, any, string][])('%s rejects an empty/missing payload with 400', async (route, body, needle) => {

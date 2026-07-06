@@ -148,3 +148,28 @@ describe('ChoresPage', () => {
     expect(screen.queryByTestId('confetti-burst')).not.toBeInTheDocument();
   });
 });
+
+describe('ChoresPage — AI starter chore plan entry point', () => {
+  it('offers the generate button on the GLOBAL empty state and opens the modal', () => {
+    const setIsGeneratingChoresOpen = vi.fn();
+    renderWithApp(<ChoresPage />, { familyMembers: members, choresList: [], setIsGeneratingChoresOpen });
+    const btn = screen.getByText(/Generate a starter chore plan/i);
+    fireEvent.click(btn);
+    expect(setIsGeneratingChoresOpen).toHaveBeenCalledWith(true);
+  });
+
+  it('retires the button once ANY chore exists (even for another kid) and hides it in kid mode', () => {
+    // Ava's board is empty but Max has a chore → per-kid empty text shows WITHOUT the starter button.
+    renderWithApp(<ChoresPage />, {
+      familyMembers: members,
+      choresList: [chore({ id: 'c1', assignedTo: 'Max' })],
+    });
+    expect(screen.getByText(/No chores yet for Ava/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Generate a starter chore plan/i)).toBeNull();
+  });
+
+  it('is absent in kid mode even on the empty state (parents review plans)', () => {
+    renderWithApp(<ChoresPage />, { familyMembers: members, choresList: [], kidMode: true });
+    expect(screen.queryByText(/Generate a starter chore plan/i)).toBeNull();
+  });
+});

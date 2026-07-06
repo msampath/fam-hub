@@ -68,7 +68,8 @@ import { mergeDeduplicateEvents, detectRecurringGroups, filterHiddenEvents, appl
 import { buildDailyReminder, shouldFireDailyReminder, dueEventReminders, type ReminderContent } from './utils/reminders';
 import { filterConflictWindow, detectConflicts } from './utils/conflicts';
 import type { RecurringGroup } from './utils/events';
-import { buildEventFromPayload, buildEventUpdateFromPayload, buildChoresFromPayload, choreDedupeKey, suggestionKey, buildReservationDraft, buildCartDraft, resolveEventDeletion } from './utils/aiActions';
+import { buildEventFromPayload, buildEventUpdateFromPayload, buildChoreFromPayload, buildChoresFromPayload, choreDedupeKey, suggestionKey, buildReservationDraft, buildCartDraft, resolveEventDeletion } from './utils/aiActions';
+import type { GeneratedChore } from './utils/chorePlan';
 import { aiErrorMessage } from './utils/aiErrors';
 import { mergeBills, type ParsedBillLike } from './utils/billsStore';
 import { mergeNewsletterDocs } from './utils/newsletters';
@@ -104,6 +105,7 @@ import NamePromptModal from './components/NamePromptModal';
 // Code-split the add-event modal: it isn't shown on the landing view, so it loads on demand instead
 // of bloating the initial bundle. SignInGate + NamePromptModal stay eager (critical sign-in paths).
 const AddEventModal = lazy(() => import('./components/AddEventModal'));
+const GenerateChoresModal = lazy(() => import('./components/GenerateChoresModal'));
 import DarkShell from './components/shell/DarkShell';
 import { useIdleTimeout } from './useIdleTimeout';
 import { CalendarContext, type CalendarCtx } from './CalendarContext';
@@ -2253,6 +2255,53 @@ export default function App() {
     return { added, duplicates };
   };
 
+  // ── AI starter chore plan (docs/ai-chore-plan-generator.md) ───────────────────────────────────
+  // Empty-state modal (GenerateChoresModal): parent gives each kid's age (+ optional interests/gender),
+  // ONE endpoint call returns a sanitized plan, the parent reviews a per-kid preview, and the selected
+  // rows bulk-add below. Errors are surfaced inline — never a fabricated plan.
+  const [isGeneratingChoresOpen, setIsGeneratingChoresOpen] = useState(false);
+  const [isGeneratingChores, setIsGeneratingChores] = useState(false);
+  const [choreGenError, setChoreGenError] = useState<string | null>(null);
+
+  const handleGenerateChores = async (kids: { name: string; age: number; interests?: string; gender?: string }[]): Promise<GeneratedChore[] | null> => {
+    setIsGeneratingChores(true);
+    setChoreGenError(null);
+    try {
+      const res = await apiFetch('/api/generate-chores', { method: 'POST', body: JSON.stringify({ kids }) });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(aiErrorMessage(res.status, errData, 'Could not generate a chore plan.', 'You can add chores manually below.'));
+      }
+      const data = await res.json();
+      return Array.isArray(data?.chores) ? data.chores : [];
+    } catch (e: any) {
+      setChoreGenError(e?.message || 'Could not generate a chore plan.');
+      return null;
+    } finally {
+      setIsGeneratingChores(false);
+    }
+  };
+
+  // Bulk-add the parent-selected rows with ONE shared dedupe Set (spec risk note: looping the per-call
+  // addChoresFromPayload would not dedupe ACROSS the batch). buildChoreFromPayload now carries notes.
+  const addGeneratedChores = (payloads: GeneratedChore[]): { added: number; duplicates: number } => {
+    const stamp = authorStamp();
+    const seen = new Set(choresList.map(choreDedupeKey));
+    const added: Chore[] = [];
+    let duplicates = 0;
+    for (const p of payloads) {
+      const built = buildChoreFromPayload(p, familyMembers);
+      if (!built) continue;
+      const c = { ...built, ...stamp };
+      const key = choreDedupeKey(c);
+      if (seen.has(key)) { duplicates++; continue; }
+      seen.add(key);
+      added.push(c);
+    }
+    if (added.length) setChoresList(prev => [...prev, ...added]);
+    return { added: added.length, duplicates };
+  };
+
   // Dispatch a quick-add classification result to the right existing handler.
   const dispatchQuickAddResult = (result: any): string => {
     const kind = result?.kind;
@@ -3085,6 +3134,8 @@ export default function App() {
     newChoreRepeatType, setNewChoreRepeatType,
     newChoreScheduleTime, setNewChoreScheduleTime,
     newChoreNotes, setNewChoreNotes,
+    isGeneratingChoresOpen, setIsGeneratingChoresOpen, isGeneratingChores, choreGenError,
+    handleGenerateChores, addGeneratedChores,
     rewardsList, redemptionsList, xpBankList,
     newRewardTitle, setNewRewardTitle,
     newRewardCost, setNewRewardCost,
@@ -3233,6 +3284,11 @@ export default function App() {
       {/* DYNAMIC SPANNING MODAL: QUICK POPUP TO MANUALLY ADD EVENTS FOR A SPECIFIC DATE (lazy) */}
       <Suspense fallback={null}>
         {isAddingEvent && selectedDayToAdd && <AddEventModal />}
+      </Suspense>
+
+      {/* AI starter chore plan (Chores empty state → age form → parent-reviewed preview; lazy) */}
+      <Suspense fallback={null}>
+        {isGeneratingChoresOpen && <GenerateChoresModal />}
       </Suspense>
 
       {/* Stale-write toast (§5.3 last-mile): a rejected concurrent write triggered a convergence

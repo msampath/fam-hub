@@ -30,6 +30,7 @@ export default function ChoresPage() {
     newChoreTitle, setNewChoreTitle, newChoreAssigned, setNewChoreAssigned,
     newChorePoints, setNewChorePoints, newChoreTimesPerDay, setNewChoreTimesPerDay,
     newChoreRepeatType, setNewChoreRepeatType, newChoreScheduleTime, setNewChoreScheduleTime,
+    setIsGeneratingChoresOpen,
   } = useApp();
 
   const kids = familyMembers.filter(m => m.role === 'Kid');
@@ -292,6 +293,22 @@ export default function ChoresPage() {
         {sections.length === 0 ? (
           <div className="rounded-[18px] px-4 py-8 text-center text-[13px] font-semibold" style={{ border: `2px solid ${C.elevated}`, color: C.ink }}>
             No chores yet for {kid.name}. Ask the copilot to add some.
+            {/* AI starter plan (docs/ai-chore-plan-generator.md): offered only on the GLOBAL empty state
+                (deliberate "starter" UX — the button retires once the first chore exists) and never in
+                kid mode (parents review the plan). */}
+            {!kidMode && choresList.length === 0 && (
+              <div className="mt-4">
+                <button
+                  id="generate-chore-plan-btn"
+                  type="button"
+                  onClick={() => setIsGeneratingChoresOpen(true)}
+                  className="rounded-full px-5 py-2.5 text-xs font-extrabold"
+                  style={{ border: `2px solid ${C.indigo}`, boxShadow: brutShadow(C.indigo, 4), background: `${C.indigo}14`, color: C.indigo }}
+                >
+                  ✨ Generate a starter chore plan
+                </button>
+              </div>
+            )}
           </div>
         ) : sections.map(section => (
           <div key={section.key}>

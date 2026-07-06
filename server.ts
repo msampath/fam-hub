@@ -43,6 +43,7 @@ import { LEDGER_CAP } from './src/utils/historyLog';
 import { shouldRunDigestNow } from './src/utils/digest';
 import { sendDigestEmail } from './src/utils/mailer';
 import { familyDataRow, FAMILY_DATA_CONFLICT } from './src/utils/familyData';
+import { CHORE_PLAN_STYLE_EXEMPLAR, sanitizeGeneratedChores } from './src/utils/chorePlan';
 import { buildAvailabilityBlock } from './src/utils/availability';
 import { buildLongWeekendBlock } from './src/utils/longWeekend';
 import { buildWeatherFacts, buildBriefingWeather, isPlanningQuery, dailyMaxFromHourly, parseGooglePollen } from './src/utils/weatherFacts';
@@ -1818,6 +1819,63 @@ Note: "${text}"`;
   } catch (error: any) {
     console.error('Error parsing quick-add: ', error);
     return aiErrorResponse(res, error, 'An error occurred while interpreting that note');
+  }
+});
+
+// ── AI starter chore plan (docs/ai-chore-plan-generator.md) ─────────────────────────────────────
+// Chores empty state → the parent gives each kid's age (+ optional interests/gender) → one model call
+// returns a tailored plan the parent REVIEWS before anything is added (preview/staging, never silent).
+// The curated exemplar is style/coverage-only; assignment is to the REAL kid names in the request, and
+// sanitizeGeneratedChores (shared, pure) clamps every field server-side. Explicitly told never to gate
+// chores by gender — gender is at most incidental personalization.
+const GENERATE_CHORES_SYSTEM = 'You design age-appropriate starter chore plans for a family app, calibrated by child development: '
+  + 'younger kids get short, concrete, 1-step jobs; older kids get multi-step responsibility. Assign ONLY to the child names provided '
+  + '(exact spelling; one name per chore — emit two rows if both kids should do it). NEVER gate or stereotype chores by gender; if a '
+  + 'gender is provided it may at most flavor an interest tie-in. Cover breadth across: household help, personal habits, learning, '
+  + 'enrichment/creative, family/cultural rituals, and outdoor. Titles short and kid-readable; put the how/why coaching in `notes`. '
+  + 'points 5-20 (harder/older = more), timesPerDay 1-3, repeatType daily|weekly, scheduleTimeOfDay Morning|Afternoon|Evening|Anytime. '
+  + 'Return schema-compliant JSON: an array of chore objects. The following example plan shows TONE, BREADTH, and NOTES STYLE only — '
+  + 'do NOT copy its items or placeholder names: ' + CHORE_PLAN_STYLE_EXEMPLAR;
+const GENERATE_CHORES_SCHEMA = {
+  type: Type.ARRAY,
+  items: {
+    type: Type.OBJECT,
+    properties: {
+      title: { type: Type.STRING },
+      assignedTo: { type: Type.STRING, description: 'Exactly one of the provided child names.' },
+      points: { type: Type.NUMBER },
+      timesPerDay: { type: Type.NUMBER },
+      repeatType: { type: Type.STRING, description: 'daily or weekly' },
+      scheduleTimeOfDay: { type: Type.STRING, description: 'Morning, Afternoon, Evening, or Anytime' },
+      notes: { type: Type.STRING, description: 'Short how/why coaching for the kid (and parent).' },
+    },
+    required: ['title', 'assignedTo'],
+  },
+};
+
+app.post('/api/generate-chores', requireAuth, aiRateLimit, async (req, res) => {
+  try {
+    const kids = (Array.isArray(req.body?.kids) ? req.body.kids : [])
+      .map((k: any) => ({
+        name: String(k?.name ?? '').trim().slice(0, 80),
+        age: Math.round(Number(k?.age)),
+        interests: String(k?.interests ?? '').trim().slice(0, 200),
+        gender: String(k?.gender ?? '').trim().slice(0, 20),
+      }))
+      .filter((k: any) => k.name && Number.isFinite(k.age) && k.age >= 1 && k.age <= 18)
+      .slice(0, 8);
+    if (!kids.length) return res.status(400).json({ error: 'At least one kid with a name and an age (1–18) is required.' });
+
+    const kidLines = kids.map((k: any) =>
+      `- ${k.name}, age ${k.age}${k.interests ? `, interests: ${k.interests}` : ''}${k.gender && k.gender !== 'unspecified' ? `, gender: ${k.gender}` : ''}`);
+    const prompt = `Create a starter chore plan for these children (about 4-8 chores per child, tailored to each age${kids.some((k: any) => k.interests) ? ' and their interests' : ''}):\n${kidLines.join('\n')}`;
+
+    const raw = await callGeminiJSON(prompt, GENERATE_CHORES_SYSTEM, GENERATE_CHORES_SCHEMA, '[]');
+    const chores = sanitizeGeneratedChores(raw, kids.map((k: any) => k.name), 40);
+    return res.json({ chores });
+  } catch (error: any) {
+    console.error('generate-chores error:', error?.message || error);
+    return aiErrorResponse(res, error, 'Could not generate a chore plan right now.');
   }
 });
 

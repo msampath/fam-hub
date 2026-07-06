@@ -223,6 +223,13 @@ describe('buildChoreFromPayload', () => {
     expect(c.timesPerDay).toBe(2);
     expect(c.repeatType).toBe('weekly');
   });
+  it('carries notes (clamped) — regression for the field buildChoreFor silently dropped', () => {
+    const c = buildChoreFromPayload({ title: 'Water plants', assignedTo: 'Mia', notes: 'Small cup per pot.' }, FAM)!;
+    expect(c.notes).toBe('Small cup per pot.');
+    const long = buildChoreFromPayload({ title: 'Read', assignedTo: 'Mia', notes: 'x'.repeat(600) }, FAM)!;
+    expect(long.notes).toHaveLength(500);
+    expect(buildChoreFromPayload({ title: 'Read', assignedTo: 'Mia' }, FAM)!.notes).toBeUndefined();
+  });
   it('coerces a bogus repeatType to daily', () => {
     expect(buildChoreFromPayload({ title: 'x', repeatType: 'hourly' }, FAM)!.repeatType).toBe('daily');
   });

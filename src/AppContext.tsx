@@ -2,6 +2,7 @@ import React, { createContext, useContext } from 'react';
 import type { ShoppingItem, PantryItem, Chore, Reward, Redemption, XpBankEntry, FamilyMember, Category, Authored, LedgerEntry, CopilotSuggestion, DigestPrefs, Goal, Routine } from './types';
 import type { PantryDiff } from './utils/visionPantry';
 import type { RoutineCandidate } from './utils/routineMiner';
+import type { GeneratedChore } from './utils/chorePlan';
 
 // Household-defined since Phase-5 (settings.storeList) — any store name the household configured.
 export type ShopStore = string;
@@ -92,6 +93,15 @@ export interface AppCtx {
   setNewChoreScheduleTime: React.Dispatch<React.SetStateAction<string>>;
   newChoreNotes: string;
   setNewChoreNotes: React.Dispatch<React.SetStateAction<string>>;
+  // AI starter chore plan (docs/ai-chore-plan-generator.md): empty-state modal → per-kid ages →
+  // model plan → parent-reviewed preview → bulk add (deduped). Generation errors are surfaced, never
+  // a fabricated plan.
+  isGeneratingChoresOpen: boolean;
+  setIsGeneratingChoresOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  isGeneratingChores: boolean;
+  choreGenError: string | null;
+  handleGenerateChores: (kids: { name: string; age: number; interests?: string; gender?: string }[]) => Promise<GeneratedChore[] | null>;
+  addGeneratedChores: (payloads: GeneratedChore[]) => { added: number; duplicates: number };
 
   // Chore rewards (catalog + redemption ledger; balance = earned XP − redeemed)
   rewardsList: Reward[];
