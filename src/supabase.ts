@@ -206,11 +206,22 @@ export const getOrCreateHousehold = async (userId: string): Promise<string> => {
   return household.id;
 };
 
+// F-04: live invite codes are exactly upper(substr(md5(...),1,6)) → 6 hex chars (schema.sql:9). Gate the
+// join call on that shape so junk/probing input never even reaches the RPC. Pure + exported for tests.
+// If the post-judging migration lengthens codes (supabase/migrations/2026-07-06-post-capstone.sql §5),
+// relax this regex in the same change.
+export const isValidInviteCode = (code: string): boolean => /^[0-9a-f]{6}$/i.test(code.trim());
+
 /**
  * Joins a household via invite code, leaving any existing household.
  * Returns true on success, false if invite code not found.
  */
 export const joinHousehold = async (_userId: string, inviteCode: string): Promise<boolean> => {
+  // Cheap format gate first (F-04): a code that can't possibly exist is rejected locally — fewer junk
+  // RPC round-trips from this client path. REAL validation stays server-side in the SECURITY DEFINER
+  // RPC (the only component that can see invite codes); the remaining DB-side hardening (deny direct
+  // membership INSERTs, longer codes, expiry, attempt throttle) is staged in the migration file §5.
+  if (!isValidInviteCode(inviteCode)) return false;
   // Must go through the SECURITY DEFINER RPC: a non-member can't SELECT a household by invite code
   // (RLS hides it), so the client-side select/insert dance always failed with "code not found".
   // The function validates the code + re-points THIS user's membership server-side (scoped to

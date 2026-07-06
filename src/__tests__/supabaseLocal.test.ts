@@ -61,3 +61,25 @@ describe('supabase.ts — LAN appliance client (sqlite mode)', () => {
     expect(hasLocalSession()).toBe(false);
   });
 });
+
+describe('invite-code join gate (F-04 — format-validate before the RPC)', () => {
+  it('isValidInviteCode accepts exactly the live 6-hex shape (case/space tolerant)', async () => {
+    const { isValidInviteCode } = await import('../supabase');
+    expect(isValidInviteCode('a1b2c3')).toBe(true);
+    expect(isValidInviteCode('A1B2C3')).toBe(true);
+    expect(isValidInviteCode('  a1b2c3  ')).toBe(true); // the RPC upper/trims too
+    expect(isValidInviteCode('a1b2c')).toBe(false);     // too short
+    expect(isValidInviteCode('a1b2c3d')).toBe(false);   // too long
+    expect(isValidInviteCode('g1b2c3')).toBe(false);    // non-hex letter
+    expect(isValidInviteCode("a1' or")).toBe(false);    // junk/probe
+    expect(isValidInviteCode('')).toBe(false);
+  });
+
+  it('joinHousehold short-circuits a malformed code to false WITHOUT touching the Supabase client', async () => {
+    // In this test env the module's `supabase` export is the throwing local-mode Proxy — so merely
+    // reaching supabase.rpc would throw. Returning false proves the gate fired first.
+    const { joinHousehold } = await import('../supabase');
+    expect(await joinHousehold('user-1', 'not-a-code!')).toBe(false);
+    expect(await joinHousehold('user-1', '')).toBe(false);
+  });
+});

@@ -98,3 +98,64 @@ create extension if not exists vector with schema extensions;
 --   for all
 --   using      (household_id = get_user_household_id())
 --   with check (household_id = get_user_household_id());
+
+-- ── 5. OPTIONAL: F-04 invite-join completion (post-judging — do NOT run while the demo is frozen) ────
+-- STATUS (honest split, 2026-07-06):
+--   In CODE already:  the client join path goes through the SECURITY DEFINER RPC
+--                     join_household_by_code (schema.sql) — code validity IS checked server-side on
+--                     the legitimate path — and src/supabase.ts now rejects malformed codes before
+--                     the RPC (6-hex format gate, isValidInviteCode).
+--   PENDING (this SQL): everything below. It changes a LIVE policy ("join household") plus the codes
+--                     themselves, so it stays commented until after judging. The Express server does
+--                     not participate in the join flow at all (client → Supabase RPC direct), so
+--                     these controls can only live here, in the database.
+--
+-- 5a. Close the direct-INSERT bypass (the core F-04 finding): today the household_members INSERT
+--     policy checks only user_id = auth.uid(), so an attacker who LEARNS a household_id can insert
+--     their own membership row and skip the invite code entirely. Deny direct inserts; the
+--     SECURITY DEFINER RPC (owned by postgres, bypasses RLS) becomes the ONLY join path.
+--     NB: schema.sql's createHousehold client code also does a direct membership insert on FIRST
+--     sign-in — move that insert into a small SECURITY DEFINER create_household() RPC in the same
+--     change, or the first-run flow breaks. That's why this must land as one reviewed unit.
+--
+-- drop policy if exists "join household" on household_members;
+-- create policy "join household" on household_members for insert with check (false);
+--
+-- 5b. Longer, CSPRNG invite codes (24-bit md5 substring → 64-bit): re-key existing households and
+--     change the default. pgcrypto's gen_random_bytes is CSPRNG; 8 bytes → 16 hex chars.
+--
+-- alter table households
+--   alter column invite_code set default upper(encode(extensions.gen_random_bytes(8), 'hex'));
+-- update households set invite_code = upper(encode(extensions.gen_random_bytes(8), 'hex'));
+--   -- (then relax isValidInviteCode in src/supabase.ts to /^[0-9a-f]{16}$/i in the same deploy)
+--
+-- 5c. Code expiry + rotation: a code is a standing secret today. Add an expiry the RPC enforces and
+--     a member-callable regenerate.
+--
+-- alter table households add column if not exists invite_code_expires_at timestamptz;
+-- create or replace function regenerate_invite_code()
+-- returns text language plpgsql security definer set search_path = public as $$
+-- declare new_code text;
+-- begin
+--   if auth.uid() is null then return null; end if;
+--   new_code := upper(encode(extensions.gen_random_bytes(8), 'hex'));
+--   update households set invite_code = new_code, invite_code_expires_at = now() + interval '7 days'
+--     where id = get_user_household_id();
+--   return new_code;
+-- end; $$;
+-- revoke execute on function regenerate_invite_code() from anon;
+-- grant  execute on function regenerate_invite_code() to authenticated;
+--   -- and inside join_household_by_code, after the code lookup:
+--   --   if (select invite_code_expires_at from households where id = hid) < now() then return null; end if;
+--
+-- 5d. Attempt throttle on the RPC (enumeration brake): the RPC is callable by any authenticated user
+--     with no limit. Track attempts per user and refuse after 10/hour.
+--
+-- create table if not exists join_attempts (
+--   user_id uuid not null, attempted_at timestamptz default now() not null
+-- );
+-- alter table join_attempts enable row level security; -- no policies: only the definer fn touches it
+--   -- and at the TOP of join_household_by_code:
+--   --   if (select count(*) from join_attempts where user_id = auth.uid()
+--   --       and attempted_at > now() - interval '1 hour') >= 10 then return null; end if;
+--   --   insert into join_attempts (user_id) values (auth.uid());
