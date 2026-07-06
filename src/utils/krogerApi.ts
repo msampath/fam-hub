@@ -249,22 +249,26 @@ export function buildCartAddBody(items: { upc: string; quantity?: number }[]): {
 // Human summary for the confirm-tier Approvals card — the parent approves EXACTLY this text.
 // Unmatched items are grouped by their honest reason ("no match at this store" ≠ "search failed —
 // try again"); everything unmatched stays on the lists either way.
+// One line per fact (header, • per item, notes) — the Approvals card renders it whitespace-pre-line;
+// the old single-run-on-sentence form was unreadable past ~3 items (owner, 2026-07-06).
 export function buildCartDraftSummary(store: string, matched: MatchedItem[], unmatched: string[], reasons?: Record<string, UnmatchedReason>): string {
   const total = matched.reduce((a, m) => a + (m.price || 0), 0);
-  const lines = matched.map(m => `${m.text} → ${m.description} (${m.size}${m.price != null ? `, $${m.price.toFixed(2)}` : ''})`);
-  let s = `Add ${matched.length} item${matched.length === 1 ? '' : 's'} to your ${store} cart (~$${total.toFixed(2)}): ${lines.join('; ')}`;
+  const parts = [
+    `Add ${matched.length} item${matched.length === 1 ? '' : 's'} to your ${store} cart (~$${total.toFixed(2)}):`,
+    ...matched.map(m => `• ${m.text} → ${m.description} (${m.size}${m.price != null ? `, $${m.price.toFixed(2)}` : ''})`),
+  ];
   // Presence-model flag (owner decision): the list carries generic buy-units, not counts — say so
   // exactly where the parent approves the cart.
-  if (matched.length) s += '. Quantities default to 1 of each — bump any in the Kroger cart before checkout';
+  if (matched.length) parts.push('Quantities default to 1 of each — bump any in the Kroger cart before checkout.');
   if (unmatched.length) {
     const failed = unmatched.filter(i => reasons?.[i] === 'search-failed');
     // 'rejected' ≠ "not stocked": products came back but none was confidently the item — a retry can
     // flip it (a no-reasons legacy caller lands in the no-products bucket, same phrasing as before).
     const lowConf = unmatched.filter(i => reasons?.[i] === 'rejected');
     const noMatch = unmatched.filter(i => reasons?.[i] !== 'search-failed' && reasons?.[i] !== 'rejected');
-    if (noMatch.length) s += ` — no match at this store: ${noMatch.join(', ')} (left on your lists)`;
-    if (lowConf.length) s += ` — couldn't confidently match: ${lowConf.join(', ')} (still on your lists — try Send again)`;
-    if (failed.length) s += ` — search failed for: ${failed.join(', ')} (try again in a bit)`;
+    if (noMatch.length) parts.push(`No match at this store: ${noMatch.join(', ')} (left on your lists).`);
+    if (lowConf.length) parts.push(`Couldn't confidently match: ${lowConf.join(', ')} (still on your lists — try Send again).`);
+    if (failed.length) parts.push(`Search failed for: ${failed.join(', ')} (try again in a bit).`);
   }
-  return s.slice(0, 900);
+  return parts.join('\n').slice(0, 900);
 }

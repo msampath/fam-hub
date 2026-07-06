@@ -527,7 +527,9 @@ export default function CopilotBar({ onOpenManage }: CopilotBarProps) {
               <div className="flex max-h-[60vh] flex-col gap-2 overflow-y-auto">
                 {pendingApprovals.map(e => (
                   <div key={e.id} className="rounded-[10px] p-2.5" style={{ border: `2px solid ${C.elevated}` }}>
-                    <div className="mb-1 text-[13px] font-bold" style={{ color: C.primary }}>{e.summary || e.tool}</div>
+                    {/* pre-line: cart-draft summaries are one line per item — collapsing them into a run-on
+                        sentence made the parent squint at exactly the text they're approving. */}
+                    <div className="mb-1 whitespace-pre-line text-[13px] font-bold" style={{ color: C.primary }}>{e.summary || e.tool}</div>
                     {e.riskTier === 'stepup' && (
                       <div className="mb-2 text-[10px] font-extrabold uppercase tracking-wide" style={{ color: C.amber }}>🔒 PIN required</div>
                     )}

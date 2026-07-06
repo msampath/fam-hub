@@ -61,14 +61,17 @@ describe('search terms (the parenthetical bug)', () => {
     const matched = [{ text: 'garlic', upc: '0001', description: 'Garlic Bulbs', size: '1 ct', price: 0.99 }];
     const s = buildCartDraftSummary('Fred Meyer - Issaquah', matched, ['unicorn fruit', 'ginger', 'butter'],
       { 'unicorn fruit': 'no-products', ginger: 'rejected', butter: 'search-failed' });
-    expect(s).toContain('no match at this store: unicorn fruit');
+    expect(s).toContain('No match at this store: unicorn fruit');
     // 'rejected' must NOT claim the store lacks it — candidates existed, confidence didn't.
-    expect(s).toContain("couldn't confidently match: ginger (still on your lists — try Send again)");
-    expect(s).toContain('search failed for: butter');
+    expect(s).toContain("Couldn't confidently match: ginger (still on your lists — try Send again)");
+    expect(s).toContain('Search failed for: butter');
     // Presence-model flag: the parent is told quantities default to 1 exactly where they approve.
     expect(s).toContain('Quantities default to 1 of each');
-    // Legacy no-reasons callers keep the old bucket + phrasing.
-    expect(buildCartDraftSummary('QFC', matched, ['kasuri methi'])).toContain('no match at this store: kasuri methi');
+    // Legacy no-reasons callers keep the old bucket (unknown reason reads as no-products).
+    expect(buildCartDraftSummary('QFC', matched, ['kasuri methi'])).toContain('No match at this store: kasuri methi');
+    // One fact per line: header + a • line per item + one line per note group (readability, owner ask).
+    expect(s.split('\n')).toHaveLength(6);
+    expect(s).toContain('\n• garlic → Garlic Bulbs (1 ct, $0.99)\n');
   });
 
   it('mergeMatchRetry folds second-pass wins into matched and clears their reasons', () => {
@@ -197,6 +200,6 @@ describe('cart body + draft summary', () => {
       ['kasuri methi']);
     expect(s).toMatch(/Add 1 item to your QFC Pine Lake cart \(~\$6\.49\)/);
     expect(s).toMatch(/paneer → Nanak Paneer Cubes \(14 oz, \$6\.49\)/);
-    expect(s).toMatch(/no match at this store: kasuri methi \(left on your lists\)/);
+    expect(s).toMatch(/No match at this store: kasuri methi \(left on your lists\)/);
   });
 });
