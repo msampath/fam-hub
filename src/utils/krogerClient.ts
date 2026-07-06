@@ -14,9 +14,10 @@ export const setStoredKrogerToken = (token: string | null | undefined): void => 
 };
 export const isKrogerConnected = (): boolean => !!getStoredKrogerToken();
 
-// Open the Kroger OAuth popup and resolve with the refresh token once the callback page postMessages
-// it back. The callback restricts its postMessage to this app's own origin; we additionally verify
-// origin + the state nonce here. Rejects on user-close or timeout so the caller can surface an error.
+// Open the Kroger OAuth popup, then claim the refresh token from the SERVER (the callback stashed it
+// keyed by the state nonce) via /api/kroger/poll. This is browser-proof — no reliance on window.opener,
+// postMessage, shared localStorage, or window.close, all of which COOP / privacy extensions / cross-
+// origin popups can break. postMessage is kept only as an optional fast path. Rejects on cancel/timeout.
 export async function connectKroger(): Promise<void> {
   const res = await apiFetch('/api/kroger/auth-url');
   const data = await res.json().catch(() => ({}));
@@ -28,17 +29,34 @@ export async function connectKroger(): Promise<void> {
 
   return new Promise<void>((resolve, reject) => {
     let done = false;
-    const finish = (fn: () => void) => { if (done) return; done = true; clearInterval(poll); window.removeEventListener('message', onMsg); fn(); };
+    let ticking = false;      // re-entrancy guard for the async poll
+    let closedFor = 0;        // ms the popup has been closed without the token landing yet
+    const started = Date.now();
+    const finish = (fn: () => void) => { if (done) return; done = true; clearInterval(timer); window.removeEventListener('message', onMsg); fn(); };
+    const accept = (token: string) => { setStoredKrogerToken(token); finish(resolve); };
+
+    // Optional fast path (works when the browser DIDN'T sever the opener).
     const onMsg = (e: MessageEvent) => {
       if (e.origin !== window.location.origin) return;
       const d = e.data;
-      if (!d || d.source !== 'kroger-connect') return;
-      if (d.state && expectedState && d.state !== expectedState) return finish(() => reject(new Error('Kroger sign-in state mismatch — try again.')));
-      if (d.refreshToken) { setStoredKrogerToken(d.refreshToken); finish(resolve); }
+      if (d?.source === 'kroger-connect' && d.refreshToken && (!d.state || !expectedState || d.state === expectedState)) accept(d.refreshToken);
     };
     window.addEventListener('message', onMsg);
-    // If the user closes the popup without finishing, don't hang forever.
-    const poll = setInterval(() => { if (popup.closed) finish(() => reject(new Error('Kroger sign-in was cancelled.'))); }, 700);
+
+    // Primary path: poll the server for the token the callback stashed under this state.
+    const timer = setInterval(async () => {
+      if (ticking || done) return;
+      ticking = true;
+      try {
+        const r = await apiFetch(`/api/kroger/poll?state=${encodeURIComponent(expectedState)}`);
+        if (r.ok) { const d = await r.json().catch(() => ({})); if (d?.refreshToken) return accept(d.refreshToken); }
+      } catch { /* transient — keep polling */ }
+      finally { ticking = false; }
+      // The callback fires just as the popup closes; give the token a 3s grace window to arrive before
+      // calling it a cancel. And cap the whole flow at 3 minutes.
+      if (popup.closed) { closedFor += 1000; if (closedFor >= 3000) finish(() => reject(new Error('Kroger sign-in was cancelled.'))); }
+      if (Date.now() - started > 180000) finish(() => reject(new Error('Kroger sign-in timed out — try again.')));
+    }, 1000);
   });
 }
 

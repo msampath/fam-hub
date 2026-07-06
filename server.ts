@@ -2020,9 +2020,23 @@ const KROGER_CLIENT_ID = process.env.KROGER_CLIENT_ID || '';
 const KROGER_CLIENT_SECRET = process.env.KROGER_CLIENT_SECRET || '';
 const krogerConfigured = () => !!(KROGER_CLIENT_ID && KROGER_CLIENT_SECRET);
 const krogerBasic = () => 'Basic ' + Buffer.from(`${KROGER_CLIENT_ID}:${KROGER_CLIENT_SECRET}`).toString('base64');
-// Callback redirect must match a URI registered in the Kroger portal — derive from APP_URL in prod,
-// localhost in dev (both are registered).
-const krogerRedirectUri = () => `${(process.env.APP_URL || `http://localhost:${PORT}`).replace(/\/$/, '')}/api/kroger/callback`;
+// Callback redirect must EXACTLY match a URI registered in the Kroger portal. Derive it from the
+// ORIGIN the browser is actually using (localhost vs LAN IP vs Cloud Run) — a fixed APP_URL broke
+// live when the app was browsed via the LAN address (Kroger: "redirect_uri did not match"). The
+// token exchange must use the same value, so the callback re-derives it from its own request.
+const krogerRedirectUri = (req: any) => {
+  const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim();
+  return `${proto}://${req.get('host')}/api/kroger/callback`;
+};
+
+// Short-lived, single-use handoff of the Kroger refresh token from the OAuth callback to the
+// authenticated poll from the app window (see /api/kroger/poll). Keyed by the unguessable `state`
+// nonce. Server-side because client popup handoffs (postMessage / shared localStorage / window.close)
+// are broken by COOP, privacy extensions, and cross-origin popups — this path can't be. In-memory is
+// fine for single-instance (appliance / local dev / min-instances 1); the ~1-minute OAuth window makes
+// a cross-instance miss unlikely on the scaled demo.
+const krogerPending = new Map<string, { token: string; exp: number }>();
+function krogerPendingSweep(): void { const now = Date.now(); for (const [k, v] of krogerPending) if (v.exp < now) krogerPending.delete(k); }
 
 async function krogerToken(body: string): Promise<{ ok: boolean; data: any }> {
   const r = await fetchWithTimeout('https://api.kroger.com/v1/connect/oauth2/token', 10000, {
@@ -2047,7 +2061,7 @@ async function getKrogerAppToken(): Promise<string | null> {
 app.get('/api/kroger/auth-url', requireAuth, (req, res) => {
   if (!krogerConfigured()) return res.status(503).json({ error: 'Kroger integration is not configured on the server (KROGER_CLIENT_ID / KROGER_CLIENT_SECRET).' });
   const state = randomBytes(16).toString('hex');
-  return res.json({ url: buildKrogerAuthUrl(KROGER_CLIENT_ID, krogerRedirectUri(), state), state });
+  return res.json({ url: buildKrogerAuthUrl(KROGER_CLIENT_ID, krogerRedirectUri(req), state), state });
 });
 
 // OAuth callback: exchange the code, then hand the refresh token to the OPENER window and close.
@@ -2060,13 +2074,19 @@ app.get('/api/kroger/callback', async (req, res) => {
   const state = esc(String(req.query.state || ''));
   if (!code) return res.status(400).send('Missing authorization code.');
   try {
-    const { ok, data } = await krogerToken(authCodeTokenBody(code, krogerRedirectUri()));
+    const { ok, data } = await krogerToken(authCodeTokenBody(code, krogerRedirectUri(req)));
     if (!ok || !data.refresh_token) {
       console.warn('[kroger] code exchange failed:', data?.error_description || data?.error || 'unknown');
       return res.status(400).send('Kroger sign-in failed — close this window and try again.');
     }
-    const appOrigin = (process.env.APP_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
-    // Escape into a JS string safely; postMessage restricted to the app's own origin.
+    // The popup was opened by the app on THIS same origin (the redirect landed here), so the
+    // opener's origin == this request's origin — same derivation as the redirect URI itself.
+    const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim();
+    const appOrigin = `${proto}://${req.get('host')}`;
+    // Robust handoff: stash the token server-side keyed by the state nonce; the app window claims it
+    // via the authenticated /api/kroger/poll. Not dependent on the browser (COOP/extensions/origin).
+    // postMessage stays as an optional fast path but is no longer relied upon.
+    if (state) krogerPending.set(state, { token: data.refresh_token, exp: Date.now() + 300000 });
     const payload = JSON.stringify({ source: 'kroger-connect', refreshToken: data.refresh_token, state });
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     return res.send(`<!doctype html><title>Kroger connected</title><body style="font-family:sans-serif">
@@ -2076,6 +2096,18 @@ app.get('/api/kroger/callback', async (req, res) => {
     console.error('[kroger] callback error:', err);
     return res.status(500).send('Kroger sign-in error — close this window and try again.');
   }
+});
+
+// The app window polls this after opening the connect popup; returns the refresh token ONCE the
+// callback has stashed it (single-use), else {pending:true}. Authenticated — the token is only ever
+// handed to a signed-in caller of this household. The unguessable state nonce is the claim key.
+app.get('/api/kroger/poll', requireAuth, (req, res) => {
+  const state = String(req.query.state || '');
+  krogerPendingSweep();
+  const entry = state ? krogerPending.get(state) : undefined;
+  if (!entry) return res.json({ pending: true });
+  krogerPending.delete(state); // single-use — the token now lives only on the claiming device
+  return res.json({ refreshToken: entry.token });
 });
 
 // Nearby Kroger-banner stores for the Manage picker (app token; household home coords from the client).
