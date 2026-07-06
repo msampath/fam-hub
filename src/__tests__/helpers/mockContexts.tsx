@@ -252,6 +252,8 @@ export function makeCalendarCtx(overrides: Partial<CalendarCtx> = {}): CalendarC
     handleTextSubmit: vi.fn(),
     handlePdfUpload: vi.fn(),
     handleDeleteSource: vi.fn(),
+    handleSyncSources: vi.fn(),
+    isSyncingSources: false,
 
     // Google Calendar sync
     cloudInviteCode: null,

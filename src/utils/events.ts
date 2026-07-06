@@ -219,3 +219,24 @@ export function expandRepeatingEvent(
     };
   });
 }
+
+// ── Feed re-sync (W8): replace ONE source's slice of the calendar with its freshly-pulled events ──
+// The saved WebSource list is the feed registry (ICS/HTML both flow through /api/parse-calendar);
+// "Sync feeds" re-pulls each source and swaps ONLY that source's events (sourceId-tagged), preserving
+// the member tag the original import chose (WebSource doesn't store it — read it off the outgoing
+// slice). Pure so the replace semantics are unit-testable; the caller decides failure policy
+// (an empty/failed pull keeps the old slice — imported plans must never vanish on a flaky feed).
+export function applySourceResync(
+  prev: CalendarEvent[],
+  sourceId: string,
+  fetched: CalendarEvent[],
+): CalendarEvent[] {
+  const outgoing = (Array.isArray(prev) ? prev : []).filter(e => e.sourceId === sourceId);
+  const keptMembers = outgoing[0]?.members;
+  const tagged = (Array.isArray(fetched) ? fetched : []).map(evt => ({
+    ...evt,
+    members: keptMembers ?? evt.members ?? ['Everyone'],
+    sourceId,
+  }));
+  return [...tagged, ...(Array.isArray(prev) ? prev : []).filter(e => e.sourceId !== sourceId)];
+}

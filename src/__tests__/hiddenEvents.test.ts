@@ -112,3 +112,35 @@ describe('mergeDeduplicateEvents keys on startTime', () => {
     expect(merged[0].members?.sort()).toEqual(['Leo', 'Mom']);
   });
 });
+
+// ── Feed re-sync slice replacement (W8) — pure semantics for the "Sync feeds" button ─────────────
+import { applySourceResync } from '../utils/events';
+
+describe('applySourceResync', () => {
+  const prev = [
+    { id: 'a1', title: 'Old feed event', start: '2026-07-01', category: 'School', sourceId: 'src-1', members: ['Ava'] },
+    { id: 'b1', title: 'Other feed event', start: '2026-07-02', category: 'Camp', sourceId: 'src-2', members: ['Max'] },
+    { id: 'm1', title: 'Manual event', start: '2026-07-03', category: 'Other' },
+  ] as any[];
+
+  it("replaces ONLY the target source's slice, leaving other sources and manual events untouched", () => {
+    const fetched = [{ id: 'a2', title: 'Fresh feed event', start: '2026-07-08', category: 'School' }] as any[];
+    const out = applySourceResync(prev, 'src-1', fetched);
+    expect(out.map(e => e.id).sort()).toEqual(['a2', 'b1', 'm1']);
+    expect(out.find(e => e.id === 'a2')!.sourceId).toBe('src-1'); // re-tagged for per-source undo
+  });
+
+  it('preserves the member tag the original import chose (WebSource does not store it)', () => {
+    const out = applySourceResync(prev, 'src-1', [{ id: 'a2', title: 'Fresh', start: '2026-07-08', category: 'School' }] as any[]);
+    expect(out.find(e => e.id === 'a2')!.members).toEqual(['Ava']);
+  });
+
+  it("falls back to the event's own members, then ['Everyone'], when the outgoing slice is empty", () => {
+    const out = applySourceResync(prev, 'src-3', [
+      { id: 'c1', title: 'Tagged', start: '2026-07-09', category: 'Other', members: ['Dad'] },
+      { id: 'c2', title: 'Untagged', start: '2026-07-10', category: 'Other' },
+    ] as any[]);
+    expect(out.find(e => e.id === 'c1')!.members).toEqual(['Dad']);
+    expect(out.find(e => e.id === 'c2')!.members).toEqual(['Everyone']);
+  });
+});

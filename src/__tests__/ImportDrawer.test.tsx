@@ -142,3 +142,33 @@ describe('ImportDrawer — universal uploader → Docs vs Calendar (P5)', () => 
     expect(doc.text).toMatch(/example\.com\/info/); // keeps the source URL
   });
 });
+
+describe('ImportDrawer — Sync feeds (W8 feed re-sync)', () => {
+  const sources = [
+    { id: 'src-1', name: 'School ICS', url: 'https://school.example/cal.ics', category: 'School' as const, lastSync: 'Synced 2026-07-01', status: 'active' as const, eventCount: 7 },
+    { id: 'src-2', name: 'Library page', url: 'https://library.example/events', category: 'Other' as const, lastSync: 'Last sync failed — kept the previous import', status: 'error' as const, eventCount: 3 },
+  ];
+
+  it('shows the Sync feeds button next to the saved sources and wires it to handleSyncSources', () => {
+    const handleSyncSources = vi.fn();
+    const { getByText } = renderWithBoth(<ImportDrawer onClose={vi.fn()} />, {}, { sources, handleSyncSources });
+    fireEvent.click(getByText('Sync feeds'));
+    expect(handleSyncSources).toHaveBeenCalledTimes(1);
+  });
+
+  it('disables the button and shows progress while a sync is running', () => {
+    const { getByText } = renderWithBoth(<ImportDrawer onClose={vi.fn()} />, {}, { sources, isSyncingSources: true });
+    expect((getByText('Syncing…') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('surfaces a failed source honestly instead of the import count', () => {
+    const { getByText } = renderWithBoth(<ImportDrawer onClose={vi.fn()} />, {}, { sources });
+    expect(getByText('✨ 7 imported')).toBeInTheDocument();               // healthy source
+    expect(getByText(/Last sync failed — kept the previous import/)).toBeInTheDocument(); // failed one
+  });
+
+  it('renders no Sync feeds button when there are no saved sources', () => {
+    const { queryByText } = renderWithBoth(<ImportDrawer onClose={vi.fn()} />, {}, { sources: [] });
+    expect(queryByText('Sync feeds')).toBeNull();
+  });
+});

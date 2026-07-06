@@ -72,6 +72,9 @@ export interface CalendarCtx {
   handleTextSubmit: (e: React.FormEvent) => void;
   handlePdfUpload: (file: File) => void;
   handleDeleteSource: (id: string) => void;
+  // Feed re-sync (W8): manual re-pull of every saved source (ICS/HTML) — no background polling.
+  handleSyncSources: () => void;
+  isSyncingSources: boolean;
 
   // Google Calendar sync
   cloudInviteCode: string | null;

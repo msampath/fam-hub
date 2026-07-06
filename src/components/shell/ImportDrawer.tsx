@@ -29,7 +29,7 @@ export default function ImportDrawer({ onClose }: ImportDrawerProps) {
     syncAssignee, setSyncAssignee, familyMembers, isParsing,
     handleTextSubmit, pastedText, setPastedText, textSourceName, setTextSourceName, textCategory, setTextCategory,
     pdfCategory, setPdfCategory, dragActive, setDragActive, handlePdfUpload, parserStep,
-    sources, handleDeleteSource,
+    sources, handleDeleteSource, handleSyncSources, isSyncingSources,
   } = useCalendar();
 
   // Docs-path local state (the calendar path keeps using CalendarContext state untouched).
@@ -232,13 +232,29 @@ export default function ImportDrawer({ onClose }: ImportDrawerProps) {
 
       {sources.length > 0 && (
         <div className="mt-3">
-          <div className="mb-1.5 text-[10px] font-bold uppercase tracking-wider" style={{ color: C.muted }}>Imported calendar sources</div>
+          <div className="mb-1.5 flex items-center justify-between">
+            <div className="text-[10px] font-bold uppercase tracking-wider" style={{ color: C.muted }}>Imported calendar sources</div>
+            {/* Feed re-sync (W8): re-pull every saved source (ICS parses deterministically; HTML re-runs
+                the AI extract). Manual by design — no background polling. A failed/empty pull keeps the
+                source's previous events. */}
+            <button
+              type="button"
+              onClick={handleSyncSources}
+              disabled={isSyncingSources}
+              className="rounded-[8px] px-2.5 py-1 text-[10px] font-extrabold uppercase"
+              style={{ border: `2px solid ${C.indigo}`, background: `${C.indigo}14`, color: C.indigo, opacity: isSyncingSources ? 0.6 : 1 }}
+            >
+              {isSyncingSources ? 'Syncing…' : 'Sync feeds'}
+            </button>
+          </div>
           <div className="flex flex-col gap-1.5">
             {sources.map(src => (
-              <div key={src.id} className="flex items-center justify-between gap-2 rounded-[10px] px-3 py-2" style={{ border: `2px solid ${C.elevated}`, background: C.card }}>
+              <div key={src.id} className="flex items-center justify-between gap-2 rounded-[10px] px-3 py-2" style={{ border: `2px solid ${src.status === 'error' ? C.red : C.elevated}`, background: C.card }}>
                 <div className="min-w-0">
                   <div className="truncate text-[13px] font-bold" style={{ color: C.primary }}>{src.name}</div>
-                  <div className="text-[11px] font-semibold" style={{ color: C.emerald }}>✨ {src.eventCount} imported</div>
+                  <div className="text-[11px] font-semibold" style={{ color: src.status === 'error' ? C.red : src.status === 'warning' ? C.amber : C.emerald }}>
+                    {src.status === 'active' ? `✨ ${src.eventCount} imported` : src.lastSync}
+                  </div>
                 </div>
                 <button type="button" onClick={() => handleDeleteSource(src.id)} aria-label={`Delete ${src.name}`} style={{ color: C.ink }}>
                   <Trash2 size={14} />

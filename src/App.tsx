@@ -64,7 +64,7 @@ import {
   shiftDateStr,
 } from './utils/dates';
 import { isoWeekKey, applyWeeklyReset, applyDailyReset, acquireResetLock } from './utils/chores';
-import { mergeDeduplicateEvents, detectRecurringGroups, filterHiddenEvents, applySyncedPull } from './utils/events';
+import { mergeDeduplicateEvents, detectRecurringGroups, filterHiddenEvents, applySyncedPull, applySourceResync } from './utils/events';
 import { buildDailyReminder, shouldFireDailyReminder, dueEventReminders, type ReminderContent } from './utils/reminders';
 import { filterConflictWindow, detectConflicts } from './utils/conflicts';
 import type { RecurringGroup } from './utils/events';
@@ -2810,6 +2810,39 @@ export default function App() {
     setEvents(prev => prev.filter(e => e.sourceId !== id));
   };
 
+  // Feed re-sync (W8): the saved WebSource list doubles as an ICS/HTML feed registry — one manual
+  // "Sync feeds" button re-pulls every source through the SAME /api/parse-calendar path (ICS parses
+  // deterministically server-side; HTML goes through the model) and swaps only that source's slice
+  // (applySourceResync, pure). NO background polling — a deliberate parent action, like Google sync.
+  // Failure policy: a failed or EMPTY pull keeps the old slice and marks the source, so a flaky feed
+  // can never silently erase imported plans.
+  const [isSyncingSources, setIsSyncingSources] = useState(false);
+  const handleSyncSources = async () => {
+    if (isSyncingSources || sources.length === 0) return;
+    setIsSyncingSources(true);
+    try {
+      for (const src of sources) {
+        try {
+          const res = await apiFetch('/api/parse-calendar', { method: 'POST', body: JSON.stringify({ url: src.url, category: src.category }) });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data = await res.json();
+          const fetched: CalendarEvent[] = Array.isArray(data?.events) ? data.events : [];
+          if (!fetched.length) {
+            setSources(prev => prev.map(s => (s.id === src.id ? { ...s, lastSync: 'Last sync found no events — kept the previous import', status: 'warning' } : s)));
+            continue;
+          }
+          setEvents(prev => applySourceResync(prev, src.id, fetched));
+          setSources(prev => prev.map(s => (s.id === src.id ? { ...s, lastSync: `Synced ${toLocalDateStr(new Date())}`, status: 'active', eventCount: fetched.length } : s)));
+        } catch (e: any) {
+          console.warn(`[feeds] re-sync failed for "${src.name}":`, e?.message || e);
+          setSources(prev => prev.map(s => (s.id === src.id ? { ...s, lastSync: 'Last sync failed — kept the previous import', status: 'error' } : s)));
+        }
+      }
+    } finally {
+      setIsSyncingSources(false);
+    }
+  };
+
   // Toggle family member checkbox in add event form
 
   // Connect to Copilot AI Summer Coordinator
@@ -3208,6 +3241,7 @@ export default function App() {
     pdfCategory, setPdfCategory,
     dragActive, setDragActive,
     handleAddSource, handleTextSubmit, handlePdfUpload, handleDeleteSource,
+    handleSyncSources, isSyncingSources,
     cloudInviteCode,
     inviteCodeInput, setInviteCodeInput,
     isJoiningHousehold, handleJoinHousehold,
