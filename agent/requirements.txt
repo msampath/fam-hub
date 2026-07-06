@@ -8,3 +8,6 @@ mcp>=1.2
 fastapi>=0.110
 uvicorn[standard]>=0.29
 pytest>=8.0
+# Local engine tier (CONCIERGE_LOCAL_ENABLED): ADK's LiteLlm wrapper drives Ollama through litellm.
+# Only imported when the local tier is on — but pinned here so the Decision-B gate run is reproducible.
+litellm>=1.40

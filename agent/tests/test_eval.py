@@ -89,6 +89,36 @@ def test_bills_agent_cannot_pay():
     assert not PAYMENT_TOOLS.intersection(tools)
 
 
+# ── Router tiering (#1 redesigned) + local chain head (Phase-4) — structural ─────────────────────
+
+def test_router_model_rides_the_root_only():
+    # A cheap router serves ONLY the root (it just emits transfer_to_agent); every specialist —
+    # the nodes doing real tool work — keeps the chain model.
+    root = agent.build_root_agent(router_model="cheap-router")
+    assert root.model == "cheap-router"
+    assert all(sub.model == agent.MODEL for sub in root.sub_agents)
+
+
+def test_router_override_is_ignored_on_an_explicit_model_attempt():
+    # api.py passes an explicit model on FALLBACK/local attempts — the router pin must not survive
+    # there, or a 503ing router would defeat the whole fallback chain.
+    root = agent.build_root_agent(model="fallback-x", router_model="cheap-router")
+    assert root.model == "fallback-x"
+    assert all(sub.model == "fallback-x" for sub in root.sub_agents)
+
+
+def test_local_head_leads_the_chain_only_when_enabled(monkeypatch):
+    if not _HAS_KEY:
+        pytest.skip("importing agent.api needs a Gemini key (boot guard)")
+    import api  # agent/api.py — resolvable because tests add agent/ to sys.path
+    monkeypatch.setattr(api, "LOCAL_ENABLED", True)
+    chain = api.build_model_chain()
+    assert chain[0] == api.LOCAL_TOKEN and chain[1] is None
+    monkeypatch.setattr(api, "LOCAL_ENABLED", False)
+    chain = api.build_model_chain()
+    assert chain[0] is None and api.LOCAL_TOKEN not in chain
+
+
 # ── LIVE: prompt-driven behavior (owner-run, needs a Gemini key) ──────────────────────────────────
 
 _HAS_KEY = bool(os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY"))

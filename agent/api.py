@@ -65,6 +65,20 @@ RETRYABLE_MARKERS = ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "OVERLOA
 MAX_ATTEMPTS_PER_MODEL = max(1, int(os.environ.get("CONCIERGE_MAX_ATTEMPTS", "2")))
 RETRY_BACKOFF_BASE = float(os.environ.get("CONCIERGE_RETRY_BACKOFF", "0.6"))  # seconds; linear per attempt
 
+# Local engine tier (Phase-4, Decision-B gated): CONCIERGE_LOCAL_ENABLED=1 inserts the local Ollama
+# model (via ADK's LiteLLM wrapper) at the HEAD of the model chain. Gate before enabling anywhere real:
+# `python agent/evals/run_eval.py` must show >=90% valid tool calls AND 0 destructive misfires on the
+# local head. ANY local failure (refused connection, bad output, timeout) advances to the Gemini chain —
+# the local tier can only ever ADD availability, never block a turn.
+LOCAL_ENABLED = os.environ.get("CONCIERGE_LOCAL_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+LOCAL_MODEL = os.environ.get("CONCIERGE_LOCAL_MODEL", "ollama_chat/gpt-oss:20b")
+LOCAL_TOKEN = "__local__"  # chain sentinel; resolved to a LiteLlm instance at build time
+
+
+def build_model_chain() -> list:
+    """The turn's model chain, in try-order: optional local head → primary (None → MODEL) → fallbacks."""
+    return ([LOCAL_TOKEN] if LOCAL_ENABLED else []) + [None] + FALLBACK_MODELS
+
 # Conversation history keyed by (user_id, session_id). The agent graph is rebuilt per request (it carries
 # the visitor's token), but history is agent-independent, so it lives here and survives across turns.
 _sessions = InMemorySessionService()
@@ -207,7 +221,13 @@ async def chat(body: ChatIn, authorization: str | None = Header(default=None)):
 
     async def _run_turn(model_name: str | None, turn_session_id: str):
         # Per-request agent carrying THIS visitor's token => the MCP child's writes are RLS-scoped to them.
-        agent = build_root_agent(access_token=jwt, model=model_name)
+        if model_name == LOCAL_TOKEN:
+            # Lazy import: `litellm` is only required when the local tier is enabled.
+            from google.adk.models.lite_llm import LiteLlm
+            model_arg: object | None = LiteLlm(model=LOCAL_MODEL)
+        else:
+            model_arg = model_name
+        agent = build_root_agent(access_token=jwt, model=model_arg)
         runner = Runner(app_name=APP_NAME, agent=agent, session_service=_sessions)
         reply = ""
         actions: list[dict] = []
@@ -233,11 +253,11 @@ async def chat(body: ChatIn, authorization: str | None = Header(default=None)):
     # so the goal's id + step statuses ride along regardless of which model/session answers. That's why the goal
     # state is injected as prompt text, not relied on from session memory. (Intentional; do not "fix" by reusing
     # the session on retry — see the corrupted-transcript reason above.)
-    chain = [None] + FALLBACK_MODELS  # primary (None → CONCIERGE_MODEL) then each fallback, in order
+    chain = build_model_chain()  # optional local head → primary (None → CONCIERGE_MODEL) → fallbacks
     last_err: Exception | None = None
     first = True
     for model_name in chain:
-        label = model_name or "primary"
+        label = LOCAL_MODEL if model_name == LOCAL_TOKEN else (model_name or "primary")
         for attempt in range(MAX_ATTEMPTS_PER_MODEL):
             if first:
                 turn_session_id = session.id
@@ -252,12 +272,20 @@ async def chat(body: ChatIn, authorization: str | None = Header(default=None)):
                 if not reply.strip():
                     reply = ("I couldn't put together an answer for that just now"
                              + (" — but the actions below did go through." if actions else " — mind trying again or rephrasing?"))
-                resolved_model = model_name or MODEL  # None = primary (CONCIERGE_MODEL); else the fallback that answered
-                if model_name is not None:
+                # None = primary (CONCIERGE_MODEL); LOCAL_TOKEN = the local Ollama model; else the fallback.
+                resolved_model = LOCAL_MODEL if model_name == LOCAL_TOKEN else (model_name or MODEL)
+                if model_name == LOCAL_TOKEN:
+                    print(f"[concierge] answered on LOCAL model {resolved_model!r}", flush=True)
+                elif model_name is not None:
                     print(f"[concierge] answered on fallback model {resolved_model!r}", flush=True)
                 return {"reply": reply, "sessionId": turn_session_id, "actions": actions, "model": resolved_model}
             except Exception as err:
                 last_err = err
+                if model_name == LOCAL_TOKEN:
+                    # The local head must never block a turn: ANY failure (connection refused, litellm
+                    # missing, bad tool syntax, timeout) advances straight to the cloud chain.
+                    print(f"[concierge] local model failed ({err!r}); advancing to the cloud chain", flush=True)
+                    break
                 if not any(s in repr(err).upper() for s in RETRYABLE_MARKERS):
                     traceback.print_exc()  # real cause to the log; generic client message (F-06 parity)
                     raise HTTPException(status_code=502, detail="The agent could not complete that request.")

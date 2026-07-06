@@ -46,6 +46,12 @@ def parse_fallback_models(raw: str) -> list[str]:
 
 FALLBACK_MODELS = parse_fallback_models(os.environ.get("CONCIERGE_FALLBACK", ""))
 
+# Router tiering (#1, REDESIGNED): a CHEAP model may serve the ROOT router — it only emits
+# transfer_to_agent — while the specialists keep the chain model, so api.py's 503 fallback still
+# swaps every node that does real work. Applied ONLY on the primary attempt (model=None below):
+# a fallback attempt must not keep a pinned, possibly-503ing router in the graph.
+ROUTER_MODEL = os.environ.get("CONCIERGE_ROUTER_MODEL", "").strip()
+
 # A cold `npx tsx src/mcp/server.ts` start (tsx transpiles on first spawn) can exceed ADK's default ~5s MCP
 # session-connect timeout — which surfaces as "Failed to create MCP session … TimeoutError" and an EMPTY
 # toolbelt (the agent then only has transfer_to_agent and "hallucinates" create_event). Give it headroom.
@@ -127,11 +133,17 @@ SPECIALIST_TOOLS: dict[str, list[str]] = {
 }
 
 
-def build_root_agent(access_token: str | None = None, model: str | None = None) -> Agent:
+def build_root_agent(access_token: str | None = None, model: object | None = None,
+                     router_model: str | None = None) -> Agent:
     """Build the concierge agent graph. Call WITHOUT a token for `adk run`/`adk web` (the MCP child uses
     the process env); the FastAPI service passes a per-request `access_token` so each visitor's writes are
-    RLS-scoped to their own household (the per-visitor isolation invariant from the security review)."""
+    RLS-scoped to their own household (the per-visitor isolation invariant from the security review).
+
+    `model` may be a model NAME or an ADK BaseLlm instance (api.py passes LiteLlm for the local tier).
+    `router_model` (or CONCIERGE_ROUTER_MODEL) puts a cheap model on the ROOT router only — ignored when
+    `model` is explicitly set, because a fallback/local attempt must swap the WHOLE graph."""
     m = model or MODEL
+    root_model = (router_model or ROUTER_MODEL or m) if model is None else m
     calendar_agent = Agent(
         name="calendar_agent", model=m,
         description="Creates and reschedules household calendar events.",
@@ -170,7 +182,7 @@ def build_root_agent(access_token: str | None = None, model: str | None = None) 
     # The root concierge routes to a specialist via ADK's LLM-driven delegation (sub_agents). It holds no
     # tools of its own — it decides WHO acts; the specialist acts with its scoped toolbelt.
     return Agent(
-        name="concierge", model=m,
+        name="concierge", model=root_model,
         description="The family's safe household concierge — routes requests to specialist agents.",
         instruction=prompts.ROOT,
         sub_agents=[calendar_agent, chores_agent, shopping_agent, outings_agent, briefing_agent, bills_agent, files_agent],
