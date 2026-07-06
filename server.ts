@@ -1625,8 +1625,13 @@ app.post('/api/vision-scan-pantry', requireAuth, aiRateLimit, async (req, res) =
 const PHOTOS_DIR = path.resolve(process.env.PHOTOS_DIR || './data/photos');
 const PHOTO_EXT = /\.(jpe?g|png|webp|gif)$/i;
 const photoPathFor = (name: string): string | null => {
-  const base = path.basename(String(name || ''));
-  if (base !== name || !PHOTO_EXT.test(base)) return null; // traversal-proof: a bare basename only
+  const raw = String(name || '');
+  // Reject both separators explicitly: on POSIX a backslash is a legal filename character, so
+  // path.basename('..\\x.jpg') round-trips unchanged and the basename check alone passed it through
+  // (Linux CI answered 404-not-found where Windows answered 400-rejected for the same input).
+  if (/[\\/]/.test(raw)) return null;
+  const base = path.basename(raw);
+  if (base !== raw || !PHOTO_EXT.test(base)) return null; // traversal-proof: a bare basename only
   return path.join(PHOTOS_DIR, base);
 };
 
