@@ -74,6 +74,7 @@ import { mergeNewsletterDocs } from './utils/newsletters';
 import type { NormalizedMessage } from './utils/email';
 import { matchOwnProfileIndex, healMemberLink } from './utils/identity';
 import { buildDemoSeed } from './utils/demoSeed';
+import { krogerCartAdd } from './utils/krogerClient';
 import { isAgentConfigured, askConciergeAgent, type AgentAction } from './utils/agentClient';
 import { routeTurn } from './utils/copilotRouter';
 import { buildAgentActionResult, detectUnbackedClaims } from './utils/agentActions';
@@ -769,6 +770,36 @@ export default function App() {
       refIds: evs.map(e => e.id),
     }, authorStamp());
     setActionLedger(prev => [...prev, entry].slice(-LEDGER_CAP));
+  };
+
+  // Kroger (client-staged, mirrors stagePushToGoogle): match the given shopping items to real products
+  // at the household's chosen store, then stage ONE confirm-tier approval whose summary lists exactly
+  // what will be added (+ what couldn't be matched). Approving it writes the cart (the applier above).
+  const [krogerBusy, setKrogerBusy] = useState(false);
+  const sendShoppingToKroger = async (items: string[]) => {
+    const store = settings[0]?.krogerStoreId;
+    if (!store) { setCopilotMessages(prev => [...prev, { role: 'assistant', text: 'Connect a Kroger store in Manage first.' }]); return; }
+    if (!items.length) return;
+    setKrogerBusy(true);
+    try {
+      const { matchKrogerItems } = await import('./utils/krogerClient');
+      const { matched, unmatched } = await matchKrogerItems(items, store);
+      if (!matched.length) {
+        setCopilotMessages(prev => [...prev, { role: 'assistant', text: `Couldn't find any of those at ${settings[0]?.krogerStoreName || 'your store'} — ${unmatched.join(', ')} stay on your lists.` }]);
+        return;
+      }
+      const { buildCartDraftSummary } = await import('./utils/krogerApi');
+      const entry = buildLedgerEntry('ledg-' + uuid(), 'kroger_cart_write', 'confirm', 'pending', {
+        summary: buildCartDraftSummary(settings[0]?.krogerStoreName || 'Kroger', matched, unmatched),
+        payload: { items: matched.map(m => ({ upc: m.upc, quantity: 1, text: m.text })) },
+      }, authorStamp());
+      setActionLedger(prev => [...prev, entry].slice(-LEDGER_CAP));
+      setCopilotMessages(prev => [...prev, { role: 'assistant', text: `🛒 Staged ${matched.length} item${matched.length === 1 ? '' : 's'} for your ${settings[0]?.krogerStoreName || 'Kroger'} cart — review in Approvals.` }]);
+    } catch (err: any) {
+      setCopilotMessages(prev => [...prev, { role: 'assistant', text: `⚠️ ${err?.message || 'Kroger matching failed.'}` }]);
+    } finally {
+      setKrogerBusy(false);
+    }
   };
 
   // (Per-device idle/reminder prefs + their persistence + the reminder toggle now live in
@@ -2529,6 +2560,27 @@ export default function App() {
       markLedger(id, approve, s0);
       return;
     }
+    // Kroger cart write (confirm-tier): on approve, add the matched products to the parent's real
+    // Kroger cart via the device's refresh token, then check the added items off the shopping list.
+    // On failure keep the entry PENDING (like push_to_google) so the parent can reconnect + retry.
+    if (entry.tool === 'kroger_cart_write') {
+      if (!approve) { markLedger(id, approve, authorStamp()); return; }
+      const payload = entry.payload as { items?: { upc: string; quantity?: number; text?: string }[] } | undefined;
+      const items = Array.isArray(payload?.items) ? payload!.items : [];
+      krogerCartAdd(items.map(i => ({ upc: i.upc, quantity: i.quantity })))
+        .then(added => {
+          markLedger(id, true, authorStamp());
+          // Check off the shopping items that made it into the cart (match by the text we staged).
+          const carted = new Set(items.map(i => String(i.text || '').trim().toLowerCase()).filter(Boolean));
+          if (carted.size) setShoppingList(prev => prev.map(i => (carted.has(String(i.text).trim().toLowerCase()) ? { ...i, completed: true } : i)));
+          setCopilotMessages(prev => [...prev, { role: 'assistant', text: `🛒 Added ${added} item${added === 1 ? '' : 's'} to your Kroger cart — open the Kroger app to check out.` }]);
+        })
+        .catch(err => {
+          // Leave the entry pending; surface the reason so the parent can reconnect Kroger and re-approve.
+          setCopilotMessages(prev => [...prev, { role: 'assistant', text: `⚠️ ${err?.message || 'Could not update your Kroger cart.'}` }]);
+        });
+      return;
+    }
     const res = resolveLedgerEntry(entry, events, approve);
     if (res.applied && res.refId) {
       const changes = res.changes as Partial<CalendarEvent>;
@@ -2643,6 +2695,9 @@ export default function App() {
   const copilotName = (settings[0]?.copilotName || '').trim() || 'Copilot';
   const setCopilotName = (name: string) =>
     setSettings(prev => [{ ...(prev[0] || {}), copilotName: name.trim().slice(0, 24) }]);
+  // Kroger chosen store (household config; the OAuth token stays per-device in localStorage).
+  const setKrogerStore = (storeId: string | null, storeName: string | null) =>
+    setSettings(prev => [{ ...(prev[0] || {}), krogerStoreId: storeId || undefined, krogerStoreName: storeName || undefined }]);
   const handleSetStepUpPin = async (pin: string): Promise<{ ok: boolean; error?: string }> => {
     try {
       const { hash, salt } = await apiSetStepUpPin(pin);
@@ -3067,6 +3122,7 @@ export default function App() {
 
   const ctx: AppCtx = {
     shoppingList, setShoppingList,
+    sendShoppingToKroger, krogerBusy, krogerStoreName: settings[0]?.krogerStoreName || null,
     newShopText, setNewShopText,
     newShopStore, setNewShopStore,
     newShopQty, setNewShopQty,
@@ -3132,6 +3188,8 @@ export default function App() {
 
     // The family's name for the copilot (synced household setting)
     copilotName, setCopilotName,
+    setKrogerStore, krogerStoreId: settings[0]?.krogerStoreId || null,
+    homeLat: settings[0]?.homeLat ?? null, homeLng: settings[0]?.homeLng ?? null,
 
     // Email scans (B1 bills / B2 packages / B3 kids) + shared suggestion-create (also used by the copilot panel)
     scanEmailForBills, scanEmailForPackages, scanEmailForKidsActivities, handleCreateSuggestion, addedSuggestionKeys,

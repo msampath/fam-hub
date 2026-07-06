@@ -21,6 +21,7 @@ export default function ShoppingPage() {
     handleSuggestRestock, isSuggestingRestock, shoppingAiError, familyMembers,
     handlePlanMeals, isPlanningMeals, mealPlan,
     handleScanPantryPhoto, isScanningPantry, pantryScan, confirmPantryScan, dismissPantryScan,
+    sendShoppingToKroger, krogerBusy, krogerStoreName,
     kidMode,
   } = useApp();
   const [showRecipes, setShowRecipes] = useState(false);
@@ -73,6 +74,18 @@ export default function ShoppingPage() {
             >
               <ChefHat size={15} /> Recipes
             </button>
+            {!kidMode && krogerStoreName && left > 0 && (
+              <button
+                type="button"
+                disabled={krogerBusy}
+                onClick={() => sendShoppingToKroger(shoppingList.filter(i => !i.completed).map(i => i.text))}
+                className="flex items-center gap-1.5 rounded-[10px] px-3.5 py-1.5 text-sm font-extrabold disabled:opacity-50"
+                style={{ border: `2px solid ${C.emerald}`, background: `${C.emerald}14`, color: C.emerald }}
+                title={`Match your list to products at ${krogerStoreName} and stage a cart for approval`}
+              >
+                🛒 {krogerBusy ? 'Matching…' : `Send to ${krogerStoreName}`}
+              </button>
+            )}
             {!kidMode && hasCompletedNonStaple && (
               <button
                 type="button"

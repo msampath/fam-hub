@@ -9,6 +9,7 @@ import {
   IDLE_TIMEOUT_OPTIONS, IDLE_SIGNOUT_OPTIONS, REMINDER_TIME_OPTIONS, REMINDER_LEAD_OPTIONS, MEMBER_COLORS_LIST,
 } from '../../constants';
 import GoogleSyncPanel from '../calendar/GoogleSyncPanel';
+import KrogerPanel from './KrogerPanel';
 import { getBackendMode, localChangePassphrase } from '../../supabase';
 import { C, memberHex } from './theme';
 
@@ -267,6 +268,11 @@ export default function Manage({ account, onClose }: ManageProps) {
               </>
             )}
           </div>
+        </Section>
+
+        {/* Grocery cart integration */}
+        <Section title="Groceries">
+          <KrogerPanel />
         </Section>
 
         {/* Family members + dietary/interests */}

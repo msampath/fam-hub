@@ -251,6 +251,11 @@ export interface HouseholdSettings {
   // (unavailable over the plain-http LAN). Set/verified via /api/stepup/* in A3.
   stepUpPinHash?: string;
   stepUpPinSalt?: string;
+  // Kroger cart integration — the chosen store is HOUSEHOLD config (shared), but the OAuth refresh
+  // token is a per-DEVICE secret kept in localStorage (famplan_kroger_refresh), never in this shared
+  // RLS collection — the exact Google-refresh-token precedent.
+  krogerStoreId?: string;
+  krogerStoreName?: string;
 }
 
 // A "last visited" tracker per place (venue/outing), NOT a full event history — bounded and

@@ -15,6 +15,13 @@ export function makeAppCtx(overrides: Partial<AppCtx> = {}): AppCtx {
     // Shopping
     shoppingList: [],
     setShoppingList: vi.fn(),
+    sendShoppingToKroger: vi.fn(),
+    krogerBusy: false,
+    krogerStoreName: null,
+    krogerStoreId: null,
+    setKrogerStore: vi.fn(),
+    homeLat: null,
+    homeLng: null,
     newShopText: '',
     setNewShopText: vi.fn(),
     newShopStore: 'Grocery Store',

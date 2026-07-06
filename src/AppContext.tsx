@@ -10,6 +10,15 @@ export interface AppCtx {
   // Shopping
   shoppingList: ShoppingItem[];
   setShoppingList: React.Dispatch<React.SetStateAction<ShoppingItem[]>>;
+  // Kroger cart: match the given item texts to products at the connected store and stage a
+  // confirm-tier cart-write approval. krogerStore is set (null when not connected/configured).
+  sendShoppingToKroger: (items: string[]) => void;
+  krogerBusy: boolean;
+  krogerStoreName: string | null;
+  krogerStoreId: string | null;
+  setKrogerStore: (storeId: string | null, storeName: string | null) => void;
+  homeLat: number | null;
+  homeLng: number | null;
   newShopText: string;
   setNewShopText: React.Dispatch<React.SetStateAction<string>>;
   newShopStore: ShopStore;
