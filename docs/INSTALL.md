@@ -47,6 +47,11 @@ keyless by default (OpenStreetMap / DuckDuckGo / Open-Meteo), so the dashboard +
 > plans trips) has no local-model path yet, so on a keyless box it stays offline while everything else (calendar,
 > chores, shopping, the in-app copilot) works. The box comes up either way — it no longer blocks on the concierge.
 
+## Optional: Kroger send-to-cart (real grocery-cart writes)
+Approve a matched shopping list into your actual Kroger/Fred Meyer/QFC cart — payment stays in Kroger's
+own app (the public API has no checkout endpoint). Needs your own free developer app + two env vars:
+[kroger-setup.md](kroger-setup.md).
+
 ## Manage it
 ```bash
 cd ~/fam-hub

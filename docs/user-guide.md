@@ -113,21 +113,26 @@ Turn on **Kid mode** in Manage (it's per-device — made for the kitchen wall ta
 - Each store list has its own **Clear** button (checked-off items go, starred staples stay), plus the
   global **Clear done**.
 
-### Kroger cart — send the list to a real cart
+### Kroger cart — send a list to a real cart
 
-Connect a Kroger-family store (QFC, Fred Meyer, Kroger…) in **Manage → Groceries**: pick your store,
-sign in to your Kroger account in the popup, done. Then:
+Connect once in **Manage → Groceries**: hit **Connect Kroger account** and sign in on Kroger's page
+(the app picks the sign-in up automatically — no popup gymnastics), pick the connection's store
+(**"Shop at → Fred Meyer - Issaquah"**), then **link the lists** that shop there (say, *Grocery Store →
+Kroger*, while *Costco* stays *Not linked*). The store belongs to the *connection*, not to any list —
+several lists can point at it, and changing the store re-points them all at once. Then:
 
-1. **Send to cart** on the Shopping page (or the one-tap offer that appears right after a recipe/dish
-   ask) matches your grocery items to real products at your store.
-2. The match is staged as **one Approval** listing exactly what will be added — and what couldn't be
-   matched (those stay on your lists).
-3. **Approve** it and the items land in your actual Kroger cart. You review and **pay in Kroger's own
-   app** — Family-Hub never checks out and never holds payment details (the public Kroger API has no
-   checkout endpoint at all).
+1. Every **linked** list gets its own **Send to <store>** button (there's also a one-tap offer right
+   after a recipe/dish ask): your items are matched to real products at that store — a model must pick
+   from the store's actual candidates or decline, and declines get one automatic second look.
+2. The match is staged as **one Approval**, one line per item (*"Ginger (1 piece) → Organic Ginger Root
+   (1 lb, $3.99)"*) — plus an honest reason for anything that didn't make it: *no match at this store*,
+   *couldn't confidently match — try Send again*, or *search failed*. Unmatched items stay on your lists.
+3. **Approve** it and the items land in your actual Kroger cart (quantities default to 1 — bump them
+   there). You review and **pay in Kroger's own app** — Family-Hub never checks out and never holds
+   payment details (the public Kroger API has no checkout endpoint at all).
 
-Self-hosters: register your own (free) app at developer.kroger.com and set `KROGER_CLIENT_ID` /
-`KROGER_CLIENT_SECRET` — see `.env.example`.
+Self-hosters: [docs/kroger-setup.md](kroger-setup.md) walks through the free developer app, the
+redirect-URI gotcha, and `KROGER_CLIENT_ID` / `KROGER_CLIENT_SECRET`.
 
 ## 8. Library — the Copilot's memory
 

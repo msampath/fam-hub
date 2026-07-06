@@ -2,7 +2,7 @@
 
 *An agent that runs your family's week.*
 
-> **Draft for the Kaggle Writeup editor** (AI Agents: Intensive Vibe Coding Capstone · **Track: Concierge Agents**). Paste into the Writeup; attach the cover image + video; set the project links. Word target ≤2,500 (this draft ≈2,300).
+> **Draft for the Kaggle Writeup editor** (AI Agents: Intensive Vibe Coding Capstone · **Track: Concierge Agents**). Paste into the Writeup; attach the cover image + video; set the project links. Word target ≤2,500 (this draft ≈2,400 — updated 2026-07-06 in-window with the "Added agentic scope" cart-loop section; after saving on Kaggle, VERIFY the status still shows Submitted).
 >
 > Links to fill at submission: https://family-hub-web-420776046740.us-central1.run.app (Cloud Run) · video: https://youtu.be/4S2k9VOpdBc · repo: https://github.com/msampath/fam-hub
 
@@ -60,6 +60,17 @@ Most submissions are reactive chatbots. Family-Hub's scheduler runs a **closed-a
 
 Elsewhere in the loop: the quick path runs a **bounded critic** (invalid actions trigger up to two corrective re-prompts, each adopted only if it strictly reduces verified issues); staged drafts support **human-in-the-loop "Modify"** ("make it vegetarian" recalculates just that draft, still pending); and the outings loop tracks its work as a **goal** with visible steps.
 
+## Added agentic scope (in-window): intent → a real grocery cart
+
+Shipped after the video was recorded — inside the submission window, public on the repo — the concierge closed its last loop: **from intent to a real-world state change.** The Kroger Cart API (Fred Meyer/QFC) turns the `add_to_cart` draft into a **real cart write**, on the same safety spine:
+
+- **Connections, not per-list stores.** The household connects the Kroger API once; the physical store is a property of the *connection* ("Shop at → Fred Meyer - Issaquah") and lists link to it — one store, many lists, the way families shop.
+- **Pick-or-decline matching.** Kroger's fuzzy search returns *frying pans* for "paneer," so a schema-enforced model call must choose from the listed candidates or return −1; validation deterministically drops out-of-range and out-of-stock picks, and low-confidence declines get one focused second-pass re-judge.
+- **Honest, line-per-item approval.** The parent approves exactly `Ginger (1 piece) → Organic Ginger Root (1 lb, $3.99)`, with per-item reasons for the rest: *no match at this store* ≠ *couldn't confidently match* ≠ *search failed*.
+- **A cart, never a checkout.** Approve → the items appear in the family's actual cart; the public API has **no payment endpoint**, so the no-payment invariant holds by contract.
+
+Verified live end-to-end: dish ask → buy-unit ingredients → routed lists → per-list send → approval → items in the real Fred Meyer cart. The hosted demo runs the submission-freeze build; the loop ships on the repo's default branch with tests and a setup guide (`docs/kroger-setup.md`).
+
 ## Course concepts demonstrated (6 of 6)
 
 | Concept | Evidence |
@@ -76,7 +87,7 @@ Elsewhere in the loop: the quick path runs a **bounded critic** (invalid actions
 ## Try it
 
 - **Live demo (no login):** https://family-hub-web-420776046740.us-central1.run.app → *Try the demo* → follow the README's 7-step **Golden Path** (grounded ask → agent write → multi-step trip with goal + verified handoff → **the payment refusal** → morning planner → kid mode).
-- **Repo:** https://github.com/msampath/fam-hub — machine-first README (Concept→Evidence table, Mermaid architecture), 925 Vitest tests + offline agent-structure pytest + a live refusal/injection eval, `docker compose up --build` for the full stack.
+- **Repo:** https://github.com/msampath/fam-hub — machine-first README (Concept→Evidence table, Mermaid architecture), 1,191 Vitest tests + offline agent-structure pytest + a live refusal/injection eval, `docker compose up --build` for the full stack.
 
 ## Honest limitations
 
@@ -84,7 +95,7 @@ The demo agent service runs `--allow-unauthenticated` with per-visitor RLS as th
 
 ## Roadmap: the $0 local concierge
 
-The deliberate next arc is **cloud → local**: the quick path already ships an Ollama integration behind a flag (`LOCAL_LLM_ENABLED`, schema-converted structured output, think-mode support, Gemini fallback), benchmarked on `gpt-oss:20b` (16 GB VRAM). Post-capstone: an eval harness replaying the app's golden prompts across engines (action validity, critic pass-rate, grounding adherence), the ADK concierge on a local model via LiteLLM, and the per-turn Escalate control re-enabled as the local↔cloud bridge — a household concierge whose data and inference never leave the house. Also queued: routine mining from the append-only logs (learned staples and rhythms as reviewable suggestions), durable agent jobs, and Home Assistant integration behind the existing step-up tier. The next rung of the authority ladder is deliberate too: **browser-assisted form-fill** (an agent-driven browser types the gathered details into the venue's form and stops before submit) is designed for the step-up PIN tier — but it stays roadmap until the pre-submit side effects (inventory holds), bot-defense/ToS reality, and the PII-injection surface of auto-typing into fetched pages each have an answer. Today the human types; that's a feature. Where a retailer offers a *sanctioned* path, the ladder climbs sooner: Kroger's public Cart API (Fred Meyer/QFC) can turn the existing `add_to_cart` draft into a real cart write — recipe → pantry-diffed missing items → product-matched at the family's own store → approved into the cart — while checkout remains structurally impossible for the agent (the public API simply has no payment endpoint).
+The deliberate next arc is **cloud → local**: the quick path already ships an Ollama integration behind a flag (`LOCAL_LLM_ENABLED`, schema-converted structured output, think-mode support, Gemini fallback), benchmarked on `gpt-oss:20b` (16 GB VRAM). Post-capstone: an eval harness replaying the app's golden prompts across engines (action validity, critic pass-rate, grounding adherence), the ADK concierge on a local model via LiteLLM, and the per-turn Escalate control re-enabled as the local↔cloud bridge — a household concierge whose data and inference never leave the house. Also queued: routine mining from the append-only logs (learned staples and rhythms as reviewable suggestions), durable agent jobs, and Home Assistant integration behind the existing step-up tier. The next rung of the authority ladder is deliberate too: **browser-assisted form-fill** (an agent-driven browser types the gathered details into the venue's form and stops before submit) is designed for the step-up PIN tier — but it stays roadmap until the pre-submit side effects (inventory holds), bot-defense/ToS reality, and the PII-injection surface of auto-typing into fetched pages each have an answer. Today the human types; that's a feature. Where a retailer offers a *sanctioned* path, the ladder climbs sooner — the Kroger cart loop above landed in-window this way, and an Instacart adapter (shoppable lists across 1,500+ banners) is the next connection card.
 
 ## The build
 
