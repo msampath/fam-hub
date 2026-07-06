@@ -63,7 +63,7 @@ import {
   parseHmToMinutes,
   shiftDateStr,
 } from './utils/dates';
-import { isoWeekKey, applyWeeklyReset, applyDailyReset } from './utils/chores';
+import { isoWeekKey, applyWeeklyReset, applyDailyReset, acquireResetLock } from './utils/chores';
 import { mergeDeduplicateEvents, detectRecurringGroups, filterHiddenEvents, applySyncedPull } from './utils/events';
 import { buildDailyReminder, shouldFireDailyReminder, dueEventReminders, type ReminderContent } from './utils/reminders';
 import { filterConflictWindow, detectConflicts } from './utils/conflicts';
@@ -940,15 +940,22 @@ export default function App() {
     } else if (dayReset) {
       ({ chores, bank } = applyDailyReset(loadedChores, loadedBank));
     }
-    if (weekChanged || dayReset) {
+    // Multi-tab guard (W8): the first tab of THIS browser to stamp the rollover marker persists it;
+    // any sibling tab still applies the reset to its own state (so both render post-reset) but skips
+    // the saves — no same-browser double-write race. Cross-device races stay the CAS's job.
+    const rolled = weekChanged || dayReset;
+    const ownsRollover = !rolled || acquireResetLock('famplan_choreResetDone', `${currentWeek}:${currentDay}`);
+    if (rolled) {
       setChoresList(chores);
       setXpBankList(bank);
-      saveHouseholdData(hid, 'chores', chores);
-      saveHouseholdData(hid, 'xpbank', bank);
+      if (ownsRollover) {
+        saveHouseholdData(hid, 'chores', chores);
+        saveHouseholdData(hid, 'xpbank', bank);
+      }
     }
     if (weekChanged || storedDay !== currentDay) {
       setChoreWeekList([{ week: currentWeek, day: currentDay }]);
-      saveHouseholdData(hid, 'choreweek', [{ week: currentWeek, day: currentDay }]);
+      if (ownsRollover) saveHouseholdData(hid, 'choreweek', [{ week: currentWeek, day: currentDay }]);
     }
   };
 
@@ -984,11 +991,21 @@ export default function App() {
   // Optimistic concurrency (§5.3): when saveHouseholdData rejects a STALE write (a concurrent device/agent
   // wrote first), converge by reloading the latest. Registered once; the ref always points at the current
   // refreshHouseholdData so it isn't a stale closure.
+  // W8 last-mile: the refresh used to be SILENT — the screen visibly changed under the user with no
+  // explanation. Surface a short "Updated elsewhere" toast alongside it. Burst-debouncing lives in
+  // supabase.ts (fireStaleRefresh, one handler call per 300ms burst); here we only show a 4s pill.
   const refreshRef = useRef(refreshHouseholdData);
   refreshRef.current = refreshHouseholdData;
+  const [staleToastVisible, setStaleToastVisible] = useState(false);
+  const staleToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    setStaleWriteHandler(() => { void refreshRef.current(); });
-    return () => setStaleWriteHandler(null);
+    setStaleWriteHandler(() => {
+      void refreshRef.current();
+      setStaleToastVisible(true);
+      if (staleToastTimerRef.current) clearTimeout(staleToastTimerRef.current);
+      staleToastTimerRef.current = setTimeout(() => { staleToastTimerRef.current = null; setStaleToastVisible(false); }, 4000);
+    });
+    return () => { setStaleWriteHandler(null); if (staleToastTimerRef.current) clearTimeout(staleToastTimerRef.current); };
   }, []);
 
   // Idle screensaver: after the configured idle window (0 = Off), blank to a power-saving
@@ -3212,6 +3229,19 @@ export default function App() {
       <Suspense fallback={null}>
         {isAddingEvent && selectedDayToAdd && <AddEventModal />}
       </Suspense>
+
+      {/* Stale-write toast (§5.3 last-mile): a rejected concurrent write triggered a convergence
+          refresh — tell the user why the screen just updated. aria-live so screen readers hear it. */}
+      {staleToastVisible && (
+        <div
+          aria-live="polite"
+          className="fixed bottom-5 left-1/2 z-50 -translate-x-1/2 rounded-full px-4 py-2 text-[13px] font-bold"
+          // C.elevated / C.emerald / C.primary from the shell palette (App.tsx doesn't pull in shell/theme).
+          style={{ background: '#1e2538', border: '2px solid #34d399', color: '#e2e8f4', boxShadow: '0 4px 14px rgba(0,0,0,0.5)' }}
+        >
+          Updated elsewhere — refreshed to the latest.
+        </div>
+      )}
 
     </div>
     </CalendarContext.Provider>

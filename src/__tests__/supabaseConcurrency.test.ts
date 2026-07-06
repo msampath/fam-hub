@@ -51,6 +51,22 @@ describe('optimistic concurrency (§5.3)', () => {
     setStaleWriteHandler(null);
   });
 
+  it('debounces a BURST of stale rejects into ONE handler call (the toast/refresh contract)', async () => {
+    result = { data: [{ data_key: 'events', data: [1], updated_at: 'v1' }], error: null };
+    await loadHouseholdData('hhD');
+    const onStale = vi.fn();
+    setStaleWriteHandler(onStale);
+    vi.useFakeTimers();
+    result = { data: [], error: null }; // every write loses the CAS
+    await saveHouseholdData('hhD', 'events', [2]);
+    await saveHouseholdData('hhD', 'events', [3]);
+    await saveHouseholdData('hhD', 'events', [4]);
+    vi.advanceTimersByTime(300);
+    expect(onStale).toHaveBeenCalledTimes(1); // one refresh + one toast for the burst, not three
+    vi.useRealTimers();
+    setStaleWriteHandler(null);
+  });
+
   it('upserts (not compare-and-set) the first write of a never-loaded collection', async () => {
     result = { data: [{ updated_at: 'v1' }], error: null };
     await saveHouseholdData('hhC', 'newcol', [1]);

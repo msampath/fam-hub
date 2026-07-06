@@ -131,3 +131,19 @@ export function choreMatchesSlot(scheduleTimeOfDay: string | undefined, filter: 
   if (!mentionsKnown) return true; // "Anytime" / legacy free-text → always visible
   return slot.includes(filter.toLowerCase());
 }
+
+// Multi-tab daily/weekly-reset guard (W8): two tabs of the SAME browser booting across a rollover both
+// see stale markers and would both persist the reset (double XP-bank writes racing each other; the cloud
+// CAS only arbitrates cross-DEVICE writers). localStorage is synchronous and shared across a browser's
+// tabs, so read-then-stamp is an effective compare-and-set: the first tab to stamp `marker` owns
+// persisting that rollover; losers still apply the reset to their own state but skip the saves.
+// Storage unavailable (private mode edge) → claim the lock and let the cloud CAS be the next wall.
+export function acquireResetLock(storageKey: string, marker: string): boolean {
+  try {
+    if (localStorage.getItem(storageKey) === marker) return false; // another tab already owns this rollover
+    localStorage.setItem(storageKey, marker);
+    return true;
+  } catch {
+    return true;
+  }
+}

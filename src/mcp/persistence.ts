@@ -98,27 +98,62 @@ export class SupabasePersistence implements Persistence {
   }
 
   async loadCollection(dataKey: string): Promise<any[]> {
+    return (await this.loadWithVersion(dataKey)).data;
+  }
+
+  // Versioned read for the CAS write path: the row's updated_at is the compare token (same contract as
+  // the browser's saveHouseholdData and the box's /api/data). null version = the row doesn't exist yet.
+  private async loadWithVersion(dataKey: string): Promise<{ data: any[]; version: string | null }> {
     const hid = await this.householdId();
     const { data, error } = await this.client
-      .from('family_data').select('data').eq('household_id', hid).eq('data_key', dataKey).maybeSingle();
+      .from('family_data').select('data, updated_at').eq('household_id', hid).eq('data_key', dataKey).maybeSingle();
     if (error) throw new Error(`read "${dataKey}" failed: ` + error.message);
-    return Array.isArray(data?.data) ? data!.data : [];
+    return { data: Array.isArray(data?.data) ? data!.data : [], version: (data as any)?.updated_at ?? null };
+  }
+
+  // Cross-process CAS (W8 — the formerly "tracked follow-up", now landed): a conditional UPDATE gated on
+  // the updated_at token we loaded, mirroring SqlitePersistence.casWrite and the browser's CAS. The
+  // in-process lock still serializes THIS child's parallel tool calls; the CAS arbitrates against the
+  // OTHER writers (a human edit / another device) landing between our read and write — on a conflict
+  // (0 rows matched) reload + rebuild + retry, so the agent's DELTA re-applies to the freshest blob
+  // instead of clobbering or being dropped. After 4 lost races (vanishingly rare at household write
+  // volume), force-apply on fresh data so the write LANDS. updated_at stays client-set today — it is an
+  // equality token, not a clock; the server-set trigger upgrade is staged in the post-capstone migration.
+  private async casWrite(dataKey: string, build: (cur: any[]) => any[]): Promise<any[]> {
+    const hid = await this.householdId();
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const { data: cur, version } = await this.loadWithVersion(dataKey);
+      const next = build(cur);
+      if (version == null) {
+        // First write of this collection: nothing to compare against → plain upsert (browser parity).
+        const { error } = await this.client.from('family_data').upsert(
+          familyDataRow(hid, dataKey, next), { onConflict: FAMILY_DATA_CONFLICT },
+        );
+        if (error) throw new Error(`write "${dataKey}" failed: ` + error.message);
+        return next;
+      }
+      const { data: rows, error } = await this.client.from('family_data')
+        .update({ data: next, updated_at: new Date().toISOString() })
+        .eq('household_id', hid).eq('data_key', dataKey).eq('updated_at', version)
+        .select('updated_at');
+      if (error) throw new Error(`write "${dataKey}" failed: ` + error.message);
+      if (rows && rows.length) return next; // CAS landed
+      // 0 rows matched → a concurrent writer was ahead; loop re-reads and re-applies.
+    }
+    const { data: cur } = await this.loadWithVersion(dataKey);
+    const next = build(cur);
+    const { error } = await this.client.from('family_data').upsert(
+      familyDataRow(hid, dataKey, next), { onConflict: FAMILY_DATA_CONFLICT },
+    );
+    if (error) throw new Error(`write "${dataKey}" failed: ` + error.message);
+    return next;
   }
 
   // `current` (the caller's preloaded blob) is intentionally IGNORED — same reasoning as SqlitePersistence:
   // under the lock every append must merge into the FRESHEST blob, and a preloaded snapshot is stale by
   // definition for every call after the first in a parallel burst.
   async append(dataKey: string, items: any[], _current?: any[]): Promise<number> {
-    return this.locked(dataKey, async () => {
-      const hid = await this.householdId();
-      const cur = await this.loadCollection(dataKey);
-      const next = [...cur, ...items];
-      const { error } = await this.client.from('family_data').upsert(
-        familyDataRow(hid, dataKey, next), { onConflict: FAMILY_DATA_CONFLICT },
-      );
-      if (error) throw new Error(`write "${dataKey}" failed: ` + error.message);
-      return next.length;
-    });
+    return this.locked(dataKey, async () => (await this.casWrite(dataKey, cur => [...cur, ...items])).length);
   }
 
   async replace(dataKey: string, items: any[]): Promise<void> {
@@ -131,18 +166,10 @@ export class SupabasePersistence implements Persistence {
     });
   }
 
-  // Cloud read-modify-write: serialized per collection by the same in-process lock (parallel tool calls
-  // can't clobber each other); a Postgres-side conditional update (cross-process CAS vs a concurrent
-  // human edit) is the tracked follow-up — low-risk on Postgres / low write volume.
+  // Cloud read-modify-write: serialized per collection by the in-process lock (parallel tool calls can't
+  // clobber each other) AND CAS-gated against cross-process writers (casWrite above).
   async mutate(dataKey: string, transform: (cur: any[]) => any[]): Promise<void> {
-    return this.locked(dataKey, async () => {
-      const hid = await this.householdId();
-      const cur = await this.loadCollection(dataKey);
-      const { error } = await this.client.from('family_data').upsert(
-        familyDataRow(hid, dataKey, transform(cur)), { onConflict: FAMILY_DATA_CONFLICT },
-      );
-      if (error) throw new Error(`mutate "${dataKey}" failed: ` + error.message);
-    });
+    await this.locked(dataKey, () => this.casWrite(dataKey, transform));
   }
 
   // Web cache read — FRESH hits only; every failure mode is a miss (fail-soft: until the morning

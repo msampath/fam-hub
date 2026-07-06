@@ -182,3 +182,21 @@ create extension if not exists vector with schema extensions;
 -- );
 -- alter table oauth_tokens enable row level security; -- no policies: server-only via service key,
 --   -- or per-user "user_id = auth.uid()" policies if the JWT-scoped client should write its own row.
+
+-- ── 7. OPTIONAL: server-set updated_at trigger (hardens the CAS token against client clock skew) ─────
+-- The optimistic-concurrency token on family_data.updated_at is CLIENT-set today (browser saveHouseholdData,
+-- MCP SupabasePersistence.casWrite — both landed CAS in code; equality is what matters, not clock accuracy).
+-- This trigger makes Postgres stamp it instead, removing the theoretical equal-timestamp collision between
+-- two skewed clients. Safe + additive, but it changes live-table behavior — apply post-judging with the rest.
+--
+-- create or replace function set_updated_at()
+-- returns trigger language plpgsql as $$
+-- begin
+--   new.updated_at = now();
+--   return new;
+-- end; $$;
+--
+-- drop trigger if exists family_data_set_updated_at on family_data;
+-- create trigger family_data_set_updated_at
+--   before insert or update on family_data
+--   for each row execute function set_updated_at();

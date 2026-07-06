@@ -143,3 +143,75 @@ describe('SupabasePersistence concurrent appends', () => {
     expect(store.shopping.map((s: any) => s.id)).toEqual(['y']);
   });
 });
+
+describe('SupabasePersistence cross-process CAS (W8 — conditional update on updated_at)', () => {
+  // Version-aware mock: rows carry {data, updated_at}; .update(...).eq(updated_at, expected) only lands
+  // when the token matches (returning the row), else matches 0 rows — exactly PostgREST's behavior.
+  const casMockClient = () => {
+    const rows: Record<string, { data: any[]; updated_at: string }> = {};
+    let stamp = 0;
+    const nextStamp = () => `v${++stamp}`;
+    const api = {
+      rows,
+      // Simulate ANOTHER writer (a device/human) landing between this process's read and write.
+      externalWrite(dataKey: string, data: any[]) { rows[dataKey] = { data, updated_at: nextStamp() }; },
+      client: { from: (table: string) => {
+        if (table === 'household_members') {
+          return { select: () => ({ limit: async () => ({ data: [{ household_id: 'h1' }], error: null }) }) };
+        }
+        return {
+          select: () => ({ eq: () => ({ eq: (_k: string, dataKey: string) => ({
+            maybeSingle: async () => ({ data: rows[dataKey] ? { data: rows[dataKey].data, updated_at: rows[dataKey].updated_at } : null, error: null }),
+          }) }) }),
+          upsert: async (row: { data_key: string; data: any[] }) => { rows[row.data_key] = { data: row.data, updated_at: nextStamp() }; return { error: null }; },
+          update: (patch: { data: any[] }) => ({ eq: () => ({ eq: (_k: string, dataKey: string) => ({ eq: (_c: string, expected: string) => ({
+            select: async () => {
+              const row = rows[dataKey];
+              if (!row || row.updated_at !== expected) return { data: [], error: null }; // CAS lost
+              rows[dataKey] = { data: patch.data, updated_at: nextStamp() };
+              return { data: [{ updated_at: rows[dataKey].updated_at }], error: null };
+            },
+          }) }) }) }),
+        };
+      } } as never,
+    };
+    return api;
+  };
+
+  it('first write of a collection upserts (no version token yet)', async () => {
+    const m = casMockClient();
+    const p = new SupabasePersistence(m.client);
+    await p.append('events', [{ id: 'e1' }]);
+    expect(m.rows.events.data).toEqual([{ id: 'e1' }]);
+  });
+
+  it('a concurrent HUMAN write between read and write is NOT clobbered — the agent retries onto it', async () => {
+    const m = casMockClient();
+    m.externalWrite('shopping', [{ id: 'human-1' }]);
+    const p = new SupabasePersistence(m.client);
+    // Interpose: the first build() call happens after the read; simulate the human's second write landing
+    // right then, so the agent's first conditional update loses and must re-read.
+    let firstBuild = true;
+    await p.mutate('shopping', cur => {
+      if (firstBuild) { firstBuild = false; m.externalWrite('shopping', [...cur, { id: 'human-2' }]); }
+      return [...cur, { id: 'agent-1' }];
+    });
+    const ids = m.rows.shopping.data.map((s: any) => s.id);
+    expect(ids).toContain('human-1');
+    expect(ids).toContain('human-2'); // the concurrent write SURVIVED (pre-CAS it was clobbered)
+    expect(ids).toContain('agent-1'); // and the agent's delta still landed
+  });
+
+  it('exhausted retries force-apply on the freshest data (the write lands, nothing lost)', async () => {
+    const m = casMockClient();
+    m.externalWrite('chores', [{ id: 'c0' }]);
+    const p = new SupabasePersistence(m.client);
+    // A pathological neighbor: EVERY build triggers yet another external write, so all 4 CAS attempts lose.
+    await p.mutate('chores', cur => {
+      m.externalWrite('chores', [...cur.filter((c: any) => c.id !== 'agent'), { id: `ext-${cur.length}` }]);
+      return [...cur, { id: 'agent' }];
+    });
+    const ids = m.rows.chores.data.map((c: any) => c.id);
+    expect(ids).toContain('agent'); // the forced final apply landed the agent's delta on fresh data
+  });
+});
