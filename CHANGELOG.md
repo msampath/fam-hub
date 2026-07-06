@@ -39,6 +39,16 @@ Cloud Run services, their env, and the Supabase config stay frozen until Kaggle 
   Kroger API has **no checkout/payment endpoint**, so the no-payment invariant holds by contract.
   Pure API module (`src/utils/krogerApi.ts`), six server routes, the two-section connect panel,
   the approved-write applier, and a dish-ask auto-offer. Setup guide: `docs/kroger-setup.md`.
+- **Weekly meal planner** — tell the copilot the week's dinners ("Mon paneer butter masala, Tue
+  tacos…") and one agent turn records the week AND derives ONE consolidated, buy-unit,
+  store-routed shopping list. A new `meal_planner_agent` specialist (wide slice, no destructive or
+  payment tools) writes via the auto-tier `set_meal_plan` tool (validated + clamped; replaces by
+  week, so "swap Thursday to rajma" is a clean re-issue that adds only the new dish's missing
+  items). Surfaces: a **This week's dinners** strip on Today (today highlighted, ✨ marks
+  agent-proposed days), "🍽 Dinner tonight / Tomorrow" lines in the briefing card and the emailed
+  digest, and a MEALS facts block so "what's for dinner?" answers locally from the family's own
+  plan. Generative mode ("plan next week, mostly veggie") ships as a scaffold: it reads the
+  calendar first and marks its proposals.
 - **Quick-add critic** (`src/utils/quickAddCritic.ts`) — the natural-language quick-add path gets
   the same verify-before-apply treatment the copilot already had.
 - **Model fallback chains** — `GEMINI_FALLBACKS` (Express quick path, may end in `local`) and
