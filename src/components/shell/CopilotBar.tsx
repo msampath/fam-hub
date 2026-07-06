@@ -254,12 +254,13 @@ export default function CopilotBar({ onOpenManage }: CopilotBarProps) {
               ? { border: `2px solid ${C.amber}`, boxShadow: brutShadow(C.amberShadow, 4), background: `${C.amber}14`, color: C.amber }
               : { border: `2px solid ${C.elevated}`, background: C.card, color: C.muted }}
           >
-            <span className="hidden sm:inline">Approvals</span>
-            {/* Show a COUNT only when something is actually pending; history-only shows a quiet "History" tag,
-                so the number never reads as "N things to handle" when the queue is empty. */}
-            {pendingApprovals.length > 0
-              ? <span className="flex h-[22px] min-w-[22px] items-center justify-center rounded-full px-1 text-[11px] font-black" style={{ background: C.amber, color: C.app }}>{pendingApprovals.length}</span>
-              : <span className="text-[10px] font-bold uppercase tracking-[0.08em]" style={{ color: C.muted }}>History</span>}
+            {/* Show a COUNT only when something is actually pending; history-only renders just "Approvals"
+                (always visible — it's the button's only content then). The audit trail stays reachable via
+                the aria-label/title, without a tag that reads as something new to handle. */}
+            <span className={pendingApprovals.length > 0 ? 'hidden sm:inline' : undefined}>Approvals</span>
+            {pendingApprovals.length > 0 && (
+              <span className="flex h-[22px] min-w-[22px] items-center justify-center rounded-full px-1 text-[11px] font-black" style={{ background: C.amber, color: C.app }}>{pendingApprovals.length}</span>
+            )}
           </button>
         )}
 

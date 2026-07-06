@@ -22,6 +22,7 @@ export default function ShoppingPage() {
     handlePlanMeals, isPlanningMeals, mealPlan,
     handleScanPantryPhoto, isScanningPantry, pantryScan, confirmPantryScan, dismissPantryScan,
     sendShoppingToKroger, krogerBusy, krogerStoreName,
+    krogerOffer, dismissKrogerOffer,
     kidMode,
   } = useApp();
   const [showRecipes, setShowRecipes] = useState(false);
@@ -32,6 +33,9 @@ export default function ShoppingPage() {
   const toggleStaple = (id: string) => setShoppingList(prev => prev.map(i => (i.id === id ? { ...i, staple: !i.staple } : i)));
   // Clear completed items, but KEEP staples (they're recurring) so they can be re-added.
   const clearCompleted = () => setShoppingList(prev => prev.filter(i => !i.completed || i.staple));
+  // Same, scoped to ONE store's list (per-group Clear button).
+  const clearStoreCompleted = (store: string) =>
+    setShoppingList(prev => prev.filter(i => i.store !== store || !i.completed || i.staple));
   // One-tap re-add a checked-off staple as a fresh pending item (dedupe by text+store).
   const reAddStaple = (item: ShoppingItem) => setShoppingList(prev => {
     if (prev.some(i => i.text.toLowerCase() === item.text.toLowerCase() && i.store === item.store && !i.completed)) return prev;
@@ -101,6 +105,35 @@ export default function ShoppingPage() {
             </div>
           </div>
         </div>
+
+        {/* Kroger dish-ask auto-offer (step 5): a recipe/meal ask just added grocery items — offer the
+            one-tap send. The actual cart write still stages ONE confirm-tier Approval. */}
+        {!kidMode && krogerOffer && krogerOffer.texts.length > 0 && krogerStoreName && (
+          <div className="flex flex-wrap items-center justify-between gap-2.5 rounded-[14px] p-3" style={{ border: `2px solid ${C.emerald}`, background: `${C.emerald}0a` }}>
+            <span className="text-[13px] font-bold" style={{ color: C.primary }}>
+              🛒 Send the {krogerOffer.texts.length} grocery item{krogerOffer.texts.length === 1 ? '' : 's'} you just added to your {krogerStoreName} cart? You approve the exact cart first.
+            </span>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={krogerBusy}
+                onClick={() => { sendShoppingToKroger(krogerOffer.texts); dismissKrogerOffer(); }}
+                className="rounded-[10px] px-3.5 py-1.5 text-[13px] font-extrabold disabled:opacity-50"
+                style={{ border: `2px solid ${C.emerald}`, background: `${C.emerald}14`, color: C.emerald }}
+              >
+                {krogerBusy ? 'Matching…' : 'Send to cart'}
+              </button>
+              <button
+                type="button"
+                onClick={dismissKrogerOffer}
+                className="rounded-[10px] px-3 py-1.5 text-[13px] font-bold"
+                style={{ border: `2px solid ${C.elevated}`, background: C.card, color: C.muted }}
+              >
+                Not now
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Recipe → list AI (reuses the existing recipe/restock endpoints) */}
         {showRecipes && (
@@ -268,6 +301,18 @@ export default function ShoppingPage() {
               <div key={group.id} className="rounded-[20px] p-5" style={{ border: `2px solid ${C.elevated}`, background: C.card }}>
                 <div className="mb-3.5 flex items-center gap-2.5 pb-3 text-sm font-extrabold uppercase tracking-[0.08em]" style={{ color: C.primary, borderBottom: `2px solid ${C.elevated}` }}>
                   <span>{group.icon}</span>{group.id}
+                  {/* Per-store Clear: only this store's checked-off items (staples stay, like the global one). */}
+                  {!kidMode && group.items.some(i => i.completed && !i.staple) && (
+                    <button
+                      type="button"
+                      onClick={() => clearStoreCompleted(group.id)}
+                      aria-label={`Clear done items in ${group.id}`}
+                      className="ml-auto rounded-[8px] px-2.5 py-1 text-[11px] font-bold normal-case tracking-normal"
+                      style={{ border: `2px solid ${C.elevated}`, background: C.app, color: C.muted }}
+                    >
+                      Clear
+                    </button>
+                  )}
                 </div>
                 {group.items.map(item => (
                   <div key={item.id} className="flex items-center gap-3 py-2" style={{ borderBottom: '1px solid #141929' }}>

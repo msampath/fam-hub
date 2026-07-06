@@ -110,6 +110,24 @@ Turn on **Kid mode** in Manage (it's per-device — made for the kitchen wall ta
 - Or skip the recipe entirely — tell the Copilot ***"I want to make paneer butter masala tomorrow"***
   and it derives the ingredients itself, in **buy units** ("Paneer (400 g pack)", "1 small bag"), skips
   the pantry basics, and sorts them into the right store lists.
+- Each store list has its own **Clear** button (checked-off items go, starred staples stay), plus the
+  global **Clear done**.
+
+### Kroger cart — send the list to a real cart
+
+Connect a Kroger-family store (QFC, Fred Meyer, Kroger…) in **Manage → Groceries**: pick your store,
+sign in to your Kroger account in the popup, done. Then:
+
+1. **Send to cart** on the Shopping page (or the one-tap offer that appears right after a recipe/dish
+   ask) matches your grocery items to real products at your store.
+2. The match is staged as **one Approval** listing exactly what will be added — and what couldn't be
+   matched (those stay on your lists).
+3. **Approve** it and the items land in your actual Kroger cart. You review and **pay in Kroger's own
+   app** — Family-Hub never checks out and never holds payment details (the public Kroger API has no
+   checkout endpoint at all).
+
+Self-hosters: register your own (free) app at developer.kroger.com and set `KROGER_CLIENT_ID` /
+`KROGER_CLIENT_SECRET` — see `.env.example`.
 
 ## 8. Library — the Copilot's memory
 

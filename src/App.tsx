@@ -386,6 +386,7 @@ export default function App() {
     isPlanningMeals, mealPlan, handlePlanMeals,
     isScanningPantry, pantryScan, handleScanPantryPhoto, confirmPantryScan, dismissPantryScan,
     appendShoppingItems, handleAddPantryItem, handleDeletePantryItem, handleParseRecipe, handleSuggestRestock,
+    krogerOffer, dismissKrogerOffer,
   } = shopping;
 
   // Natural-language quick-add (global bar) — classifies one note into event/shopping/chore.
@@ -3123,6 +3124,7 @@ export default function App() {
   const ctx: AppCtx = {
     shoppingList, setShoppingList,
     sendShoppingToKroger, krogerBusy, krogerStoreName: settings[0]?.krogerStoreName || null,
+    krogerOffer, dismissKrogerOffer,
     newShopText, setNewShopText,
     newShopStore, setNewShopStore,
     newShopQty, setNewShopQty,

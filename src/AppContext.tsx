@@ -13,6 +13,10 @@ export interface AppCtx {
   // Kroger cart: match the given item texts to products at the connected store and stage a
   // confirm-tier cart-write approval. krogerStore is set (null when not connected/configured).
   sendShoppingToKroger: (items: string[]) => void;
+  // Dish-ask auto-offer (step 5): grocery items the last recipe/meal ask added, offered for one-tap
+  // send-to-cart (the write itself still rides the confirm Approval).
+  krogerOffer: { texts: string[] } | null;
+  dismissKrogerOffer: () => void;
   krogerBusy: boolean;
   krogerStoreName: string | null;
   krogerStoreId: string | null;

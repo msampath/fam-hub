@@ -37,11 +37,14 @@ describe('CopilotBar', () => {
     expect(appCtx.approveLedgerEntry).toHaveBeenCalledWith('d1');
   });
 
-  it('shows a quiet "History" tag (no pending count) when the queue has only resolved entries', () => {
+  it('renders just "Approvals" (no HISTORY tag, no count) when the queue has only resolved entries', () => {
     renderWithBoth(<CopilotBar onOpenManage={vi.fn()} />, { actionLedger: [draft({ id: 'r1', status: 'approved' })] });
     // history-only → the history aria-label, NOT the "(1)" pending one that reads as "1 to handle"
     expect(screen.getByLabelText('Approvals history (1)')).toBeInTheDocument();
     expect(screen.queryByLabelText('Approvals (1)')).not.toBeInTheDocument();
+    // ...and the button face is JUST the word "Approvals" — the "History" tag is gone (owner call).
+    expect(screen.getByText('Approvals')).toBeInTheDocument();
+    expect(screen.queryByText('History')).not.toBeInTheDocument();
   });
 
   it('surfaces an "Open →" button for a handoff in the Actions modal and opens it in a new tab', async () => {

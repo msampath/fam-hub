@@ -34,6 +34,10 @@ export interface UseShopping {
   confirmPantryScan: () => void;
   dismissPantryScan: () => void;
   shoppingAiError: string | null; setShoppingAiError: Dispatch<SetStateAction<string | null>>;
+  // Kroger dish-ask auto-offer (step 5): after a recipe/meal-plan ask adds grocery items, offer a
+  // one-tap "send to cart" — the offer only; the cart write still goes through the confirm Approval.
+  krogerOffer: { texts: string[] } | null;
+  dismissKrogerOffer: () => void;
   appendShoppingItems: (items: { text?: string; store?: string }[]) => number;
   handleAddPantryItem: () => void;
   handleDeletePantryItem: (id: string) => void;
@@ -70,6 +74,14 @@ export function useShopping({ authorStamp }: UseShoppingDeps): UseShopping {
   const [isScanningPantry, setIsScanningPantry] = useState(false);
   const [pantryScan, setPantryScan] = useState<PantryDiff | null>(null); // detected-vs-pantry diff awaiting confirm
   const [shoppingAiError, setShoppingAiError] = useState<string | null>(null);
+  // Kroger dish-ask auto-offer (step 5): the grocery-store texts the last recipe/meal ask just added.
+  const [krogerOffer, setKrogerOffer] = useState<{ texts: string[] } | null>(null);
+  const dismissKrogerOffer = () => setKrogerOffer(null);
+
+  // Grocery-store items from an AI batch — the ones a Kroger cart could carry. Costco/Indian-Store
+  // routed items deliberately stay on their own lists (the acceptance contract).
+  const groceryTexts = (items: { text?: string; store?: string }[]) =>
+    normalizeShoppingItems(items, VALID_STORES).filter(i => i.store === 'Grocery Store').map(i => i.text);
 
   const appendShoppingItems = (items: { text?: string; store?: string }[]) => {
     const stamp = authorStamp();
@@ -104,6 +116,8 @@ export function useShopping({ authorStamp }: UseShoppingDeps): UseShopping {
       const added = appendShoppingItems(data.items || []);
       if (added === 0) throw new Error('No ingredients found — try a more detailed recipe or a clearer dish name.');
       setRecipeInput('');
+      const carried = groceryTexts(data.items || []);
+      if (carried.length) setKrogerOffer({ texts: carried });
     } catch (err: any) {
       setShoppingAiError(err.message || 'Recipe parsing failed.');
     } finally {
@@ -154,8 +168,10 @@ export function useShopping({ authorStamp }: UseShoppingDeps): UseShopping {
         throw new Error(aiErrorMessage(res.status, body, 'Could not plan meals from your pantry.', 'Add items to your list manually for now.'));
       }
       const data = await res.json();
-      appendShoppingItems(data.items || []);
+      const added = appendShoppingItems(data.items || []);
       setMealPlan(Array.isArray(data.meals) ? data.meals.slice(0, 3) : []);
+      const carried = added > 0 ? groceryTexts(data.items || []) : [];
+      if (carried.length) setKrogerOffer({ texts: carried });
     } catch (err: any) {
       setShoppingAiError(err.message || 'Meal planning failed.');
     } finally {
@@ -211,6 +227,7 @@ export function useShopping({ authorStamp }: UseShoppingDeps): UseShopping {
     mealPlan, setMealPlan,
     isScanningPantry, pantryScan, handleScanPantryPhoto, confirmPantryScan, dismissPantryScan,
     shoppingAiError, setShoppingAiError,
+    krogerOffer, dismissKrogerOffer,
     appendShoppingItems,
     handleAddPantryItem,
     handleDeletePantryItem,
