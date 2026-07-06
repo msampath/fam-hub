@@ -15,6 +15,11 @@ import { buildHarnessUserPrompt, buildConversationBlock, addDaysISO } from './sr
 import { buildLocalKnowledgeFactsAsync } from './src/utils/localKnowledge';
 import { verifyActions, buildCriticNote, verifyActionClaims, unbackedClaimCorrection } from './src/utils/copilotCritic';
 import { verifyQuickAdd, buildQuickAddCriticNote, coerceQuickAdd } from './src/utils/quickAddCritic';
+import {
+  buildKrogerAuthUrl, authCodeTokenBody, refreshTokenBody, clientCredentialsBody,
+  shapeLocations, shapeProductCandidates, buildMatchPrompt, validateMatchSelections,
+  buildCartAddBody, KROGER_MATCH_SCHEMA, type ProductCandidate,
+} from './src/utils/krogerApi';
 import { buildRevisePrompt } from './src/utils/reviseDraft';
 import { filterUnrequestedHolidayDeletes } from './src/utils/holidayGuard';
 import { buildBriefing, type Briefing } from './src/utils/briefing';
@@ -2003,6 +2008,153 @@ app.post('/api/google-refresh', requireAuth, async (req, res) => {
   } catch (err: any) {
     console.error('Google token refresh error:', err);
     return res.status(500).json({ error: 'Token refresh error.' });
+  }
+});
+
+// ── Kroger cart integration ─────────────────────────────────────────────────────────────────────
+// OAuth (authorization_code, popup + postMessage like Google connect), store lookup, LLM-validated
+// product matching, and the cart write the parent approves in Approvals. Kroger's public API has NO
+// checkout/payment endpoint — adding to the cart is the ceiling, so the no-payment invariant holds by
+// API contract. All pure logic lives in src/utils/krogerApi.ts (unit-tested); these routes are thin HTTP.
+const KROGER_CLIENT_ID = process.env.KROGER_CLIENT_ID || '';
+const KROGER_CLIENT_SECRET = process.env.KROGER_CLIENT_SECRET || '';
+const krogerConfigured = () => !!(KROGER_CLIENT_ID && KROGER_CLIENT_SECRET);
+const krogerBasic = () => 'Basic ' + Buffer.from(`${KROGER_CLIENT_ID}:${KROGER_CLIENT_SECRET}`).toString('base64');
+// Callback redirect must match a URI registered in the Kroger portal — derive from APP_URL in prod,
+// localhost in dev (both are registered).
+const krogerRedirectUri = () => `${(process.env.APP_URL || `http://localhost:${PORT}`).replace(/\/$/, '')}/api/kroger/callback`;
+
+async function krogerToken(body: string): Promise<{ ok: boolean; data: any }> {
+  const r = await fetchWithTimeout('https://api.kroger.com/v1/connect/oauth2/token', 10000, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Authorization: krogerBasic() },
+    body,
+  });
+  return { ok: r.ok, data: await r.json().catch(() => ({})) };
+}
+
+// App-level (client_credentials) token for product/location reads, cached until near expiry.
+let krogerAppToken: { token: string; exp: number } | null = null;
+async function getKrogerAppToken(): Promise<string | null> {
+  if (krogerAppToken && Date.now() < krogerAppToken.exp - 60000) return krogerAppToken.token;
+  const { ok, data } = await krogerToken(clientCredentialsBody('product.compact'));
+  if (!ok || !data.access_token) return null;
+  krogerAppToken = { token: data.access_token, exp: Date.now() + Number(data.expires_in || 1800) * 1000 };
+  return krogerAppToken.token;
+}
+
+// Auth URL for the connect popup. State is a nonce the client echoes back via postMessage origin checks.
+app.get('/api/kroger/auth-url', requireAuth, (req, res) => {
+  if (!krogerConfigured()) return res.status(503).json({ error: 'Kroger integration is not configured on the server (KROGER_CLIENT_ID / KROGER_CLIENT_SECRET).' });
+  const state = randomBytes(16).toString('hex');
+  return res.json({ url: buildKrogerAuthUrl(KROGER_CLIENT_ID, krogerRedirectUri(), state), state });
+});
+
+// OAuth callback: exchange the code, then hand the refresh token to the OPENER window and close.
+// The token never touches our storage — the client keeps it per-device in localStorage, the exact
+// Google-refresh-token precedent. (postMessage targets the app's own origin only.)
+app.get('/api/kroger/callback', async (req, res) => {
+  const esc = (s: string) => s.replace(/[<>&"']/g, '');
+  if (!krogerConfigured()) return res.status(503).send('Kroger integration not configured.');
+  const code = String(req.query.code || '');
+  const state = esc(String(req.query.state || ''));
+  if (!code) return res.status(400).send('Missing authorization code.');
+  try {
+    const { ok, data } = await krogerToken(authCodeTokenBody(code, krogerRedirectUri()));
+    if (!ok || !data.refresh_token) {
+      console.warn('[kroger] code exchange failed:', data?.error_description || data?.error || 'unknown');
+      return res.status(400).send('Kroger sign-in failed — close this window and try again.');
+    }
+    const appOrigin = (process.env.APP_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
+    // Escape into a JS string safely; postMessage restricted to the app's own origin.
+    const payload = JSON.stringify({ source: 'kroger-connect', refreshToken: data.refresh_token, state });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.send(`<!doctype html><title>Kroger connected</title><body style="font-family:sans-serif">
+<p>Kroger connected — you can close this window.</p>
+<script>try{window.opener&&window.opener.postMessage(${payload},${JSON.stringify(appOrigin)});}catch(e){}window.close();</script></body>`);
+  } catch (err) {
+    console.error('[kroger] callback error:', err);
+    return res.status(500).send('Kroger sign-in error — close this window and try again.');
+  }
+});
+
+// Nearby Kroger-banner stores for the Manage picker (app token; household home coords from the client).
+app.get('/api/kroger/locations', requireAuth, async (req, res) => {
+  if (!krogerConfigured()) return res.status(503).json({ error: 'Kroger integration is not configured.' });
+  const lat = Number(req.query.lat), lng = Number(req.query.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return res.status(400).json({ error: 'lat and lng are required.' });
+  try {
+    const tok = await getKrogerAppToken();
+    if (!tok) return res.status(502).json({ error: 'Kroger is unavailable right now.' });
+    const r = await fetchWithTimeout(`https://api.kroger.com/v1/locations?filter.latLong.near=${lat},${lng}&filter.limit=8`, 10000, {
+      headers: { Authorization: `Bearer ${tok}` },
+    });
+    const data = await r.json().catch(() => ({}));
+    return res.json({ stores: shapeLocations(data) });
+  } catch (err) {
+    console.error('[kroger] locations error:', err);
+    return res.status(500).json({ error: 'Store lookup failed.' });
+  }
+});
+
+// Match shopping-list items to real products at the chosen store. Per item: Kroger fuzzy search
+// (which happily returns frying pans for "paneer" — verified live) → shaped candidates → ONE
+// schema-enforced model call picks an index or -1 → deterministic validation in krogerApi.ts.
+app.post('/api/kroger/match', requireAuth, aiRateLimit, async (req, res) => {
+  if (!krogerConfigured()) return res.status(503).json({ error: 'Kroger integration is not configured.' });
+  const locationId = String(req.body?.locationId || '');
+  const items = (Array.isArray(req.body?.items) ? req.body.items : []).map((s: any) => String(s || '').trim()).filter(Boolean).slice(0, 25);
+  if (!locationId || !items.length) return res.status(400).json({ error: 'locationId and items are required.' });
+  try {
+    const tok = await getKrogerAppToken();
+    if (!tok) return res.status(502).json({ error: 'Kroger is unavailable right now.' });
+    const candidates: Record<string, ProductCandidate[]> = {};
+    for (const item of items) {
+      const q = new URLSearchParams({ 'filter.term': item, 'filter.locationId': locationId, 'filter.limit': '5' });
+      const r = await fetchWithTimeout(`https://api.kroger.com/v1/products?${q}`, 10000, { headers: { Authorization: `Bearer ${tok}` } });
+      candidates[item] = r.ok ? shapeProductCandidates(await r.json().catch(() => ({}))) : [];
+    }
+    const parsed = await callGeminiJSON(
+      buildMatchPrompt(items, candidates),
+      'You match grocery-list items to store products. Choose ONLY from the listed candidates; -1 when none truly is the item.',
+      KROGER_MATCH_SCHEMA, '{}', undefined, { temperature: 0.2 },
+    ).catch(() => null);
+    return res.json(validateMatchSelections(parsed, items, candidates));
+  } catch (err) {
+    console.error('[kroger] match error:', err);
+    return res.status(500).json({ error: 'Product matching failed.' });
+  }
+});
+
+// The approved cart write. Refresh token comes from the caller's device (never our storage); the
+// quantity clamp + UPC filter live in buildCartAddBody. 204 from Kroger = items are in the cart.
+app.post('/api/kroger/cart-add', requireAuth, async (req, res) => {
+  if (!krogerConfigured()) return res.status(503).json({ error: 'Kroger integration is not configured.' });
+  const refreshToken = String(req.body?.refreshToken || '');
+  if (!refreshToken) return res.status(400).json({ error: 'Kroger is not connected on this device.' });
+  const body = buildCartAddBody(Array.isArray(req.body?.items) ? req.body.items : []);
+  if (!body.items.length) return res.status(400).json({ error: 'No valid items to add.' });
+  try {
+    const { ok, data } = await krogerToken(refreshTokenBody(refreshToken));
+    if (!ok || !data.access_token) {
+      console.warn('[kroger] user token refresh failed:', data?.error_description || data?.error || 'unknown');
+      return res.status(400).json({ error: 'Kroger authorization expired — reconnect Kroger in Manage.' });
+    }
+    const r = await fetchWithTimeout('https://api.kroger.com/v1/cart/add', 15000, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${data.access_token}` },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) {
+      const t = await r.text().catch(() => '');
+      console.warn('[kroger] cart add failed:', r.status, t.slice(0, 200));
+      return res.status(502).json({ error: 'Kroger rejected the cart update — try again in a minute.' });
+    }
+    // Hand back the fresh refresh token when Kroger rotates it, so the device can keep it current.
+    return res.json({ added: body.items.length, ...(data.refresh_token ? { refreshToken: data.refresh_token } : {}) });
+  } catch (err) {
+    console.error('[kroger] cart add error:', err);
+    return res.status(500).json({ error: 'Cart update failed.' });
   }
 });
 
