@@ -266,9 +266,16 @@ export interface HouseholdSettings {
   storeList?: string[];
   // LEGACY (pre-bindings): which list mapped to the single Kroger store. Superseded by storeBindings.
   krogerListStore?: string;
-  // Store ↔ list BINDINGS (owner's model: each store, when added, ties to exactly ONE shopping list).
-  // Keyed by the list name; Kroger-only today, the value shape extends to other retailers later.
+  // TRANSITIONAL (one release): the first bindings cut stored resolved {list → location} directly.
+  // Superseded by krogerConnection + listLinks below; effectiveBindings() still reads it through.
   storeBindings?: Record<string, { locationId: string; name: string }>;
+  // TWO-LEVEL retailer model (owner's design):
+  // Level 1 — the CONNECTION: the Kroger API is connected once, and the physical store location is a
+  // property of the connection (step 2), not of any list.
+  krogerConnection?: { locationId: string; name: string };
+  // Level 2 — LIST LINKS: each list may link to a connection (many lists → one connection is fine).
+  // Values are retailer ids ('kroger' today; 'instacart' etc. later).
+  listLinks?: Record<string, 'kroger'>;
   // Pattern-4 routines the PARENT enabled (mined from the quick-add log, surfaced as Manage toggles —
   // never silently injected). An enabled routine stages a confirm-tier draft on its weekday's digest.
   routines?: Routine[];

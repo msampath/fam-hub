@@ -22,9 +22,12 @@ export interface AppCtx {
   krogerOffer: { texts: string[]; store: string } | null;
   dismissKrogerOffer: () => void;
   krogerBusy: boolean;
-  // Store ↔ list bindings (list name → Kroger location); legacy single-store config reads through.
+  // RESOLVED list → store view (composed from the two-level model below; the send path reads this).
   storeBindings: Record<string, { locationId: string; name: string }>;
-  setStoreBinding: (list: string, binding: { locationId: string; name: string } | null) => void;
+  // Two-level retailer model: the CONNECTION (Kroger, with its step-2 store location) + LIST LINKS.
+  krogerConnection: { locationId: string; name: string } | null;
+  setKrogerConnection: (loc: { locationId: string; name: string } | null) => void;
+  setListLink: (list: string, retailer: 'kroger' | null) => void;
   // Household-defined store lists (Phase-5): sanitized, never empty (defaults to SHOP_STORES).
   storeList: string[];
   setStoreList: (stores: string[]) => void;

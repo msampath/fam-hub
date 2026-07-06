@@ -49,20 +49,48 @@ export function shapeLocations(apiJson: any): KrogerStore[] {
 
 export type StoreBindings = Record<string, { locationId: string; name: string }>;
 
-// The ONE reader for "which Kroger store does this LIST send to". Prefers the explicit bindings;
-// falls back to the legacy single-store config (pre-bindings households) as a 'Grocery Store'
-// binding — a pure view, no data migration/rewrite needed.
+// The ONE reader for "which store does this LIST send to" — the RESOLVED view the send path consumes.
+// Two-level model (owner's design): a list links to a CONNECTION (listLinks), and the physical store
+// location is a property of THAT connection (krogerConnection, the step-2 choice) — so changing the
+// Kroger location once re-points every linked list. Read-throughs, newest first:
+//   1. listLinks × krogerConnection (the current model)
+//   2. storeBindings (the transitional resolved shape — one release)
+//   3. legacy krogerStoreId/Name → a 'Grocery Store' link (strips the old "FRED " chain-code prefix)
+// Pure view — no stored data is rewritten by reading.
 export function effectiveBindings(settings?: {
+  listLinks?: Record<string, string>; krogerConnection?: { locationId: string; name: string };
   storeBindings?: StoreBindings; krogerStoreId?: string; krogerStoreName?: string;
 } | null): StoreBindings {
+  const conn = settings?.krogerConnection;
+  if (settings?.listLinks && conn?.locationId) {
+    const out: StoreBindings = {};
+    for (const [list, retailer] of Object.entries(settings.listLinks)) {
+      if (retailer === 'kroger') out[list] = { locationId: conn.locationId, name: conn.name };
+    }
+    if (Object.keys(out).length) return out;
+  }
   if (settings?.storeBindings && Object.keys(settings.storeBindings).length) return settings.storeBindings;
   if (settings?.krogerStoreId) {
-    // Legacy names were saved as "CHAIN name" ("FRED Fred Meyer - Issaquah") — strip the leading
-    // all-caps chain code for display; freshly-bound stores save the API name alone.
     const legacy = (settings.krogerStoreName || 'Kroger').replace(/^[A-Z0-9]{2,8}\s+(?=\S)/, '');
     return { 'Grocery Store': { locationId: settings.krogerStoreId, name: legacy } };
   }
   return {};
+}
+
+// The connection's step-2 location, read through the same fallback chain (the panel shows this even
+// for households still on the transitional/legacy shapes).
+export function effectiveKrogerConnection(settings?: {
+  krogerConnection?: { locationId: string; name: string };
+  storeBindings?: StoreBindings; krogerStoreId?: string; krogerStoreName?: string;
+} | null): { locationId: string; name: string } | null {
+  if (settings?.krogerConnection?.locationId) return settings.krogerConnection;
+  const first = Object.values(settings?.storeBindings || {})[0];
+  if (first?.locationId) return first;
+  if (settings?.krogerStoreId) {
+    const legacy = (settings.krogerStoreName || 'Kroger').replace(/^[A-Z0-9]{2,8}\s+(?=\S)/, '');
+    return { locationId: settings.krogerStoreId, name: legacy };
+  }
+  return null;
 }
 
 // ── Search terms ─────────────────────────────────────────────────────────────────────────────────

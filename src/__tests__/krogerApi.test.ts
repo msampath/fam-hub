@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   buildKrogerAuthUrl, authCodeTokenBody, refreshTokenBody, clientCredentialsBody,
   shapeLocations, shapeProductCandidates, buildMatchPrompt, validateMatchSelections,
-  buildCartAddBody, buildCartDraftSummary, krogerSearchTerm, krogerFallbackTerm, effectiveBindings, type ProductCandidate,
+  buildCartAddBody, buildCartDraftSummary, krogerSearchTerm, krogerFallbackTerm, effectiveBindings, effectiveKrogerConnection, type ProductCandidate,
 } from '../utils/krogerApi';
 
 const PANEER_CANDS: ProductCandidate[] = [
@@ -68,18 +68,34 @@ describe('search terms (the parenthetical bug)', () => {
   });
 });
 
-// Store ↔ list bindings: explicit bindings win; the legacy single-store config reads through as a
-// 'Grocery Store' binding (no data migration); nothing configured → no bindings.
-describe('effectiveBindings', () => {
-  it('prefers explicit bindings, falls back to legacy, else empty', () => {
-    const explicit = { 'Indian Store': { locationId: '123', name: 'Apna Bazar' } };
-    expect(effectiveBindings({ storeBindings: explicit, krogerStoreId: '999', krogerStoreName: 'Old' })).toEqual(explicit);
+// The two-level model's resolved view: listLinks × krogerConnection composes first; the transitional
+// storeBindings shape reads through next; then the legacy single-store config; else empty.
+describe('effectiveBindings (two-level compose + read-throughs)', () => {
+  const LOC = { locationId: '70100658', name: 'Fred Meyer - Issaquah' };
+
+  it('composes listLinks × the connection — many lists per connection, location changes once', () => {
+    const s = { krogerConnection: LOC, listLinks: { 'Grocery Store': 'kroger' as const, 'Costco': 'kroger' as const } };
+    expect(effectiveBindings(s)).toEqual({ 'Grocery Store': LOC, 'Costco': LOC });
+    // Links without a connection location resolve to nothing (falls through the chain).
+    expect(effectiveBindings({ listLinks: { 'Grocery Store': 'kroger' } })).toEqual({});
+  });
+
+  it('reads the transitional storeBindings shape through, then legacy, else empty', () => {
+    const transitional = { 'Indian Store': { locationId: '123', name: 'Apna Bazar' } };
+    expect(effectiveBindings({ storeBindings: transitional, krogerStoreId: '999', krogerStoreName: 'Old' })).toEqual(transitional);
     // The legacy stored name carried the chain-code prefix ("FRED …") — the read-through strips it.
     expect(effectiveBindings({ krogerStoreId: '70100658', krogerStoreName: 'FRED Fred Meyer - Issaquah' }))
-      .toEqual({ 'Grocery Store': { locationId: '70100658', name: 'Fred Meyer - Issaquah' } });
+      .toEqual({ 'Grocery Store': LOC });
     expect(effectiveBindings({})).toEqual({});
     expect(effectiveBindings(null)).toEqual({});
     expect(effectiveBindings({ storeBindings: {} })).toEqual({}); // empty object ≠ configured
+  });
+
+  it('effectiveKrogerConnection surfaces the step-2 location through the same chain', () => {
+    expect(effectiveKrogerConnection({ krogerConnection: LOC })).toEqual(LOC);
+    expect(effectiveKrogerConnection({ storeBindings: { 'Grocery Store': LOC } })).toEqual(LOC);
+    expect(effectiveKrogerConnection({ krogerStoreId: '70100658', krogerStoreName: 'FRED Fred Meyer - Issaquah' })).toEqual(LOC);
+    expect(effectiveKrogerConnection({})).toBeNull();
   });
 });
 

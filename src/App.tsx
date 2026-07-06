@@ -77,7 +77,7 @@ import type { NormalizedMessage } from './utils/email';
 import { matchOwnProfileIndex, healMemberLink } from './utils/identity';
 import { buildDemoSeed } from './utils/demoSeed';
 import { krogerCartAdd } from './utils/krogerClient';
-import { effectiveBindings } from './utils/krogerApi';
+import { effectiveBindings, effectiveKrogerConnection } from './utils/krogerApi';
 import { LEDGER_APPLIERS } from './utils/ledgerAppliers';
 import { mineShoppingRoutines } from './utils/routineMiner';
 import { isAgentConfigured, askConciergeAgent, type AgentAction } from './utils/agentClient';
@@ -2675,14 +2675,31 @@ export default function App() {
   const setCopilotName = (name: string) =>
     setSettings(prev => [{ ...(prev[0] || {}), copilotName: name.trim().slice(0, 24) }]);
   // Kroger chosen store (household config; the OAuth token stays per-device in localStorage).
-  // Bind/unbind ONE list ↔ ONE Kroger store. Materializes the effective view (so a legacy
-  // single-store config becomes explicit on first edit) and clears the legacy fields — one source
-  // of truth from then on.
-  const setStoreBinding = (list: string, binding: { locationId: string; name: string } | null) =>
+  // Two-level model setters (Phase-0 Lists-bug redesign). Both MATERIALIZE the effective state into
+  // the new fields (krogerConnection + listLinks) and clear the transitional/legacy shapes — one
+  // source of truth from the first edit on.
+  // Level 1: the connection's step-2 store location (null = disconnect → links die with it).
+  const setKrogerConnection = (loc: { locationId: string; name: string } | null) =>
     setSettings(prev => {
-      const cur = { ...effectiveBindings(prev[0]) };
-      if (binding) cur[list] = binding; else delete cur[list];
-      return [{ ...(prev[0] || {}), storeBindings: cur, krogerStoreId: undefined, krogerStoreName: undefined, krogerListStore: undefined }];
+      const links = Object.fromEntries(Object.keys(effectiveBindings(prev[0])).map(l => [l, 'kroger' as const]));
+      return [{
+        ...(prev[0] || {}),
+        krogerConnection: loc ?? undefined,
+        listLinks: loc ? links : undefined,
+        storeBindings: undefined, krogerStoreId: undefined, krogerStoreName: undefined, krogerListStore: undefined,
+      }];
+    });
+  // Level 2: link/unlink ONE list to a connection ('kroger' today).
+  const setListLink = (list: string, retailer: 'kroger' | null) =>
+    setSettings(prev => {
+      const links = Object.fromEntries(Object.keys(effectiveBindings(prev[0])).map(l => [l, 'kroger' as const]));
+      if (retailer) links[list] = retailer; else delete links[list];
+      return [{
+        ...(prev[0] || {}),
+        krogerConnection: effectiveKrogerConnection(prev[0]) ?? undefined,
+        listLinks: links,
+        storeBindings: undefined, krogerStoreId: undefined, krogerStoreName: undefined, krogerListStore: undefined,
+      }];
     });
   // Household store-list editor (Phase-5): sanitize on the way IN so the shared blob never carries junk.
   const setStoreList = (stores: string[]) =>
@@ -3156,7 +3173,9 @@ export default function App() {
   const ctx: AppCtx = {
     shoppingList, setShoppingList,
     sendShoppingToKroger, krogerBusy,
-    storeBindings, setStoreBinding,
+    storeBindings,
+    krogerConnection: effectiveKrogerConnection(settings[0]),
+    setKrogerConnection, setListLink,
     krogerOffer, dismissKrogerOffer,
     storeList, setStoreList,
     routineCandidates, routines, setRoutines,
