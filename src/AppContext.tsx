@@ -176,6 +176,9 @@ export interface AppCtx {
   setCustomEventEndTime: React.Dispatch<React.SetStateAction<string>>;
   customEventFreeBusy: '' | 'busy' | 'free';
   setCustomEventFreeBusy: React.Dispatch<React.SetStateAction<'' | 'busy' | 'free'>>;
+  // RRULE-lite repeat choice ('' = one-off); expansion happens at creation (useAddEventForm).
+  customEventRepeat: '' | 'daily' | 'weekly';
+  setCustomEventRepeat: React.Dispatch<React.SetStateAction<'' | 'daily' | 'weekly'>>;
   customEventDescription: string;
   setCustomEventDescription: React.Dispatch<React.SetStateAction<string>>;
   customEventMembers: string[];

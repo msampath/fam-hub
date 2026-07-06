@@ -1,5 +1,6 @@
 import { useState, type Dispatch, type SetStateAction, type FormEvent } from 'react';
 import { uuid } from '../utils/uuid';
+import { expandRepeatingEvent } from '../utils/events';
 import type { Category, CalendarEvent, Authored } from '../types';
 
 // The manual "add event for a date" form. Cohesive UI state + its submit/reset, extracted from App.
@@ -23,6 +24,7 @@ export interface AddEventForm {
   customEventStartTime: string; setCustomEventStartTime: Dispatch<SetStateAction<string>>;
   customEventEndTime: string; setCustomEventEndTime: Dispatch<SetStateAction<string>>;
   customEventFreeBusy: '' | 'busy' | 'free'; setCustomEventFreeBusy: Dispatch<SetStateAction<'' | 'busy' | 'free'>>;
+  customEventRepeat: '' | 'daily' | 'weekly'; setCustomEventRepeat: Dispatch<SetStateAction<'' | 'daily' | 'weekly'>>;
   toggleEventMember: (m: string) => void;
   handleAddCustomEvent: (e: FormEvent) => void;
 }
@@ -39,6 +41,7 @@ export function useAddEventForm(deps: AddEventFormDeps): AddEventForm {
   const [customEventStartTime, setCustomEventStartTime] = useState(''); // 'HH:MM' or '' = all-day
   const [customEventEndTime, setCustomEventEndTime] = useState('');
   const [customEventFreeBusy, setCustomEventFreeBusy] = useState<'' | 'busy' | 'free'>(''); // '' = auto
+  const [customEventRepeat, setCustomEventRepeat] = useState<'' | 'daily' | 'weekly'>(''); // RRULE-lite; '' = one-off
 
   const toggleEventMember = (m: string) => {
     setCustomEventMembers(prev => (prev.includes(m) ? prev.filter(x => x !== m) : [...prev, m]));
@@ -64,7 +67,11 @@ export function useAddEventForm(deps: AddEventFormDeps): AddEventForm {
       ...authorStamp(),
     };
 
-    setEvents(prev => [newEvt, ...prev]);
+    // RRULE-lite: a repeating event becomes N concrete instances sharing a local series id — the
+    // exact shape Google's singleEvents pull produces, so nothing downstream changes (and the
+    // recurring-series bulk delete already recognizes it).
+    const instances = expandRepeatingEvent(newEvt, customEventRepeat, () => 'usr-' + uuid());
+    setEvents(prev => [...instances, ...prev]);
 
     setCustomEventTitle('');
     setCustomEventDescription('');
@@ -73,6 +80,7 @@ export function useAddEventForm(deps: AddEventFormDeps): AddEventForm {
     setCustomEventStartTime('');
     setCustomEventEndTime('');
     setCustomEventFreeBusy('');
+    setCustomEventRepeat('');
     setCustomEventMembers([]);
     setIsAddingEvent(false);
     setSelectedDayToAdd(null);
@@ -88,6 +96,7 @@ export function useAddEventForm(deps: AddEventFormDeps): AddEventForm {
     customEventStartTime, setCustomEventStartTime,
     customEventEndTime, setCustomEventEndTime,
     customEventFreeBusy, setCustomEventFreeBusy,
+    customEventRepeat, setCustomEventRepeat,
     toggleEventMember,
     handleAddCustomEvent,
   };

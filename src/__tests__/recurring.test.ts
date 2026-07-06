@@ -138,3 +138,57 @@ describe('detectRecurringGroups', () => {
     expect(detectRecurringGroups([])).toEqual([]);
   });
 });
+
+// ── RRULE-lite (W8): manual repeat → concrete instances, Google-pull shaped ─────────────────────
+import { expandRepeatingEvent, REPEAT_DAILY_COUNT, REPEAT_WEEKLY_COUNT } from '../utils/events';
+
+describe('expandRepeatingEvent', () => {
+  const base = ev({ id: 'usr-1', start: '2026-07-06', title: 'Soccer practice' });
+  let n = 0;
+  const makeId = () => `usr-gen-${++n}`;
+
+  it("'' (one-off) passes the event through untouched — no series id", () => {
+    const out = expandRepeatingEvent(base, '', makeId);
+    expect(out).toEqual([base]);
+    expect(out[0].recurringEventId).toBeUndefined();
+  });
+
+  it('daily → 30 consecutive dates sharing one local series id; the first keeps the base id', () => {
+    const out = expandRepeatingEvent(base, 'daily', makeId);
+    expect(out).toHaveLength(REPEAT_DAILY_COUNT);
+    expect(out[0]).toMatchObject({ id: 'usr-1', start: '2026-07-06', recurringEventId: 'local-rec-usr-1' });
+    expect(out[1].start).toBe('2026-07-07');
+    expect(out[29].start).toBe('2026-08-04'); // +29 days, across the month boundary
+    expect(new Set(out.map(e => e.recurringEventId)).size).toBe(1);
+    expect(new Set(out.map(e => e.id)).size).toBe(REPEAT_DAILY_COUNT); // every instance its own id
+  });
+
+  it('weekly → 12 same-weekday dates', () => {
+    const out = expandRepeatingEvent(base, 'weekly', makeId);
+    expect(out).toHaveLength(REPEAT_WEEKLY_COUNT);
+    expect(out[1].start).toBe('2026-07-13');
+    expect(out[11].start).toBe('2026-09-21'); // +77 days
+    const weekday = new Date('2026-07-06T00:00:00Z').getUTCDay();
+    expect(out.every(e => new Date(`${e.start}T00:00:00Z`).getUTCDay() === weekday)).toBe(true);
+  });
+
+  it('preserves a multi-day span: each instance shifts start AND end together', () => {
+    const spanBase = ev({ id: 'usr-2', start: '2026-07-06', end: '2026-07-08', title: 'Camp block' });
+    const out = expandRepeatingEvent(spanBase, 'weekly', makeId);
+    expect(out[0]).toMatchObject({ start: '2026-07-06', end: '2026-07-08' });
+    expect(out[1]).toMatchObject({ start: '2026-07-13', end: '2026-07-15' });
+  });
+
+  it('a malformed start date refuses to expand (returns just the base)', () => {
+    const bad = ev({ id: 'usr-3', start: 'sometime' });
+    expect(expandRepeatingEvent(bad, 'daily', makeId)).toEqual([bad]);
+  });
+
+  it('the expanded series is picked up by detectRecurringGroups for bulk delete (the rec: branch)', () => {
+    const out = expandRepeatingEvent(base, 'daily', makeId);
+    const groups = detectRecurringGroups(out);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].instanceCount).toBe(REPEAT_DAILY_COUNT);
+    expect(groups[0].eventIds).toHaveLength(REPEAT_DAILY_COUNT);
+  });
+});

@@ -610,7 +610,8 @@ export default function App() {
     customEventMembers, setCustomEventMembers, customEventDescription, setCustomEventDescription,
     customEventEnd, setCustomEventEnd, customEventLocation, setCustomEventLocation,
     customEventStartTime, setCustomEventStartTime, customEventEndTime, setCustomEventEndTime,
-    customEventFreeBusy, setCustomEventFreeBusy, toggleEventMember, handleAddCustomEvent,
+    customEventFreeBusy, setCustomEventFreeBusy, customEventRepeat, setCustomEventRepeat,
+    toggleEventMember, handleAddCustomEvent,
   } = addEventForm;
 
   // Filtering states
@@ -3164,6 +3165,7 @@ export default function App() {
     customEventStartTime, setCustomEventStartTime,
     customEventEndTime, setCustomEventEndTime,
     customEventFreeBusy, setCustomEventFreeBusy,
+    customEventRepeat, setCustomEventRepeat,
     customEventDescription, setCustomEventDescription,
     customEventMembers, toggleEventMember,
     // Concierge action ledger + approval handlers (foundation A2)

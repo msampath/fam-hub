@@ -13,6 +13,7 @@ export default function AddEventModal() {
     customEventStartTime, setCustomEventStartTime,
     customEventEndTime, setCustomEventEndTime,
     customEventFreeBusy, setCustomEventFreeBusy,
+    customEventRepeat, setCustomEventRepeat,
     customEventDescription, setCustomEventDescription,
     customEventMembers, toggleEventMember,
     familyMembers,
@@ -142,6 +143,35 @@ export default function AddEventModal() {
               })}
             </div>
             <p className="text-[9px] text-slate-400 mt-1">“Free” (holidays, OOO, no-school, time off) leaves the day open for planning; “Busy” occupies it. Auto guesses from the title/category.</p>
+          </div>
+
+          <div>
+            <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Repeats</label>
+            <div className="flex gap-1.5 mt-1">
+              {([
+                { val: '', label: 'One-off' },
+                { val: 'daily', label: 'Daily × 30' },
+                { val: 'weekly', label: 'Weekly × 12' },
+              ] as const).map(opt => {
+                const isSelected = customEventRepeat === opt.val;
+                return (
+                  <button
+                    key={opt.val || 'none'}
+                    id={`modal-evt-repeat-${opt.val || 'none'}`}
+                    type="button"
+                    onClick={() => setCustomEventRepeat(opt.val)}
+                    className={`px-2.5 py-1 text-[10px] font-bold rounded-lg border transition-all ${
+                      isSelected ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+            {/* RRULE-lite: repeating adds concrete instances (like a Google pull), so each one can be
+                edited/deleted individually — and the whole series bulk-deleted from the recurring notice. */}
+            {customEventRepeat && <p className="text-[9px] text-slate-400 mt-1">Adds {customEventRepeat === 'daily' ? '30 daily' : '12 weekly'} entries you can edit or bulk-delete as a series.</p>}
           </div>
 
           <div>

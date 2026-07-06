@@ -155,6 +155,8 @@ export function makeAppCtx(overrides: Partial<AppCtx> = {}): AppCtx {
     setCustomEventEndTime: vi.fn(),
     customEventFreeBusy: '',
     setCustomEventFreeBusy: vi.fn(),
+    customEventRepeat: '',
+    setCustomEventRepeat: vi.fn(),
     customEventDescription: '',
     setCustomEventDescription: vi.fn(),
     customEventMembers: [],

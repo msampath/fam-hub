@@ -23,3 +23,20 @@ describe('AddEventModal — event times', () => {
     expect((document.getElementById('modal-evt-end-time') as HTMLInputElement).value).toBe('17:30');
   });
 });
+
+describe('AddEventModal — RRULE-lite repeat picker (W8)', () => {
+  it('renders One-off / Daily / Weekly pills and reports the choice', () => {
+    const setCustomEventRepeat = vi.fn();
+    renderWithApp(<AddEventModal />, { selectedDayToAdd: '2026-07-06', setCustomEventRepeat });
+    expect(document.getElementById('modal-evt-repeat-none')).not.toBeNull();
+    fireEvent.click(document.getElementById('modal-evt-repeat-weekly')!);
+    expect(setCustomEventRepeat).toHaveBeenCalledWith('weekly');
+    fireEvent.click(document.getElementById('modal-evt-repeat-daily')!);
+    expect(setCustomEventRepeat).toHaveBeenCalledWith('daily');
+  });
+
+  it('explains the expansion when a repeat is selected', () => {
+    const { getByText } = renderWithApp(<AddEventModal />, { selectedDayToAdd: '2026-07-06', customEventRepeat: 'weekly' });
+    expect(getByText(/12 weekly entries/i)).toBeInTheDocument();
+  });
+});

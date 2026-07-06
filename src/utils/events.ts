@@ -178,3 +178,44 @@ export function applySyncedPull(
   );
   return mergeDeduplicateEvents([...kept, ...freshImported]);
 }
+
+// ── RRULE-lite (W8): manual repeating events, expanded AT CREATION into concrete instances ────────
+// Prior art is the Google pull: singleEvents=true expands a series into one card per day, each tagged
+// recurringEventId. We do exactly the same for a manual "repeats daily/weekly" event — N real events
+// sharing a local series id — so EVERY existing pipeline (render, conflicts, availability grounding,
+// reminders, Google push, CAS sync) works unchanged, and detectRecurringGroups' `rec:` branch gives
+// series-wide bulk delete for free. Bounded windows (30 days / 12 weeks) keep it a starter series,
+// not an infinite rule; date math is pure UTC arithmetic on the Y-M-D strings (no tz drift).
+export const REPEAT_DAILY_COUNT = 30;
+export const REPEAT_WEEKLY_COUNT = 12;
+
+function shiftYmd(ymd: string, days: number): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d + days));
+  return t.toISOString().slice(0, 10);
+}
+
+export function expandRepeatingEvent(
+  base: CalendarEvent,
+  repeat: '' | 'daily' | 'weekly',
+  makeId: () => string,
+): CalendarEvent[] {
+  if (repeat !== 'daily' && repeat !== 'weekly') return [base];
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(base.start || '')) return [base];
+  const step = repeat === 'daily' ? 1 : 7;
+  const count = repeat === 'daily' ? REPEAT_DAILY_COUNT : REPEAT_WEEKLY_COUNT;
+  const seriesId = `local-rec-${base.id}`;
+  const span = base.end && /^\d{4}-\d{2}-\d{2}$/.test(base.end)
+    ? Math.max(0, Math.round((Date.parse(base.end) - Date.parse(base.start)) / 86_400_000))
+    : null;
+  return Array.from({ length: count }, (_, i) => {
+    const start = shiftYmd(base.start, i * step);
+    return {
+      ...base,
+      id: i === 0 ? base.id : makeId(),
+      start,
+      end: span != null ? shiftYmd(start, span) : undefined,
+      recurringEventId: seriesId,
+    };
+  });
+}
