@@ -321,6 +321,27 @@ describe('step-up PIN routes', () => {
   });
 });
 
+// ── 5b. PIN failure lockout at the route level (rate window widened so the lockout is what trips) ─
+describe('step-up PIN failure lockout (5 wrong → 10-min lock)', () => {
+  it('4 fails then a success resets; 5 fails lock out even the CORRECT pin afterwards', async () => {
+    const { app, auth } = await authedApp({ STEPUP_VERIFY_PER_MIN: '100' });
+    const { hashStepUpPin } = await import('../../server');
+    const salt = 'b'.repeat(32);
+    const hash = hashStepUpPin('7777', salt);
+    const verify = (pin: string) => auth(request(app).post('/api/stepup/verify').send({ pin, hash, salt }));
+
+    // 4 consecutive fails stay open, and a success wipes the counter…
+    for (let i = 0; i < 4; i++) expect((await verify('0000')).body).toEqual({ valid: false });
+    expect((await verify('7777')).body).toEqual({ valid: true });
+
+    // …so it takes 5 FRESH fails to lock; after that even the right PIN is refused (nothing leaks while locked).
+    for (let i = 0; i < 5; i++) expect((await verify('0000')).status).toBe(200);
+    const locked = await verify('7777');
+    expect(locked.status).toBe(429);
+    expect(locked.body.error).toContain('locked');
+  });
+});
+
 // ── 6. Async agent jobs: id validation + the foreign-id-is-404 household boundary ─────────────────
 describe('agent job routes (sqlite-backed, no agent traffic)', () => {
   let app: any;

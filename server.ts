@@ -2654,6 +2654,23 @@ export function isValidPin(pin: unknown): boolean {
 // Verify is brute-forceable (4-digit = 10k combos), so cap attempts per user, stricter than the AI limit.
 const STEPUP_VERIFY_PER_MIN = Number(process.env.STEPUP_VERIFY_PER_MIN) || 5;
 const stepUpHits = new Map<string, { count: number; resetAt: number }>();
+// Second layer: the per-minute window alone still allows a patient drip (5 guesses/min ≈ 10k combos in
+// ~33 h), so count consecutive FAILURES per user — 5 wrong PINs locks verify for 10 minutes, and a
+// correct PIN clears the slate. Pure transition function, exported for unit tests; state in-memory
+// (single-instance app, resets on restart — same tradeoff as every limiter above).
+const STEPUP_LOCK_MAX_FAILS = 5;
+const STEPUP_LOCK_MS = 10 * 60_000;
+const stepUpFails = new Map<string, { fails: number; lockUntil: number }>();
+export function nextPinLockEntry(
+  entry: { fails: number; lockUntil: number } | undefined,
+  valid: boolean, now: number,
+  maxFails = STEPUP_LOCK_MAX_FAILS, lockMs = STEPUP_LOCK_MS,
+): { fails: number; lockUntil: number } | null {
+  if (valid) return null; // a correct PIN clears the counter entirely
+  const expiredLock = !!entry && entry.lockUntil !== 0 && entry.lockUntil <= now;
+  const fails = expiredLock ? 1 : (entry?.fails ?? 0) + 1; // a served lockout starts a fresh count
+  return { fails, lockUntil: fails >= maxFails ? now + lockMs : 0 };
+}
 // Also cap PIN *changes* so a compromised session can't repeatedly reset the PIN or harvest {hash,salt}.
 const STEPUP_SET_PER_5MIN = Number(process.env.STEPUP_SET_PER_5MIN) || 3;
 const stepUpSetHits = new Map<string, { count: number; resetAt: number }>();
@@ -2680,8 +2697,18 @@ app.post('/api/stepup/verify', requireAuth, (req, res) => {
   const { allowed, entry } = checkRateWindow(stepUpHits.get(key), now, STEPUP_VERIFY_PER_MIN, 60_000);
   stepUpHits.set(key, entry);
   if (!allowed) return res.status(429).json({ error: 'Too many PIN attempts — wait a minute.', retryable: true });
+  // Failure lockout (layer 2): while locked, refuse WITHOUT verifying — a locked window leaks nothing
+  // about further guesses, right or wrong.
+  const lockEntry = stepUpFails.get(key);
+  if (lockEntry && lockEntry.lockUntil > now) {
+    return res.status(429).json({ error: 'Too many wrong PINs — PIN entry is locked for 10 minutes.', retryable: true });
+  }
+  if (stepUpFails.size >= 256) for (const [k, v] of stepUpFails) if (v.lockUntil <= now) stepUpFails.delete(k); // same bounded-Map paranoia as pruneExpired
   const { pin, hash, salt } = req.body || {};
-  return res.json({ valid: verifyStepUpPin(String(pin ?? ''), String(hash ?? ''), String(salt ?? '')) });
+  const valid = verifyStepUpPin(String(pin ?? ''), String(hash ?? ''), String(salt ?? ''));
+  const nextLock = nextPinLockEntry(lockEntry, valid, now);
+  if (nextLock) stepUpFails.set(key, nextLock); else stepUpFails.delete(key);
+  return res.json({ valid });
 });
 
 
