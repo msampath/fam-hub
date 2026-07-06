@@ -11,7 +11,7 @@ import { createClient, type User } from '@supabase/supabase-js';
 // NOTE: `vite` is imported DYNAMICALLY in the dev branch below (not here) so it can be a devDependency and
 // stay out of the production runtime image — the dev middleware never loads in production.
 import { buildCopilotPrompt, COPILOT_SYSTEM, COPILOT_HARNESS_SYSTEM, COPILOT_SCHEMA } from './src/utils/copilotPrompt';
-import { buildHarnessUserPrompt, buildConversationBlock, addDaysISO } from './src/utils/copilotHarness';
+import { buildHarnessUserPrompt, buildConversationBlock, buildMealsFacts, addDaysISO } from './src/utils/copilotHarness';
 import { buildLocalKnowledgeFactsAsync } from './src/utils/localKnowledge';
 import { verifyActions, buildCriticNote, verifyActionClaims, unbackedClaimCorrection } from './src/utils/copilotCritic';
 import { verifyQuickAdd, buildQuickAddCriticNote, coerceQuickAdd } from './src/utils/quickAddCritic';
@@ -1893,7 +1893,7 @@ app.post('/api/generate-chores', requireAuth, aiRateLimit, async (req, res) => {
  */
 app.post('/api/copilot', requireAuth, aiRateLimit, async (req, res) => {
   try {
-    const { events, prompt, familyMembers = [], home, visitLog = [], chatHistory = [], documents = [] } = req.body;
+    const { events, prompt, familyMembers = [], home, visitLog = [], chatHistory = [], documents = [], mealplan = [] } = req.body;
     if (!prompt) {
       return res.status(400).json({ error: 'Prompt is required' });
     }
@@ -2046,6 +2046,9 @@ app.post('/api/copilot', requireAuth, aiRateLimit, async (req, res) => {
     // "extend it" (the copilot is otherwise stateless per request). Sanitized + capped in the builder.
     const conversation = useHarness ? (buildConversationBlock(chatHistory) || undefined) : undefined;
 
+    // MEALS FACTS: the family's own dinner plan — "what's for dinner (Tuesday)?" reads THIS block.
+    const meals = useHarness ? buildMealsFacts(mealplan, today) : undefined;
+
     // LOCAL KNOWLEDGE FACTS: ground on the household's saved Docs Library. Semantic (embeddings) when
     // RAG_EMBEDDINGS_ENABLED, else keyword — both capped + same block format.
     const localKnowledge = useHarness && Array.isArray(documents) && documents.length
@@ -2057,7 +2060,7 @@ app.post('/api/copilot', requireAuth, aiRateLimit, async (req, res) => {
       ? documents.slice(0, 60).map((d: any) => `${(d?.folder || 'Unfiled')}/${d?.name || ''}`.trim()).filter(Boolean).join('; ')
       : undefined;
     const contextPrompt = useHarness
-      ? buildHarnessUserPrompt(today, upcomingEvents, memberNames, prompt, availability || undefined, weather || undefined, history || undefined, conversation, longWeekend, places, eventsNearby, nowLabel, home?.homeLabel, localKnowledge, savedDocs)
+      ? buildHarnessUserPrompt(today, upcomingEvents, memberNames, prompt, availability || undefined, weather || undefined, history || undefined, conversation, longWeekend, places, eventsNearby, nowLabel, home?.homeLabel, localKnowledge, savedDocs, meals)
       : buildCopilotPrompt(JSON.stringify(upcomingEvents, null, 2), memberNames, today, prompt);
     // Kid-pickable copilot name rides in the household settings blob (`home`) — one appended line so the
     // quick path answers to the family's name for it too. Clamped; only when actually renamed.
@@ -3052,13 +3055,15 @@ app.post('/api/camera-summary', requireAuth, (_req, res) =>
 // RLS-scoped identity (no service-role in this path), still confirm-tier, still parent-approved.
 app.post('/api/morning-briefing', requireAuth, aiRateLimit, async (req, res) => {
   try {
-    const { events = [], chores = [], goals = [], shopping = [], ledger = [] } = req.body || {};
+    const { events = [], chores = [], goals = [], shopping = [], ledger = [], mealplan = [] } = req.body || {};
     const now = new Date();
     const pad = (n: number) => String(n).padStart(2, '0');
     const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
     const evList = Array.isArray(events) ? events : [];
     const chList = Array.isArray(chores) ? chores : [];
-    const briefing = buildBriefing(evList, chList, today);
+    // mealplan = MealPlan[] (the client sends the collection); the newest week's days feed the dinner lines.
+    const mealDays = Array.isArray(mealplan) && mealplan[0]?.days ? mealplan[0].days : [];
+    const briefing = buildBriefing(evList, chList, today, 14, mealDays);
     // The ADK concierge AUTHORS the narrative from the deterministically-extracted facts, so the in-app
     // preview is genuinely agent-generated (matching the emailed digest). Best-effort: if the agent is
     // unreachable, agentSummary stays undefined and the card renders the structured briefing (title/lines/
@@ -3404,7 +3409,7 @@ async function runDailyDigest(): Promise<void> {
     // missed digest on a send failure over a duplicate. (True multi-instance safety needs an atomic claim /
     // Cloud Scheduler; the in-process reentrancy guard below covers the single-instance overlap.)
     await admin.from('family_data').upsert(familyDataRow(row.household_id, 'digestprefs', [{ ...prefs, lastRunDate: today }]), { onConflict: FAMILY_DATA_CONFLICT });
-    const [ev, ch, st, lg, gl, sh, mb] = await Promise.all([
+    const [ev, ch, st, lg, gl, sh, mb, mp] = await Promise.all([
       admin.from('family_data').select('data').eq('household_id', row.household_id).eq('data_key', 'events').maybeSingle(),
       admin.from('family_data').select('data').eq('household_id', row.household_id).eq('data_key', 'chores').maybeSingle(),
       admin.from('family_data').select('data').eq('household_id', row.household_id).eq('data_key', 'settings').maybeSingle(),
@@ -3412,10 +3417,13 @@ async function runDailyDigest(): Promise<void> {
       admin.from('family_data').select('data').eq('household_id', row.household_id).eq('data_key', 'goals').maybeSingle(),
       admin.from('family_data').select('data').eq('household_id', row.household_id).eq('data_key', 'shopping').maybeSingle(),
       admin.from('family_data').select('data').eq('household_id', row.household_id).eq('data_key', 'members').maybeSingle(),
+      admin.from('family_data').select('data').eq('household_id', row.household_id).eq('data_key', 'mealplan').maybeSingle(),
     ]);
     const events = asTypedArray<CalendarEvent>(ev.data?.data);
     const choresArr = asTypedArray<Chore>(ch.data?.data);
-    const briefing = buildBriefing(events, choresArr, today);
+    // The newest week's dinners ride into the digest's briefing lines ("Dinner tonight: …").
+    const mealDays = ((mp.data?.data as any[]) || [])[0]?.days || [];
+    const briefing = buildBriefing(events, choresArr, today, 14, mealDays);
 
     // Home location → today's weather + air quality. Fetched once here and reused by BOTH the proactive
     // umbrella nudge and the email's weather line (best-effort; cached; null/empty when no home is set).

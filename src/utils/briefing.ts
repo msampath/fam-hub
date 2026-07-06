@@ -50,12 +50,28 @@ export function buildCalendarNudges(events: CalendarEvent[], today: string, hori
   return nudges.sort((a, b) => a.date.localeCompare(b.date));
 }
 
-// The full on-demand briefing: today's agenda (events + due chores) + calendar-driven nudges.
-export function buildBriefing(events: CalendarEvent[], chores: Chore[], today: string, horizonDays = 14): Briefing {
+// Dinner lines from the meal plan (owner decision: dinners live in the briefing + the Today strip,
+// never as calendar events). Tonight always leads; tomorrow follows when planned. Pure.
+export function buildDinnerLines(mealPlanDays: { date: string; dish: string }[] | undefined, today: string): string[] {
+  const days = Array.isArray(mealPlanDays) ? mealPlanDays : [];
+  const tomorrow = addOneDayUTC(today);
+  const dishFor = (d: string) => days.find(x => x?.date === d && x?.dish)?.dish;
+  const out: string[] = [];
+  const tonight = dishFor(today);
+  const next = dishFor(tomorrow);
+  if (tonight) out.push(`🍽 Dinner tonight: ${tonight}`);
+  if (next) out.push(`🍽 Tomorrow: ${next}`);
+  return out;
+}
+
+// The full on-demand briefing: today's agenda (events + due chores) + calendar-driven nudges
+// (+ the dinner lines when a meal plan covers today/tomorrow).
+export function buildBriefing(events: CalendarEvent[], chores: Chore[], today: string, horizonDays = 14,
+  mealPlanDays?: { date: string; dish: string }[]): Briefing {
   const daily = buildDailyReminder(events, chores, today);
   return {
     title: daily?.title ?? 'Today: nothing scheduled',
-    lines: daily ? daily.body.split('\n') : [],
+    lines: [...(daily ? daily.body.split('\n') : []), ...buildDinnerLines(mealPlanDays, today)],
     nudges: buildCalendarNudges(events, today, horizonDays),
   };
 }

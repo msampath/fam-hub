@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { sanitizeForPrompt } from '../utils/promptSafety';
 import { buildHistoryFacts } from '../utils/historyFacts';
 import { buildAvailabilityBlock } from '../utils/availability';
-import { buildDateFacts } from '../utils/copilotHarness';
+import { buildDateFacts, buildMealsFacts } from '../utils/copilotHarness';
 
 describe('sanitizeForPrompt', () => {
   it('collapses newlines/tabs/control chars to single spaces (can\'t break a block)', () => {
@@ -39,5 +39,19 @@ describe('FACTS blocks neutralize injection in stored text', () => {
   it('HISTORY FACTS keeps a malicious place label on a single line', () => {
     const out = buildHistoryFacts('2026-06-18', [{ id: 'v', label: nasty, lastVisited: '2026-01-01' }]);
     expect(out.split('\n').filter(l => l.startsWith('- ')).length).toBe(1);
+  });
+
+  it('MEALS FACTS: newest week only, today tagged, a malicious dish stays on one line', () => {
+    const plans = [
+      { weekStart: '2026-06-08', days: [{ date: '2026-06-09', dish: 'Old week — must not appear' }] },
+      { weekStart: '2026-06-15', days: [{ date: '2026-06-18', dish: nasty, note: 'quick' }, { date: '2026-06-19', dish: 'Tacos' }] },
+    ];
+    const out = buildMealsFacts(plans, '2026-06-18')!;
+    expect(out).toContain('MEALS');
+    expect(out).toContain('2026-06-18 (today):');
+    expect(out).not.toContain('Old week');
+    expect(out.split('\n').filter(l => l.startsWith('- ')).length).toBe(2); // injected newlines collapsed
+    expect(buildMealsFacts([], '2026-06-18')).toBeUndefined();
+    expect(buildMealsFacts(undefined, '2026-06-18')).toBeUndefined();
   });
 });

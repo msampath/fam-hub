@@ -48,6 +48,13 @@ describe('routeTurn', () => {
     expect(routeTurn('what is the capital of France?', { agentReachable: true, forced: true })).toBe('agent');
   });
 
+  it('meal-plan READS stay local; meal-plan WRITES go to the agent', () => {
+    expect(routeTurn("what's for dinner?", { agentReachable: true })).toBe('local');
+    expect(routeTurn("what's for dinner on Tuesday", { agentReachable: true })).toBe('local');
+    expect(routeTurn("plan next week's dinners: Mon paneer butter masala, Tue tacos", { agentReachable: true })).toBe('agent');
+    expect(routeTurn("swap Thursday's dinner to rajma", { agentReachable: true })).toBe('agent');
+  });
+
   it('falls back to local when the agent is unreachable, even for action intent', () => {
     expect(routeTurn('add a zoo day Saturday', { agentReachable: false })).toBe('local');
     expect(routeTurn('add a zoo day Saturday', { agentReachable: false, forced: true })).toBe('local');

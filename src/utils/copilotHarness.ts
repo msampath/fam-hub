@@ -83,6 +83,27 @@ export function buildConversationBlock(
 }
 
 // The user-message half of the harnessed prompt: DATE FACTS + optional AVAILABILITY + optional
+// MEALS FACTS: the family's own dinner plan (newest week), so "what's for dinner (Tuesday)?" is a
+// deterministic read — routed LOCAL by the router, answered from this block, never invented. Pure.
+export function buildMealsFacts(mealplan: any[] | undefined, today: string): string | undefined {
+  const days = (Array.isArray(mealplan) ? mealplan : [])
+    .slice()
+    .sort((a, b) => String(b?.weekStart || '').localeCompare(String(a?.weekStart || '')))[0]?.days;
+  if (!Array.isArray(days) || !days.length) return undefined;
+  const lines = days
+    .filter((d: any) => d?.date && d?.dish)
+    .slice(0, 7)
+    .map((d: any) => {
+      const date = String(d.date).slice(0, 10);
+      const tag = date === today ? ' (today)' : '';
+      const note = d.note ? ` — ${sanitizeForPrompt(String(d.note), 60)}` : '';
+      return `- ${date}${tag}: ${sanitizeForPrompt(String(d.dish), 80)}${note}`;
+    });
+  if (!lines.length) return undefined;
+  return 'MEALS (the family\'s dinner plan — answer "what\'s for dinner" questions from THIS list only; '
+    + 'if a day isn\'t listed, say no dinner is planned for it):\n' + lines.join('\n');
+}
+
 // WEATHER FACTS + optional HISTORY FACTS + roster + optional recent conversation + the parent's
 // request. The rules live in the system prompt (COPILOT_HARNESS_SYSTEM), so this stays lean. The
 // optional blocks are server-built and injected only when present; the model reads them rather than
@@ -103,6 +124,7 @@ export function buildHarnessUserPrompt(
   homeLabel?: string,
   localKnowledge?: string,
   savedDocs?: string,
+  meals?: string,
 ): string {
   // HOME sits right under DATE FACTS, ALWAYS present when set (independent of the grounding fetch), so
   // the model never lacks the family's location and never asks the parent for a city/ZIP it already has.
@@ -117,6 +139,8 @@ export function buildHarnessUserPrompt(
   const placesBlock = places ? `\n\n${places.trim()}` : '';
   const eventsBlock = eventsNearby ? `\n\n${eventsNearby.trim()}` : '';
   const historyBlock = history ? `\n\n${history.trim()}` : '';
+  // MEALS — the family's own dinner plan ("what's for dinner?" answers from HERE, never invented).
+  const mealsBlock = meals ? `\n\n${meals.trim()}` : '';
   // LOCAL KNOWLEDGE (saved docs) sits after the world-grounding blocks — household-specific facts.
   const knowledgeBlock = localKnowledge ? `\n\n${localKnowledge.trim()}` : '';
   // SAVED DOCS — the names the model may move_document / delete_document by (it must use these exact names).
@@ -125,7 +149,7 @@ export function buildHarnessUserPrompt(
     : '';
   const convoBlock = conversation ? `\n\n${conversation.trim()}` : '';
   const safeMembers = (Array.isArray(memberNames) ? memberNames : []).map(m => sanitizeForPrompt(m, 60)).filter(Boolean);
-  return `${buildDateFacts(today, events, 28, nowLabel)}${homeBlock}${lwBlock}${availBlock}${weatherBlock}${placesBlock}${eventsBlock}${historyBlock}${knowledgeBlock}${docsBlock}
+  return `${buildDateFacts(today, events, 28, nowLabel)}${homeBlock}${lwBlock}${availBlock}${weatherBlock}${placesBlock}${eventsBlock}${historyBlock}${mealsBlock}${knowledgeBlock}${docsBlock}
 
 Active family members: ${safeMembers.join(', ') || '(none specified)'}.${convoBlock}
 

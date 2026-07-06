@@ -47,6 +47,8 @@ export interface AgentTurnContext {
   copilotName?: string;
   // Household-defined store lists (Phase-5) — so the shopping specialist routes to THEIR lists.
   stores?: string[];
+  // The CURRENT week's dinner plan — an adjustment turn ("swap Thursday") re-issues the full week.
+  mealplan?: { date: string; dish: string; note?: string }[];
 }
 
 // Coerce a raw JSON action element into the AgentAction shape. Defense-in-depth at the wire boundary (the
@@ -68,6 +70,7 @@ function buildTurnBody(sessionId: string, message: string, ctx?: AgentTurnContex
     ...(ctx?.goals?.length ? { goals: ctx.goals } : {}),
     ...(ctx?.copilotName && ctx.copilotName !== 'Copilot' ? { copilotName: ctx.copilotName } : {}),
     ...(ctx?.stores?.length ? { stores: ctx.stores } : {}),
+    ...(ctx?.mealplan?.length ? { mealplan: ctx.mealplan } : {}),
   };
 }
 

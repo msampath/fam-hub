@@ -10,6 +10,7 @@ import { useWeather } from '../useWeather';
 import { aqiColor, aqiLabel, uvColor, uvLabel } from '../../../utils/weatherClient';
 import BriefingCard from '../BriefingCard';
 import GoalsStrip from '../GoalsStrip';
+import DinnersStrip from '../DinnersStrip';
 
 interface TodayPageProps {
   onNavigate: (index: number) => void;
@@ -118,6 +119,9 @@ export default function TodayPage({ onNavigate, onOpenCalendar }: TodayPageProps
 
         {/* Goals the concierge is tracking (A6) */}
         <GoalsStrip />
+
+        {/* This week's dinners (the meal planner) */}
+        <DinnersStrip />
 
         {/* Conflicts / double-booking heads-up (reuses CalendarCtx.conflicts) */}
         {conflicts.length > 0 && (

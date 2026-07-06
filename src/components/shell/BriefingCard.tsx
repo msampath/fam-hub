@@ -15,7 +15,7 @@ import { C, brutShadow } from './theme';
 // Approvals CLIENT-side under the visitor's own RLS-scoped identity — confirm-tier, parent still approves.
 export default function BriefingCard() {
   const { events } = useCalendar();
-  const { choresList, setShoppingList, authorStamp, goalsList, shoppingList, actionLedger, stageLedgerEntries, storeList } = useApp();
+  const { choresList, setShoppingList, authorStamp, goalsList, shoppingList, actionLedger, stageLedgerEntries, storeList, mealPlans } = useApp();
   const [briefing, setBriefing] = useState<(Briefing & { proposals?: StagedProposal[] }) | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -27,7 +27,7 @@ export default function BriefingCard() {
     try {
       const res = await apiFetch('/api/morning-briefing', {
         method: 'POST',
-        body: JSON.stringify({ events, chores: choresList, goals: goalsList, shopping: shoppingList, ledger: actionLedger.filter(e => e.status === 'pending'), stores: storeList }),
+        body: JSON.stringify({ events, chores: choresList, goals: goalsList, shopping: shoppingList, ledger: actionLedger.filter(e => e.status === 'pending'), stores: storeList, mealplan: mealPlans }),
       });
       if (!res.ok) throw new Error('briefing failed');
       setBriefing(await res.json());

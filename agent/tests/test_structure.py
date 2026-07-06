@@ -13,10 +13,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from concierge import agent, prompts  # noqa: E402
 
 
-def test_root_is_the_concierge_with_seven_specialists():
+def test_root_is_the_concierge_with_eight_specialists():
     assert agent.root_agent.name == "concierge"
     sub_names = sorted(a.name for a in agent.root_agent.sub_agents)
-    assert sub_names == ["bills_agent", "briefing_agent", "calendar_agent", "chores_agent", "files_agent", "outings_agent", "shopping_agent"]
+    assert sub_names == ["bills_agent", "briefing_agent", "calendar_agent", "chores_agent", "files_agent",
+                         "meal_planner_agent", "outings_agent", "shopping_agent"]
 
 
 def test_root_delegates_only_and_specialists_carry_tools():
@@ -28,9 +29,22 @@ def test_root_delegates_only_and_specialists_carry_tools():
 
 def test_safety_invariant_is_in_every_persona():
     # The no-payment + honest-status posture must be present in each agent's instruction.
-    for text in (prompts.ROOT, prompts.CALENDAR, prompts.CHORES, prompts.SHOPPING, prompts.OUTINGS, prompts.BRIEFING, prompts.BILLS, prompts.FILES):
+    for text in (prompts.ROOT, prompts.CALENDAR, prompts.CHORES, prompts.SHOPPING, prompts.OUTINGS, prompts.BRIEFING, prompts.BILLS, prompts.FILES, prompts.MEAL_PLANNER):
         assert "NO MONEY EVER MOVES THROUGH YOU" in text
         assert "DRAFT" in text
+
+
+def test_meal_planner_slice_and_persona():
+    # The meal planner is deliberately WIDE (set_meal_plan + shopping + calendar read + research) but
+    # carries NO destructive or payment-shaped tool; its persona pins the two contract points the
+    # client depends on: re-issue the FULL week (replace-by-week) and ONE consolidated shopping set.
+    tools = set(agent.SPECIALIST_TOOLS["meal_planner_agent"])
+    assert {"set_meal_plan", "add_shopping_item", "get_events"} <= tools
+    assert not (tools & {"delete_event", "delete_chore", "clear_chores", "delete_shopping_item",
+                         "add_to_cart", "reserve", "prepare_handoff"})
+    assert "set_meal_plan" in prompts.MEAL_PLANNER
+    assert "FULL updated week" in prompts.MEAL_PLANNER
+    assert "ONE deduped set" in prompts.MEAL_PLANNER
 
 
 def test_outings_treats_web_content_as_untrusted():

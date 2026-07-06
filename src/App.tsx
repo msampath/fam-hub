@@ -2989,7 +2989,10 @@ export default function App() {
         .filter(g => g.status !== 'done' && g.status !== 'abandoned')
         .slice(0, 5)
         .map(g => ({ id: g.id, text: g.text, status: g.status, ...(g.nextAction ? { nextAction: g.nextAction } : {}), steps: (g.steps || []).map(s => ({ title: s.title, status: s.status })) }));
-      r = await askConciergeAgent(jwt, agentSessionId, query, { history, family, goals, copilotName, stores: storeList });
+      // The newest week's dinner plan — an adjustment turn ("swap Thursday to rajma") must re-issue
+      // the FULL week via set_meal_plan, which needs the current one in the prompt (api.py injects it).
+      const mealplan = (mealPlans[0]?.days || []).map(d => ({ date: d.date, dish: d.dish, ...(d.note ? { note: d.note } : {}) }));
+      r = await askConciergeAgent(jwt, agentSessionId, query, { history, family, goals, copilotName, stores: storeList, mealplan });
     } catch (e) {
       console.warn('Agent turn failed; falling back to local copilot.', e);
       return false;
@@ -3046,6 +3049,7 @@ export default function App() {
           familyMembers: familyMembers.map(m => ({ name: m.name, age: m.age })), // names + ages (don't guess ages)
           home: settings[0], // home location (if set) for weather grounding; server ignores if absent
           visitLog: visitLog, // per-place "last visited" log for HISTORY FACTS grounding (planning queries)
+          mealplan: mealPlans, // the weekly dinner plans → the MEALS facts block ("what's for dinner?" answers locally)
           // Docs Library text for LOCAL KNOWLEDGE FACTS grounding; the server keyword-retrieves + caps it.
           documents: libraryDocs.map(d => ({ name: d.name, folder: d.folder, text: d.text, createdAt: d.createdAt })),
           // Short conversation memory: prior transcript turns (current `prompt` excluded) so the model

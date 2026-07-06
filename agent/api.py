@@ -104,6 +104,7 @@ class ChatIn(BaseModel):
     goals: list[dict] | None = None     # the family's CURRENT tracked goals [{id,text,status,nextAction,steps}]
     copilotName: str | None = None      # what the family calls the copilot (kid-pickable) — answer to it
     stores: list[str] | None = None     # household store lists (Phase-5) — route add_shopping_item to THESE
+    mealplan: list[dict] | None = None  # the CURRENT week's dinners [{date,dish,note?}] — adjustment turns need it
 
 
 def _visitor_id(jwt: str | None) -> str:
@@ -216,6 +217,24 @@ async def chat(body: ChatIn, authorization: str | None = Header(default=None)):
                 "this block. NEVER say a goal/step was changed or completed unless you called set_goal this turn.\n"
                 + "\n".join(lines) + "\n\n"
             )
+    # CURRENT WEEK'S DINNERS — same injection pattern as goals: an adjustment turn ("swap Thursday to
+    # rajma") must re-issue set_meal_plan with the FULL updated week, which needs the current one.
+    meals_block = ""
+    if body.mealplan:
+        def _mclean(v: object, n: int) -> str:
+            return " ".join(str(v).split())[:n]
+        mlines = []
+        for d in body.mealplan[:7]:
+            if not isinstance(d, dict) or not d.get("date") or not d.get("dish"):
+                continue
+            note = f" ({_mclean(d.get('note'), 60)})" if d.get("note") else ""
+            mlines.append(f"- {_mclean(d.get('date'), 10)}: {_mclean(d.get('dish'), 80)}{note}")
+        if mlines:
+            meals_block = (
+                "CURRENT DINNER PLAN (this week, authoritative). To change ANY day, call set_meal_plan with "
+                "the FULL updated week (it replaces by week) and add only the new dish's missing ingredients.\n"
+                + "\n".join(mlines) + "\n\n"
+            )
     # Kid-pickable copilot name: one grounded line so every engine answers to the family's name for it.
     # Clamped + whitespace-collapsed (it's a household setting, not web content — thin guard only).
     name_block = ""
@@ -223,7 +242,7 @@ async def chat(body: ChatIn, authorization: str | None = Header(default=None)):
         safe_name = " ".join(str(body.copilotName).split())[:24]
         if safe_name and safe_name.lower() != "copilot":
             name_block = f'(The family named you "{safe_name}" — refer to yourself by that name.)\n\n'
-    grounded = f"{context}\n\n{name_block}{goals_block}{convo}{message}"
+    grounded = f"{context}\n\n{name_block}{goals_block}{meals_block}{convo}{message}"
     content = types.Content(role="user", parts=[types.Part(text=grounded)])
 
     async def _run_turn(model_name: str | None, turn_session_id: str):

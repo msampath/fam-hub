@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildCalendarNudges, buildBriefing } from '../utils/briefing';
+import { buildCalendarNudges, buildBriefing, buildDinnerLines } from '../utils/briefing';
 import type { CalendarEvent, Chore } from '../types';
 
 const ev = (id: string, title: string, start: string): CalendarEvent =>
@@ -47,5 +47,26 @@ describe('buildBriefing', () => {
     const b = buildBriefing([], [], TODAY);
     expect(b.lines).toEqual([]);
     expect(b.nudges).toEqual([]);
+  });
+});
+
+describe('buildDinnerLines (the meal planner in the briefing)', () => {
+  const days = [
+    { date: '2026-06-24', dish: 'Paneer butter masala' },
+    { date: '2026-06-25', dish: 'Tacos' },
+    { date: '2026-06-27', dish: 'Roast chicken' },
+  ];
+  it('tonight + tomorrow when both are planned', () => {
+    expect(buildDinnerLines(days, TODAY)).toEqual(['🍽 Dinner tonight: Paneer butter masala', '🍽 Tomorrow: Tacos']);
+  });
+  it('tomorrow-only when tonight is unplanned; empty when neither is', () => {
+    expect(buildDinnerLines(days, '2026-06-26')).toEqual(['🍽 Tomorrow: Roast chicken']);
+    expect(buildDinnerLines(days, '2026-06-30')).toEqual([]);
+    expect(buildDinnerLines(undefined, TODAY)).toEqual([]);
+  });
+  it('rides into buildBriefing lines after the agenda', () => {
+    const b = buildBriefing([ev('1', 'Dentist', TODAY)], [], TODAY, 14, days);
+    expect(b.lines[b.lines.length - 2]).toBe('🍽 Dinner tonight: Paneer butter masala');
+    expect(b.lines[b.lines.length - 1]).toBe('🍽 Tomorrow: Tacos');
   });
 });

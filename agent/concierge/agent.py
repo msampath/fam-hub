@@ -130,6 +130,13 @@ SPECIALIST_TOOLS: dict[str, list[str]] = {
     "bills_agent": ["get_bills"],                                    # READ-only — reports bills (never pays)
     # Manages the Docs Library: find docs, recategorize (move), or delete (staged for confirmation).
     "files_agent": ["search_local_knowledge", "move_document", "delete_document"],
+    # The weekly meal planner — a deliberately WIDE specialist (the loop spans two domains): records
+    # the week via set_meal_plan (auto-tier, client-owned), derives the consolidated shopping set via
+    # add_shopping_item, reads the calendar for constraints (get_events — busy nights want quick
+    # dinners), and may research a dish's ingredients (local corpus first, then the web). set_goal so
+    # a longer ask ("plan the month") can be tracked. No destructive or payment-shaped tool.
+    "meal_planner_agent": ["set_meal_plan", "add_shopping_item", "get_events",
+                           "search_local_knowledge", "web_search", "fetch_page", "set_goal"],
 }
 
 
@@ -179,13 +186,18 @@ def build_root_agent(access_token: str | None = None, model: object | None = Non
         description="Manages the Docs Library: finds, recategorizes (move), and deletes saved documents.",
         instruction=prompts.FILES, tools=[_mcp(SPECIALIST_TOOLS["files_agent"], access_token)],
     )
+    meal_planner_agent = Agent(
+        name="meal_planner_agent", model=m,
+        description="Plans the week's dinners (given or proposed) and derives ONE consolidated shopping list for the week.",
+        instruction=prompts.MEAL_PLANNER, tools=[_mcp(SPECIALIST_TOOLS["meal_planner_agent"], access_token)],
+    )
     # The root concierge routes to a specialist via ADK's LLM-driven delegation (sub_agents). It holds no
     # tools of its own — it decides WHO acts; the specialist acts with its scoped toolbelt.
     return Agent(
         name="concierge", model=root_model,
         description="The family's safe household concierge — routes requests to specialist agents.",
         instruction=prompts.ROOT,
-        sub_agents=[calendar_agent, chores_agent, shopping_agent, outings_agent, briefing_agent, bills_agent, files_agent],
+        sub_agents=[calendar_agent, chores_agent, shopping_agent, outings_agent, briefing_agent, bills_agent, files_agent, meal_planner_agent],
     )
 
 
