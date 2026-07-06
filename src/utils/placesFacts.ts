@@ -261,3 +261,33 @@ export function buildPlacesFacts(homeLabel: string, places: Place[], maxItems = 
     gemNote,
   ].filter(Boolean).join('\n');
 }
+
+// ── Keyless-fallback honesty (Phase-3 tail) ────────────────────────────────────────────────────────
+// The keyless OSM Overpass fallback can only search by CATEGORY (named cafes/restaurants near a
+// point) — it cannot look a venue up BY NAME. Before this filter, "The Pink Door" came back as six
+// arbitrary cafés presented as a success (root-caused live 2026-07-05). So: when the ask carries any
+// non-category token, keep only results whose NAME matches one — and an empty result is the honest
+// answer ("name lookup needs a Maps key"), never a wrong-looking one.
+const KEYLESS_CATEGORY_WORDS = new Set([
+  'restaurant', 'restaurants', 'cafe', 'cafes', 'coffee', 'coffeeshop', 'coffeeshops', 'food',
+  'eat', 'eats', 'lunch', 'dinner', 'breakfast', 'brunch', 'dessert', 'bakery', 'bakeries',
+  'pizza', 'takeout', 'fast', 'bar', 'bars', 'pub', 'pubs', 'shop', 'shops', 'place', 'places', 'spot', 'spots',
+]);
+const KEYLESS_STOP_WORDS = new Set(['the', 'and', 'for', 'near', 'nearby', 'best', 'good', 'great', 'new', 'top', 'with', 'kids', 'family']);
+
+/**
+ * Filter keyless (Overpass) results against the text query. Category-only asks ("coffee shops",
+ * "restaurants") pass through untouched — every result IS a category match. An ask with specific
+ * tokens ("din tai fung", "pink door", "indian restaurants") keeps only name-matching venues;
+ * `nameMiss: true` signals the caller found nothing it can honestly present for that name.
+ */
+export function filterKeylessPlacesByName(places: Place[], textQuery: string): { places: Place[]; nameMiss: boolean } {
+  const tokens = String(textQuery || '').toLowerCase().split(/[^a-z0-9]+/).filter(t => t.length >= 3 && !KEYLESS_STOP_WORDS.has(t));
+  const specific = tokens.filter(t => !KEYLESS_CATEGORY_WORDS.has(t));
+  if (!specific.length) return { places, nameMiss: false }; // pure category ask — the category results ARE the answer
+  const matched = places.filter(p => {
+    const name = String(p.name || '').toLowerCase();
+    return specific.some(t => name.includes(t));
+  });
+  return { places: matched, nameMiss: matched.length === 0 };
+}

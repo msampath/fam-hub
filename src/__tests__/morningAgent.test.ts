@@ -91,6 +91,30 @@ describe('validateMorningProposals (safety gate)', () => {
     expect(validateMorningProposals('nonsense', ctx())).toEqual([]);
     expect(validateMorningProposals([null, 42, 'x', {}], ctx())).toEqual([]);
   });
+
+  // Phase-3 facts cross-check: a rationale must cite something that EXISTS in the FACTS the model saw.
+  describe('factsText cross-check (briefing-compose treatment)', () => {
+    const FACTS = 'TODAY: 2026-07-03\n\nAGENDA:\n- Soccer practice 16:00 (Max)\nWEATHER: Rain 80% this afternoon.\nCHORES STILL OPEN TODAY:\n- Feed the dog (Ava)';
+
+    it('keeps proposals whose rationale cites the facts; drops invented ones', () => {
+      const out = validateMorningProposals([
+        shopping('shopping', 'Umbrella', { rationale: 'Rain 80% during soccer practice' }),
+        shopping('shopping', 'Gift wrap', { rationale: "Leo's birthday on Friday" }),   // no Leo, no birthday in FACTS
+        event('Trampoline park', '2026-07-05', { rationale: 'Indoor pick for the rain forecast' }),
+      ], ctx({ factsText: FACTS }));
+      expect(out.map(p => p.summary)).toEqual([
+        'Rain 80% during soccer practice',
+        'Indoor pick for the rain forecast',
+      ]);
+    });
+
+    it('without factsText the gate is off (backwards-compatible)', () => {
+      const out = validateMorningProposals([
+        shopping('shopping', 'Gift wrap', { rationale: "Leo's birthday on Friday" }),
+      ], ctx());
+      expect(out).toHaveLength(1);
+    });
+  });
 });
 
 describe('toLedgerEntries (staging shape)', () => {

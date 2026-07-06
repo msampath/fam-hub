@@ -8,9 +8,10 @@ import { type NormalizedMessage, emailBlocks } from './email';
 // A parsed bill — the ONLY thing kept (never the email body).
 export interface ParsedBill {
   payee: string;
-  amount?: string;   // display string ("$84.20") — don't coerce currency
-  dueDate?: string;  // YYYY-MM-DD
+  amount?: string;     // display string ("$84.20") — don't coerce currency
+  dueDate?: string;    // YYYY-MM-DD
   account?: string;
+  confidence?: number; // model's 0-1 self-report; the server drops rows < 0.5 (weak-model gate)
 }
 
 // Tight Gmail search filter: bill-shaped mail in a recent window only. Minimal read (privacy) + cheap
@@ -25,7 +26,8 @@ export function buildBillParsePrompt(messages: NormalizedMessage[]): string {
   return `You are extracting BILLS / payment-due items from the emails below. Return JSON {"bills":[...]}.\n`
     + `For each email that is clearly a bill/invoice/statement with money owed, output one bill: `
     + `payee (the company), amount (as written, e.g. "$84.20", omit if unknown), dueDate (YYYY-MM-DD; omit if not stated), account (last 4 / account label if shown). `
-    + `Ignore marketing, receipts for already-paid one-off purchases, and anything with no amount owed. If none are bills, return {"bills":[]}.\n\n`
+    + `Ignore marketing, receipts for already-paid one-off purchases, and anything with no amount owed. If none are bills, return {"bills":[]}. `
+    + `Include a confidence (0-1) on every bill: how sure you are it's a real bill with correctly-read fields — use below 0.5 when unsure.\n\n`
     + emailBlocks(messages);
 }
 

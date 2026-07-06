@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseGooglePlaces, parseOverpassPlaces, buildPlacesFacts, indexedPlaces, parseDistanceConstraint, detectPlacesIntent, isPlacesQuery, flagHiddenGems, filterRecentlyVisited, type Place } from '../utils/placesFacts';
+import { parseGooglePlaces, parseOverpassPlaces, buildPlacesFacts, indexedPlaces, parseDistanceConstraint, detectPlacesIntent, isPlacesQuery, flagHiddenGems, filterRecentlyVisited, filterKeylessPlacesByName, type Place } from '../utils/placesFacts';
 
 describe('parseGooglePlaces', () => {
   it('normalizes name/category/rating/coords and skips entries missing a name or coords', () => {
@@ -212,5 +212,49 @@ describe('place URLs + ids (honest links, never model-written)', () => {
       { name: 'B', category: 'zoo', lat: 0, lng: 0 },
     ], 10);
     expect(idx.map(x => [x.id, x.place.name])).toEqual([['P1', 'A'], ['P2', 'B']]);
+  });
+});
+
+// Keyless-fallback honesty (Phase-3): Overpass is category-only, so a NAME ask must never come back
+// as six arbitrary cafés dressed as a success — root-caused live 2026-07-05 ("The Pink Door").
+describe('filterKeylessPlacesByName', () => {
+  const cafes: Place[] = [
+    { name: 'Din Tai Fung', category: 'restaurant', lat: 0, lng: 0 },
+    { name: 'The Pink Door', category: 'restaurant', lat: 0, lng: 0 },
+    { name: "Joe's Donuts", category: 'cafe', lat: 0, lng: 0 },
+    { name: 'Random Coffee House', category: 'cafe', lat: 0, lng: 0 },
+  ];
+
+  it('pure category asks pass through untouched (every result IS a category match)', () => {
+    for (const q of ['coffee shops', 'restaurants', 'places to eat', 'best cafes']) {
+      const r = filterKeylessPlacesByName(cafes, q);
+      expect(r.places).toHaveLength(4);
+      expect(r.nameMiss).toBe(false);
+    }
+  });
+
+  it('a name ask keeps ONLY name-matching venues', () => {
+    const r = filterKeylessPlacesByName(cafes, 'din tai fung');
+    expect(r.places.map(p => p.name)).toEqual(['Din Tai Fung']);
+    expect(r.nameMiss).toBe(false);
+    const pink = filterKeylessPlacesByName(cafes, 'the pink door restaurant');
+    expect(pink.places.map(p => p.name)).toEqual(['The Pink Door']);
+  });
+
+  it('a name ask with NO matching venue returns empty + nameMiss (honest miss, not wrong success)', () => {
+    const r = filterKeylessPlacesByName(cafes, 'canlis');
+    expect(r.places).toHaveLength(0);
+    expect(r.nameMiss).toBe(true);
+  });
+
+  it('cuisine-qualified asks filter on the qualifier (honest miss beats unrelated cafés)', () => {
+    const r = filterKeylessPlacesByName(cafes, 'indian restaurants');
+    expect(r.places).toHaveLength(0);
+    expect(r.nameMiss).toBe(true);
+  });
+
+  it('empty/stopword-only queries pass through', () => {
+    expect(filterKeylessPlacesByName(cafes, '').places).toHaveLength(4);
+    expect(filterKeylessPlacesByName(cafes, 'the best').places).toHaveLength(4);
   });
 });

@@ -21,6 +21,7 @@ import {
   buildCartAddBody, KROGER_MATCH_SCHEMA, type ProductCandidate,
 } from './src/utils/krogerApi';
 import { buildRevisePrompt } from './src/utils/reviseDraft';
+import { validateExtractedEvents } from './src/utils/extractedEvents';
 import { filterUnrequestedHolidayDeletes } from './src/utils/holidayGuard';
 import { buildBriefing, type Briefing } from './src/utils/briefing';
 import { buildProactiveLedger, buildGoalNudges } from './src/utils/proactiveBriefing';
@@ -33,7 +34,7 @@ import { buildAvailabilityBlock } from './src/utils/availability';
 import { buildLongWeekendBlock } from './src/utils/longWeekend';
 import { buildWeatherFacts, buildBriefingWeather, isPlanningQuery, dailyMaxFromHourly, parseGooglePollen } from './src/utils/weatherFacts';
 import { buildHistoryFacts } from './src/utils/historyFacts';
-import { buildPlacesFacts, indexedPlaces, parseGooglePlaces, parseOverpassPlaces, parseDistanceConstraint, detectPlacesIntent, isPlacesQuery, flagHiddenGems, filterRecentlyVisited, GOOGLE_PLACE_TYPES, OVERPASS_TOURISM, OVERPASS_LEISURE, type Place } from './src/utils/placesFacts';
+import { buildPlacesFacts, indexedPlaces, parseGooglePlaces, parseOverpassPlaces, filterKeylessPlacesByName, parseDistanceConstraint, detectPlacesIntent, isPlacesQuery, flagHiddenGems, filterRecentlyVisited, GOOGLE_PLACE_TYPES, OVERPASS_TOURISM, OVERPASS_LEISURE, type Place } from './src/utils/placesFacts';
 import { buildEventsFacts, indexedEvents, parseTicketmasterEvents, type LocalEvent } from './src/utils/eventsFacts';
 import { geminiSchemaToJsonSchema } from './src/utils/llmSchema';
 import { normalizeGmail, normalizeGraph, type NormalizedMessage } from './src/utils/email';
@@ -469,14 +470,19 @@ export function contentsToText(contents: any): string {
 // canonical @google/genai response schema is converted to plain JSON Schema for Ollama's `format`.
 // Reuses parseGeminiJSON so a truncated/garbage local response is tagged malformedResponse, the
 // same as Gemini. Bounded by an AbortController timeout so a hung local box can't stall the request.
+// localOpts: per-CALL overrides for the LOCAL slot only (Phase-3 weak-model treatments) — a scan can
+// cap the local budget + force THINK=low without touching the cloud call's genConfig or the global env.
+type LocalSlotOpts = { maxOutputTokens?: number; think?: boolean | string };
+
 async function callOllamaJSON(
   contents: any,
   systemInstruction: string,
   responseSchema: any,
   emptyFallback: string,
   genConfig: Record<string, any>,
+  localOpts?: LocalSlotOpts,
 ): Promise<any> {
-  const options: Record<string, any> = { num_predict: 8192 };
+  const options: Record<string, any> = { num_predict: localOpts?.maxOutputTokens ?? 8192 };
   if (typeof genConfig.temperature === 'number') options.temperature = genConfig.temperature;
   if (LOCAL_LLM_NUM_CTX) options.num_ctx = LOCAL_LLM_NUM_CTX;
 
@@ -491,7 +497,8 @@ async function callOllamaJSON(
     options,
   };
   // Only send `think` when explicitly configured — passing it to a non-thinking model errors.
-  if (LOCAL_LLM_THINK !== undefined) body.think = LOCAL_LLM_THINK;
+  const think = localOpts?.think !== undefined ? localOpts.think : LOCAL_LLM_THINK;
+  if (think !== undefined) body.think = think;
   // Keep the model warm so an idle gap doesn't trigger a slow cold reload (→ latency/abort → "all busy").
   if (LOCAL_LLM_KEEP_ALIVE) body.keep_alive = LOCAL_LLM_KEEP_ALIVE;
 
@@ -656,6 +663,9 @@ async function callGeminiJSON(
   emptyFallback: string = '[]',
   meta?: { model?: string; usedFallback?: boolean },
   genConfig: Record<string, any> = {},
+  // Weak-model routing knobs (Phase-3): requireCloud skips the local slot entirely (OCR/revise-draft
+  // accept-risk surfaces); local overrides the local slot's output budget / think level (email scans).
+  opts: { requireCloud?: boolean; local?: LocalSlotOpts } = {},
 ): Promise<any> {
   const run = async (model: string) => {
     // `config: any` so caller-supplied genConfig (temperature / frequency+presence penalties)
@@ -702,9 +712,9 @@ async function callGeminiJSON(
     for (let i = 0; i < chain.length; i++) {
       const entry = chain[i];
       if (isLocalToken(entry)) {
-        if (!LOCAL_LLM_ENABLED || !isTextOnlyContents(contents)) continue; // local off / multimodal → skip this slot
+        if (opts.requireCloud || !LOCAL_LLM_ENABLED || !isTextOnlyContents(contents)) continue; // cloud-only / local off / multimodal → skip this slot
         try {
-          const data = await callOllamaJSON(contents, systemInstruction, responseSchema, emptyFallback, genConfig);
+          const data = await callOllamaJSON(contents, systemInstruction, responseSchema, emptyFallback, genConfig, opts.local);
           if (meta) { meta.model = `ollama:${LOCAL_LLM_MODEL}`; meta.usedFallback = i > 0; }
           return data;
         } catch (err: any) {
@@ -728,9 +738,9 @@ async function callGeminiJSON(
   // ── LEGACY AUTO MODE (no GEMINI_FALLBACKS) ──────────────────────────────────────
   // 0) Local model FIRST (no quota wall), for text-only prompts — auto-tried first so the default
   // config bypasses the quota wall with zero chain config. ANY failure falls through to Gemini.
-  if (LOCAL_LLM_ENABLED && isTextOnlyContents(contents)) {
+  if (!opts.requireCloud && LOCAL_LLM_ENABLED && isTextOnlyContents(contents)) {
     try {
-      const data = await callOllamaJSON(contents, systemInstruction, responseSchema, emptyFallback, genConfig);
+      const data = await callOllamaJSON(contents, systemInstruction, responseSchema, emptyFallback, genConfig, opts.local);
       if (meta) { meta.model = `ollama:${LOCAL_LLM_MODEL}`; meta.usedFallback = false; }
       return data;
     } catch (err: any) {
@@ -1142,8 +1152,9 @@ ${cleanedText}
       "You are a precise parsing model. Extract school schedules, summer programs, and parent resource/ParentMap calendar listings into accurate JSON. Ensure exact dates. If years are not explicitly declared, assume 2026. Return a schema-compliant array.",
       CALENDAR_EVENT_SCHEMA,
     );
-    // Add unique string IDs
-    const eventsWithIds = (Array.isArray(parsedEvents) ? parsedEvents : []).map((evt: any) => ({
+    // Add unique string IDs. Validator (Phase-3): real ISO dates within ±1yr only — a weak model's
+    // "next Tuesday" / invented-year events get dropped here, not imported.
+    const eventsWithIds = validateExtractedEvents(Array.isArray(parsedEvents) ? parsedEvents : [], new Date().toLocaleDateString('en-CA')).map((evt: any) => ({
       ...evt,
       id: 'ai-' + randomUUID(),
       category: evt.category || category
@@ -1194,7 +1205,7 @@ app.post('/api/parse-pdf', requireAuth, aiRateLimit, async (req, res) => {
       "You are a precise parsing model. Extract school schedules, summer programs, and calendar listings from the attached file into accurate JSON. Ensure exact dates. If years are not explicitly declared, assume 2026. Return a schema-compliant array.",
       CALENDAR_EVENT_SCHEMA,
     );
-    const eventsWithIds = (Array.isArray(parsedEvents) ? parsedEvents : []).map((evt: any) => ({
+    const eventsWithIds = validateExtractedEvents(Array.isArray(parsedEvents) ? parsedEvents : [], new Date().toLocaleDateString('en-CA')).map((evt: any) => ({
       ...evt,
       id: 'pdf-' + randomUUID(),
       category: evt.category || category
@@ -1238,6 +1249,8 @@ app.post('/api/extract-pdf-text', requireAuth, aiRateLimit, async (req, res) => 
       { parts: [pdfPart, textPart] },
       'You transcribe a scanned document\'s text accurately. Return ONLY what is written — never summarize or invent.',
       { type: Type.OBJECT, properties: { text: { type: Type.STRING } }, required: ['text'] },
+      // OCR is an accept-risk surface for the local model (Phase-3): cloud only, always.
+      '[]', undefined, {}, { requireCloud: true },
     );
     const text = typeof ocr?.text === 'string' ? ocr.text.slice(0, 20000) : '';
     return res.json({ text, method: 'ocr' });
@@ -1387,7 +1400,7 @@ ${calendarText}
       "You are a precise parsing model. Extract school schedules, summer programs, and calendar listings from raw text into accurate JSON. Ensure exact dates. If years are not explicitly declared, assume 2026. Return a schema-compliant array.",
       CALENDAR_EVENT_SCHEMA,
     );
-    const eventsWithIds = (Array.isArray(parsedEvents) ? parsedEvents : []).map((evt: any) => ({
+    const eventsWithIds = validateExtractedEvents(Array.isArray(parsedEvents) ? parsedEvents : [], new Date().toLocaleDateString('en-CA')).map((evt: any) => ({
       ...evt,
       id: 'text-' + randomUUID(),
       category: evt.category || category
@@ -1614,6 +1627,8 @@ app.post('/api/revise-draft', requireAuth, aiRateLimit, async (req, res) => {
         },
         required: ['summary'],
       },
+      // Revising a staged DRAFT is an accept-risk surface for the local model (Phase-3): cloud only.
+      '[]', undefined, {}, { requireCloud: true },
     );
     return res.json({ revised });
   } catch (error: any) {
@@ -2357,7 +2372,9 @@ async function fetchNearbyPlaces(lat: number, lng: number, opts?: { radiusM?: nu
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: 'data=' + encodeURIComponent(q),
       });
-      if (r.ok) places = parseOverpassPlaces(await r.json());
+      // Honesty filter (shared with the agent's placesFetch): Overpass is category-only, so a name
+      // ask keeps only name-matching venues — empty beats six arbitrary cafés shown as a "success".
+      if (r.ok) places = filterKeylessPlacesByName(parseOverpassPlaces(await r.json()), textQuery).places;
     }
     if (!places.length && !textQuery) {
       // Free fallback: OpenStreetMap Overpass — named family POIs near home, notable (wikidata) first.
@@ -2659,6 +2676,7 @@ const BILL_SCHEMA = {
   type: Type.OBJECT,
   properties: { bills: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: {
     payee: { type: Type.STRING }, amount: { type: Type.STRING }, dueDate: { type: Type.STRING }, account: { type: Type.STRING },
+    confidence: { type: Type.NUMBER, description: 'Your 0-1 confidence this is a REAL bill with correctly-read fields. Use below 0.5 when unsure — such rows are discarded.' },
   }, required: ['payee'] } } },
   required: ['bills'],
 };
@@ -2671,6 +2689,15 @@ const BILL_SCHEMA = {
 // on the flash-lite chain models; see the copilot note ~L1685.)
 const EMAIL_SCAN_DISABLED = process.env.EMAIL_SCAN_DISABLED === 'true';
 const SCAN_GENCONFIG = { maxOutputTokens: 1024 };
+// Local-slot override for the scans (Phase-3): a thinking local model burns its budget on reasoning
+// tokens, so 1k truncates mid-JSON — give the LOCAL slot 4k with THINK=low instead (the cloud call
+// keeps the hard 1k anti-runaway cap above; local tokens are free, the cap there bounds LATENCY).
+const SCAN_LOCAL_OPTS = { local: { maxOutputTokens: 4096, think: 'low' as const } };
+// Phase-3 confidence gate: each scan row self-reports a 0-1 confidence (prompted + in-schema); an
+// explicitly LOW score (<0.5) drops the row before it becomes a suggestion. Rows without the field
+// pass — the gate targets a weak model's dutiful-but-unsure extractions, not schema drift.
+const confidentRows = <T,>(rows: T[]): T[] =>
+  rows.filter(r => typeof (r as { confidence?: unknown })?.confidence !== 'number' || (r as { confidence: number }).confidence >= 0.5);
 
 app.post('/api/scan-bills', requireAuth, aiRateLimit, async (req, res) => {
   if (EMAIL_SCAN_DISABLED) return res.json({ suggestions: [], bills: [], scanned: 0 });
@@ -2680,12 +2707,12 @@ app.post('/api/scan-bills', requireAuth, aiRateLimit, async (req, res) => {
     if (scan.error) return res.status(scan.status || 502).json({ error: scan.error });
     if (!scan.messages.length) return res.json({ suggestions: [], scanned: 0 });
     let parsed: any;
-    try { parsed = await callGeminiJSON(buildBillParsePrompt(scan.messages), BILL_SYSTEM, BILL_SCHEMA, '{"bills":[]}', undefined, SCAN_GENCONFIG); }
+    try { parsed = await callGeminiJSON(buildBillParsePrompt(scan.messages), BILL_SYSTEM, BILL_SCHEMA, '{"bills":[]}', undefined, SCAN_GENCONFIG, SCAN_LOCAL_OPTS); }
     catch (e: any) {
       console.warn('scan-bills parse failed:', e?.message || e);
       return res.status(503).json({ error: 'The AI is busy — try the scan again in a moment.', retryable: true });
     }
-    const bills: ParsedBill[] = Array.isArray(parsed?.bills) ? parsed.bills : [];
+    const bills: ParsedBill[] = confidentRows(Array.isArray(parsed?.bills) ? parsed.bills : []);
     const suggestions = dedupeSuggestions(bills.map(b => billToSuggestion(b, today)));
     // Also return the raw parsed bills so the client can PERSIST them to the `bills` collection (the
     // agent's get_bills reads that) — parsed fields only, never the email body.
@@ -2721,7 +2748,7 @@ app.post('/api/scan-newsletters', requireAuth, aiRateLimit, async (req, res) => 
     let byIndex = new Map<number, { keep?: boolean; title?: string; summary?: string }>();
     let ran = false;
     try {
-      const parsed = await callGeminiJSON(buildNewsletterClassifyPrompt(scan.messages), NEWSLETTER_SYSTEM, NEWSLETTER_CLASSIFY_SCHEMA, '{"items":[]}', undefined, SCAN_GENCONFIG);
+      const parsed = await callGeminiJSON(buildNewsletterClassifyPrompt(scan.messages), NEWSLETTER_SYSTEM, NEWSLETTER_CLASSIFY_SCHEMA, '{"items":[]}', undefined, SCAN_GENCONFIG, SCAN_LOCAL_OPTS);
       ran = true;
       // Join by the model-echoed 1-based "index" (matches "Email N"), NOT array position — so a dropped or
       // reordered verdict can't staple the wrong title/keep onto the wrong email.
@@ -2747,6 +2774,7 @@ const PACKAGE_SCHEMA = {
   type: Type.OBJECT,
   properties: { packages: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: {
     carrier: { type: Type.STRING }, item: { type: Type.STRING }, eta: { type: Type.STRING }, trackingNumber: { type: Type.STRING },
+    confidence: { type: Type.NUMBER, description: 'Your 0-1 confidence this is a REAL incoming delivery with correctly-read fields. Use below 0.5 when unsure — such rows are discarded.' },
   } } } },
   required: ['packages'],
 };
@@ -2759,12 +2787,12 @@ app.post('/api/scan-packages', requireAuth, aiRateLimit, async (req, res) => {
     if (scan.error) return res.status(scan.status || 502).json({ error: scan.error });
     if (!scan.messages.length) return res.json({ suggestions: [], scanned: 0 });
     let parsed: any;
-    try { parsed = await callGeminiJSON(buildPackageParsePrompt(scan.messages), PACKAGE_SYSTEM, PACKAGE_SCHEMA, '{"packages":[]}', undefined, SCAN_GENCONFIG); }
+    try { parsed = await callGeminiJSON(buildPackageParsePrompt(scan.messages), PACKAGE_SYSTEM, PACKAGE_SCHEMA, '{"packages":[]}', undefined, SCAN_GENCONFIG, SCAN_LOCAL_OPTS); }
     catch (e: any) {
       console.warn('scan-packages parse failed:', e?.message || e);
       return res.status(503).json({ error: 'The AI is busy — try the scan again in a moment.', retryable: true });
     }
-    const pkgs: ParsedPackage[] = Array.isArray(parsed?.packages) ? parsed.packages : [];
+    const pkgs: ParsedPackage[] = confidentRows(Array.isArray(parsed?.packages) ? parsed.packages : []);
     const suggestions = dedupeSuggestions(pkgs.map(p => packageToSuggestion(p, today)));
     return res.json({ suggestions, scanned: scan.messages.length });
   } catch (err: any) {
@@ -2778,6 +2806,7 @@ const KIDS_SCHEMA = {
   type: Type.OBJECT,
   properties: { activities: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: {
     title: { type: Type.STRING }, date: { type: Type.STRING }, time: { type: Type.STRING }, location: { type: Type.STRING }, category: { type: Type.STRING },
+    confidence: { type: Type.NUMBER, description: 'Your 0-1 confidence this is a REAL scheduled kids activity with correctly-read fields. Use below 0.5 when unsure — such rows are discarded.' },
   }, required: ['title'] } } },
   required: ['activities'],
 };
@@ -2790,12 +2819,12 @@ app.post('/api/scan-kids', requireAuth, aiRateLimit, async (req, res) => {
     if (scan.error) return res.status(scan.status || 502).json({ error: scan.error });
     if (!scan.messages.length) return res.json({ suggestions: [], scanned: 0 });
     let parsed: any;
-    try { parsed = await callGeminiJSON(buildKidsActivityParsePrompt(scan.messages), KIDS_SYSTEM, KIDS_SCHEMA, '{"activities":[]}', undefined, SCAN_GENCONFIG); }
+    try { parsed = await callGeminiJSON(buildKidsActivityParsePrompt(scan.messages), KIDS_SYSTEM, KIDS_SCHEMA, '{"activities":[]}', undefined, SCAN_GENCONFIG, SCAN_LOCAL_OPTS); }
     catch (e: any) {
       console.warn('scan-kids parse failed:', e?.message || e);
       return res.status(503).json({ error: 'The AI is busy — try the scan again in a moment.', retryable: true });
     }
-    const acts: ParsedActivity[] = Array.isArray(parsed?.activities) ? parsed.activities : [];
+    const acts: ParsedActivity[] = confidentRows(Array.isArray(parsed?.activities) ? parsed.activities : []);
     const suggestions = dedupeSuggestions(acts.map(a => activityToSuggestion(a, today)));
     return res.json({ suggestions, scanned: scan.messages.length });
   } catch (err: any) {
@@ -2837,7 +2866,7 @@ app.post('/api/morning-briefing', requireAuth, aiRateLimit, async (req, res) => 
       const lgList = (Array.isArray(ledger) ? ledger : []).slice(-100);
       const facts = buildMorningFacts({ today, agendaText: briefingToText(briefing), chores: chList, shopping: shList, goals: glList, pendingLedger: lgList });
       const raw = await callGeminiJSON(facts, MORNING_PLANNER_SYSTEM, MORNING_PLANNER_SCHEMA, '{"proposals":[]}', undefined, MORNING_GENCONFIG);
-      proposals = validateMorningProposals(raw?.proposals, { today, shopping: shList, pendingLedger: lgList, goals: glList });
+      proposals = validateMorningProposals(raw?.proposals, { today, shopping: shList, pendingLedger: lgList, goals: glList, factsText: facts });
     } catch (e: any) {
       console.warn('[morning-briefing] planner skipped:', e?.message || e);
     }
@@ -3111,7 +3140,7 @@ async function runDailyDigest(): Promise<void> {
           const chores = asTypedArray<Chore>(ch.data?.data);
           const facts = buildMorningFacts({ today, agendaText: briefingToText(briefing, weatherLine), weatherLine, chores, shopping, goals, pendingLedger: [...ledger, ...staged] });
           const raw = await callGeminiJSON(facts, MORNING_PLANNER_SYSTEM, MORNING_PLANNER_SCHEMA, '{"proposals":[]}', undefined, MORNING_GENCONFIG);
-          const proposals = validateMorningProposals(raw?.proposals, { today, shopping, pendingLedger: [...ledger, ...staged], goals });
+          const proposals = validateMorningProposals(raw?.proposals, { today, shopping, pendingLedger: [...ledger, ...staged], goals, factsText: facts });
           planned = toLedgerEntries(proposals, today, () => 'ledg-' + randomUUID(), stamp);
         } catch (e: any) {
           console.warn('[digest] morning planner skipped (deterministic nudges still staged):', e?.message || e);

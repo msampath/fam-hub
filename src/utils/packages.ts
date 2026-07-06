@@ -10,6 +10,7 @@ export interface ParsedPackage {
   item?: string;           // what's arriving, if stated
   eta?: string;            // YYYY-MM-DD expected delivery
   trackingNumber?: string; // shown only in the reminder note; not used as a key
+  confidence?: number;     // model's 0-1 self-report; the server drops rows < 0.5 (weak-model gate)
 }
 
 // Tight Gmail search filter: shipment/carrier mail in a recent window only.
@@ -22,7 +23,8 @@ export function buildPackageParsePrompt(messages: NormalizedMessage[]): string {
   return `You are extracting INCOMING PACKAGE / delivery info from the emails below. Return JSON {"packages":[...]}.\n`
     + `For each email that is clearly a shipment notification with an upcoming delivery, output one package: `
     + `carrier (UPS/FedEx/USPS/DHL/Amazon/etc.), item (what's arriving, if stated), eta (YYYY-MM-DD expected delivery date; omit if not stated), trackingNumber (if shown). `
-    + `Ignore marketing, order-placed confirmations with no shipping/ETA, and already-delivered notices. If none, return {"packages":[]}.\n\n`
+    + `Ignore marketing, order-placed confirmations with no shipping/ETA, and already-delivered notices. If none, return {"packages":[]}. `
+    + `Include a confidence (0-1) on every package: how sure you are it's a real upcoming delivery with correctly-read fields — use below 0.5 when unsure.\n\n`
     + emailBlocks(messages);
 }
 

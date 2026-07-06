@@ -9,7 +9,7 @@
 // copilot path. They're kept separate for now so adding the agent's discovery can't touch the working
 // copilot; a later cleanup can point server.ts at this module.
 import {
-  parseGooglePlaces, parseOverpassPlaces,
+  parseGooglePlaces, parseOverpassPlaces, filterKeylessPlacesByName,
   GOOGLE_PLACE_TYPES, OVERPASS_TOURISM, OVERPASS_LEISURE, type Place,
 } from './placesFacts';
 
@@ -84,7 +84,9 @@ export async function fetchNearbyPlaces(
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: 'data=' + encodeURIComponent(q),
       });
-      if (r.ok) places = parseOverpassPlaces(await r.json());
+      // Overpass is CATEGORY-only — honesty filter: a name ask keeps only name-matching venues
+      // (empty = honest miss), never six arbitrary cafés dressed as the answer.
+      if (r.ok) places = filterKeylessPlacesByName(parseOverpassPlaces(await r.json()), textQuery).places;
     }
     if (!places.length && !textQuery) {
       const q = `[out:json][timeout:20];(`
@@ -204,7 +206,7 @@ async function geocodeDestination(name: string): Promise<{ lat: number; lng: num
  */
 export async function findPlaces(
   homeLat: number, homeLng: number, query?: string, max = 6, destination?: string,
-): Promise<{ places: Place[]; destinationResolved: boolean }> {
+): Promise<{ places: Place[]; destinationResolved: boolean; keylessNameMiss: boolean }> {
   const textQuery = (query || '').trim();
   const dest = (destination || '').trim();
   // Default: search around home. With a destination, geocode it and search around THERE (wider radius).
@@ -222,5 +224,8 @@ export async function findPlaces(
   const top = places.slice(0, max);
   // Drive time is ALWAYS home → venue (so a getaway shows the real distance from home).
   await attachTravelTimes(homeLat, homeLng, top);
-  return { places: top, destinationResolved };
+  // Keyless + a text ask + nothing survived the name filter → the caller should say a precise name
+  // lookup needs a Maps key instead of presenting an empty (or wrong) result as a plain miss.
+  const keylessNameMiss = !process.env.GOOGLE_MAPS_API_KEY && !!textQuery && top.length === 0;
+  return { places: top, destinationResolved, keylessNameMiss };
 }

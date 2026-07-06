@@ -16,6 +16,7 @@ export interface ParsedActivity {
   time?: string;       // 'HH:MM' 24h if stated
   location?: string;
   category?: string;   // School|Camp|Sports|Arts|Holiday|Other (clamped)
+  confidence?: number; // model's 0-1 self-report; the server drops rows < 0.5 (weak-model gate)
 }
 
 // Tight Gmail filter: kids' schedule/activity mail in a recent-ish window.
@@ -27,7 +28,8 @@ export function buildKidsActivityQuery(days = 60): string {
 export function buildKidsActivityParsePrompt(messages: NormalizedMessage[]): string {
   return `You are extracting KIDS' ACTIVITIES / scheduled events (camps, practices, lessons, games, recitals, field trips, school events) from the emails below. Return JSON {"activities":[...]}.\n`
     + `For each dated activity, output: title (short, e.g. "Soccer practice"), date (YYYY-MM-DD), time ("HH:MM" 24h if stated), location (if stated), category (one of School, Camp, Sports, Arts, Holiday, Other). `
-    + `Ignore marketing and anything with no specific date. If none, return {"activities":[]}.\n\n`
+    + `Ignore marketing and anything with no specific date. If none, return {"activities":[]}. `
+    + `Include a confidence (0-1) on every activity: how sure you are it's a real scheduled activity with correctly-read fields — use below 0.5 when unsure.\n\n`
     + emailBlocks(messages);
 }
 

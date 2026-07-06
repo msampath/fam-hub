@@ -113,6 +113,17 @@ const isISODate = (s: string) => {
 // drop, dates outside [today, today+14] drop, unknown goalIds are STRIPPED (the proposal survives),
 // duplicates (vs the live list, pending entries, and within the batch) drop, everything is length-
 // clamped. The output NEVER carries a tier or status — callers stage confirm/pending, hardcoded.
+// Facts cross-check (Phase-3 briefing-compose treatment): a proposal's rationale must cite something
+// that actually EXISTS in the FACTS the model was shown — a weak model's "Leo's birthday Friday"
+// invented from thin air shares no meaningful token with the facts and gets dropped (the deterministic
+// nudges remain the fallback, so a bad model day degrades to facts-only, never to fiction).
+const FACTS_XCHECK_STOP = new Set([
+  'today', 'tomorrow', 'this', 'that', 'with', 'need', 'needs', 'soon', 'list', 'shopping', 'still',
+  'open', 'goal', 'goals', 'week', 'weekend', 'family', 'good', 'time', 'plan', 'before', 'after',
+]);
+const xcheckTokens = (text: string): string[] =>
+  String(text).toLowerCase().split(/[^a-z0-9]+/).filter(t => t.length >= 4 && !FACTS_XCHECK_STOP.has(t));
+
 export function validateMorningProposals(
   raw: unknown,
   ctx: {
@@ -120,9 +131,11 @@ export function validateMorningProposals(
     shopping?: ShoppingItem[];       // live list (don't re-propose what's already on it)
     pendingLedger?: LedgerEntry[];   // pending entries (don't re-stage what's already waiting)
     goals?: Goal[];                  // open goals (goalId allowlist)
+    factsText?: string;              // the exact FACTS block the model saw → rationale cross-check
   },
 ): StagedProposal[] {
   const list = Array.isArray(raw) ? raw : [];
+  const factsSet = ctx.factsText ? new Set(xcheckTokens(ctx.factsText)) : null;
   const maxDate = addDaysISO(ctx.today, HORIZON_DAYS);
   const openGoalIds = new Set(
     (ctx.goals || []).filter(g => g.status === 'open' || g.status === 'active' || g.status === 'waiting').map(g => g.id),
@@ -144,6 +157,9 @@ export function validateMorningProposals(
     const prop = p as Record<string, unknown>;
     const rationale = String(prop.rationale || '').trim().slice(0, MAX_RATIONALE);
     if (!rationale) continue; // ungrounded proposals don't stage
+    // Cross-check: the rationale must share at least one meaningful token with the FACTS it claims
+    // to serve (only enforced when the caller provides the facts text).
+    if (factsSet && !xcheckTokens(rationale).some(t => factsSet.has(t))) continue;
     const goalId = typeof prop.goalId === 'string' && openGoalIds.has(prop.goalId) ? prop.goalId : undefined;
 
     if (prop.kind === 'shopping') {

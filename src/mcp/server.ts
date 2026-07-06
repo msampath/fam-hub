@@ -191,7 +191,7 @@ async function handleFindPlaces(args: Record<string, unknown>): Promise<McpToolR
     return { ok: false, tool: 'find_places', tier: 'auto', status: 'rejected',
       message: 'No home location is set. Ask the parent to set their home town so I can find real nearby places.' };
   }
-  const { places, destinationResolved } = await findPlaces(lat, lng, query, 6, destination || undefined);
+  const { places, destinationResolved, keylessNameMiss } = await findPlaces(lat, lng, query, 6, destination || undefined);
   const homeLabel = home.homeLabel || 'home';
   // Only claim "around <destination>" when the destination actually GEOCODED. On a geocode miss we fell back
   // to a HOME-area search, so say so plainly (and the agent won't present home venues as the far getaway).
@@ -206,6 +206,10 @@ async function handleFindPlaces(args: Record<string, unknown>): Promise<McpToolR
     })),
     message: places.length
       ? `Found ${places.length} real places ${where}.`
+      // Keyless name-ask miss: say WHY honestly (category-only fallback) instead of a bare miss —
+      // and never the pre-fix behavior of six arbitrary cafés presented as the venue.
+      : keylessNameMiss
+      ? `I couldn't look up "${query}" by name — precise name lookup needs a Google Maps key (the keyless fallback only searches by category). Tell the family the lookup is unavailable, or try a category like "thai restaurants".`
       : `No matching places found ${where}.`,
   };
 }
