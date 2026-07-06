@@ -219,6 +219,22 @@ export function validateMatchSelections(
   return { matched, unmatched, reasons };
 }
 
+// Fold a second-pass re-judge of 'rejected' items back into the first result. 'rejected' means
+// candidates existed but the sampled judgment said no — live-observed (2026-07-06) to flip on a
+// fresh, smaller-batch call with IDENTICAL candidates (butter/ginger), while a real mismatch stays
+// rejected. Retry winners move to matched; everything else keeps its first-pass slot.
+export function mergeMatchRetry(first: MatchResult, retry: MatchResult): MatchResult {
+  if (!retry.matched.length) return first;
+  const won = new Set(retry.matched.map(m => m.text));
+  const reasons = { ...(first.reasons || {}) };
+  for (const t of won) delete reasons[t];
+  return {
+    matched: [...first.matched, ...retry.matched],
+    unmatched: first.unmatched.filter(i => !won.has(i)),
+    reasons,
+  };
+}
+
 // ── Cart ─────────────────────────────────────────────────────────────────────────────────────────
 
 // PUT /v1/cart/add body. Quantity clamped 1..10 — a garbled quantity must never bulk-buy.
@@ -242,8 +258,12 @@ export function buildCartDraftSummary(store: string, matched: MatchedItem[], unm
   if (matched.length) s += '. Quantities default to 1 of each — bump any in the Kroger cart before checkout';
   if (unmatched.length) {
     const failed = unmatched.filter(i => reasons?.[i] === 'search-failed');
-    const noMatch = unmatched.filter(i => reasons?.[i] !== 'search-failed');
+    // 'rejected' ≠ "not stocked": products came back but none was confidently the item — a retry can
+    // flip it (a no-reasons legacy caller lands in the no-products bucket, same phrasing as before).
+    const lowConf = unmatched.filter(i => reasons?.[i] === 'rejected');
+    const noMatch = unmatched.filter(i => reasons?.[i] !== 'search-failed' && reasons?.[i] !== 'rejected');
     if (noMatch.length) s += ` — no match at this store: ${noMatch.join(', ')} (left on your lists)`;
+    if (lowConf.length) s += ` — couldn't confidently match: ${lowConf.join(', ')} (still on your lists — try Send again)`;
     if (failed.length) s += ` — search failed for: ${failed.join(', ')} (try again in a bit)`;
   }
   return s.slice(0, 900);

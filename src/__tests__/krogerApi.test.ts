@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildKrogerAuthUrl, authCodeTokenBody, refreshTokenBody, clientCredentialsBody,
-  shapeLocations, shapeProductCandidates, buildMatchPrompt, validateMatchSelections,
+  shapeLocations, shapeProductCandidates, buildMatchPrompt, validateMatchSelections, mergeMatchRetry,
   buildCartAddBody, buildCartDraftSummary, krogerSearchTerm, krogerFallbackTerm, effectiveBindings, effectiveKrogerConnection, type ProductCandidate,
 } from '../utils/krogerApi';
 
@@ -57,14 +57,37 @@ describe('search terms (the parenthetical bug)', () => {
     expect(r.reasons).toEqual({ paneer: 'rejected', 'unicorn fruit': 'no-products', butter: 'search-failed' });
   });
 
-  it('buildCartDraftSummary separates "no match at this store" from "search failed"', () => {
+  it('buildCartDraftSummary separates "no match" / "couldn\'t confidently match" / "search failed"', () => {
     const matched = [{ text: 'garlic', upc: '0001', description: 'Garlic Bulbs', size: '1 ct', price: 0.99 }];
-    const s = buildCartDraftSummary('Fred Meyer - Issaquah', matched, ['unicorn fruit', 'butter'],
-      { 'unicorn fruit': 'no-products', butter: 'search-failed' });
+    const s = buildCartDraftSummary('Fred Meyer - Issaquah', matched, ['unicorn fruit', 'ginger', 'butter'],
+      { 'unicorn fruit': 'no-products', ginger: 'rejected', butter: 'search-failed' });
     expect(s).toContain('no match at this store: unicorn fruit');
+    // 'rejected' must NOT claim the store lacks it — candidates existed, confidence didn't.
+    expect(s).toContain("couldn't confidently match: ginger (still on your lists — try Send again)");
     expect(s).toContain('search failed for: butter');
     // Presence-model flag: the parent is told quantities default to 1 exactly where they approve.
     expect(s).toContain('Quantities default to 1 of each');
+    // Legacy no-reasons callers keep the old bucket + phrasing.
+    expect(buildCartDraftSummary('QFC', matched, ['kasuri methi'])).toContain('no match at this store: kasuri methi');
+  });
+
+  it('mergeMatchRetry folds second-pass wins into matched and clears their reasons', () => {
+    const first = {
+      matched: [{ text: 'garlic', upc: '0001', description: 'Garlic Bulbs', size: '1 ct', price: 0.99 }],
+      unmatched: ['ginger', 'butter', 'unicorn fruit'],
+      reasons: { ginger: 'rejected', butter: 'rejected', 'unicorn fruit': 'no-products' } as const,
+    };
+    const retry = {
+      matched: [{ text: 'butter', upc: '0002', description: 'Challenge Unsalted Butter', size: '16 oz', price: 4.79 }],
+      unmatched: ['ginger'],
+      reasons: { ginger: 'rejected' } as const,
+    };
+    const merged = mergeMatchRetry(first, retry);
+    expect(merged.matched.map(m => m.text)).toEqual(['garlic', 'butter']);
+    expect(merged.unmatched).toEqual(['ginger', 'unicorn fruit']); // first-pass order kept
+    expect(merged.reasons).toEqual({ ginger: 'rejected', 'unicorn fruit': 'no-products' });
+    // A retry with no wins is a strict no-op (same object back — nothing to rebuild).
+    expect(mergeMatchRetry(first, { matched: [], unmatched: ['ginger', 'butter'], reasons: {} })).toBe(first);
   });
 });
 

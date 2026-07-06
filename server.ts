@@ -17,7 +17,7 @@ import { verifyActions, buildCriticNote, verifyActionClaims, unbackedClaimCorrec
 import { verifyQuickAdd, buildQuickAddCriticNote, coerceQuickAdd } from './src/utils/quickAddCritic';
 import {
   buildKrogerAuthUrl, authCodeTokenBody, refreshTokenBody, clientCredentialsBody,
-  shapeLocations, shapeProductCandidates, buildMatchPrompt, validateMatchSelections,
+  shapeLocations, shapeProductCandidates, buildMatchPrompt, validateMatchSelections, mergeMatchRetry,
   buildCartAddBody, KROGER_MATCH_SCHEMA, krogerSearchTerm, krogerFallbackTerm, type ProductCandidate,
 } from './src/utils/krogerApi';
 import { buildRevisePrompt } from './src/utils/reviseDraft';
@@ -2327,12 +2327,18 @@ app.post('/api/kroger/match', requireAuth, aiRateLimit, async (req, res) => {
         if (!found.length) console.warn(`[kroger] zero candidates for "${item}" (term "${term}") at ${locationId}`);
       }
     }
-    const parsed = await callGeminiJSON(
-      buildMatchPrompt(items, candidates),
-      'You match grocery-list items to store products. Choose ONLY from the listed candidates; -1 when none truly is the item.',
-      KROGER_MATCH_SCHEMA, '{}', undefined, { temperature: 0.2 },
+    const matchSystem = 'You match grocery-list items to store products. Choose ONLY from the listed candidates; -1 when none truly is the item.';
+    const judge = (subset: string[]) => callGeminiJSON(
+      buildMatchPrompt(subset, candidates), matchSystem, KROGER_MATCH_SCHEMA, '{}', undefined, { temperature: 0.2 },
     ).catch(() => null);
-    return res.json(validateMatchSelections(parsed, items, candidates, searchFailed));
+    let result = validateMatchSelections(await judge(items), items, candidates, searchFailed);
+    // Second pass for 'rejected' items only: candidates existed, the sampled judgment said no. A
+    // fresh smaller-batch call flips genuine borderline cases (live 2026-07-06: butter/ginger matched
+    // on a manual re-send with identical candidates) while real mismatches stay rejected. One extra
+    // model call, no re-search; a failed retry merges as a no-op.
+    const rejected = result.unmatched.filter(i => result.reasons?.[i] === 'rejected');
+    if (rejected.length) result = mergeMatchRetry(result, validateMatchSelections(await judge(rejected), rejected, candidates));
+    return res.json(result);
   } catch (err) {
     console.error('[kroger] match error:', err);
     return res.status(500).json({ error: 'Product matching failed.' });
