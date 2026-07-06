@@ -159,3 +159,26 @@ create extension if not exists vector with schema extensions;
 --   --   if (select count(*) from join_attempts where user_id = auth.uid()
 --   --       and attempted_at > now() - interval '1 hour') >= 10 then return null; end if;
 --   --   insert into join_attempts (user_id) values (auth.uid());
+
+-- ── 6. OPTIONAL: F-02 refresh-token binding (post-judging — needs this new table, so TODO only) ──────
+-- ASSESSED 2026-07-06: /api/google-refresh authenticates the CALLER but accepts ANY refresh token in
+-- the body (the token lives per-device in client localStorage by design — same pattern as Kroger; the
+-- server stores no copy today, so there is nothing to "bind to" without new storage). Already in code:
+-- the caller must hold a valid session (requireAuth) and Google's error bodies are NOT echoed (a prober
+-- can't use us to confirm token validity — the F-02 "at minimum" + F-06). What this table enables: move
+-- the refresh token server-side keyed to the user at OAuth-connect time, then /api/google-refresh (and
+-- the Gmail-scan x-google-token path) looks it up by req.user.id and STOPS accepting tokens in the
+-- request body at all. Encrypt at rest with a server-held key (pgsodium or app-layer AES-GCM) — RLS
+-- alone must not be the only wall around a long-lived Google credential.
+-- F-03 (DNS-rebinding), assessed the same pass, needs NO schema work: src/utils/ssrfGuard.ts already
+-- pins every safeFetch hop to its validated IP, and all other outbound calls are fixed-host.
+--
+-- create table if not exists oauth_tokens (
+--   user_id      uuid        primary key references auth.users(id) on delete cascade,
+--   provider     text        not null default 'google' check (provider in ('google', 'kroger')),
+--   token_cipher text        not null,  -- AES-GCM ciphertext, key from server env (never plaintext)
+--   created_at   timestamptz default now() not null,
+--   updated_at   timestamptz default now() not null
+-- );
+-- alter table oauth_tokens enable row level security; -- no policies: server-only via service key,
+--   -- or per-user "user_id = auth.uid()" policies if the JWT-scoped client should write its own row.
