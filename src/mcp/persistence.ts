@@ -14,6 +14,10 @@ import type { McpToolResult } from './conciergeTools';
 import { familyDataRow, FAMILY_DATA_CONFLICT } from '../utils/familyData';
 import { getSqliteAdapter, type SqliteAdapter } from '../storage';
 import { getOrCreateHouseholdId } from '../storage/boxConfig';
+import {
+  normalizeWebUrl, webUrlHash, isCacheFresh, packCachedPage, unpackCachedPage,
+  WEB_CACHE_TTL_MS, type CachedPage,
+} from '../utils/webCache';
 
 // Which family_data collection each auto-tier tool's artifact appends to.
 const TOOL_COLLECTION: Record<string, string> = {
@@ -31,6 +35,12 @@ export interface Persistence {
   mutate(dataKey: string, transform: (cur: any[]) => any[]): Promise<void>;
   // Overwrite a collection wholesale (forced; kept for the rare wholesale-replace + tests).
   replace(dataKey: string, items: any[]): Promise<void>;
+  // Household-scoped web-page cache (roadmap "Web cache") for the fetch_page tool — the `web_cache` table
+  // on both backends. OPTIONAL so contract-slice mocks/tests stay valid, and FAIL-SOFT by contract: any
+  // error (table not migrated yet, RLS hiccup, network) is a cache MISS / silent no-op — the cache must
+  // never break a live fetch. get() returns FRESH rows only (the 7-day TTL is enforced on read).
+  webCacheGet?(url: string): Promise<{ page: CachedPage; fetchedAt: string } | null>;
+  webCachePut?(url: string, page: CachedPage): Promise<void>;
 }
 
 // Build a Supabase-backed persistence from env (the visitor's JWT). null when not configured → the MCP
@@ -134,6 +144,40 @@ export class SupabasePersistence implements Persistence {
       if (error) throw new Error(`mutate "${dataKey}" failed: ` + error.message);
     });
   }
+
+  // Web cache read — FRESH hits only; every failure mode is a miss (fail-soft: until the morning
+  // migration lands the `web_cache` table doesn't exist in the shared demo project, and a cache outage
+  // must degrade to a live fetch, never to a broken tool).
+  async webCacheGet(url: string): Promise<{ page: CachedPage; fetchedAt: string } | null> {
+    try {
+      const norm = normalizeWebUrl(url);
+      if (!norm) return null;
+      const hid = await this.householdId();
+      const { data, error } = await this.client.from('web_cache').select('content, fetched_at')
+        .eq('household_id', hid).eq('url_hash', webUrlHash(norm)).maybeSingle();
+      if (error || !data) return null;
+      const fetchedAt = String(data.fetched_at ?? '');
+      if (!isCacheFresh(fetchedAt, Date.now())) return null; // TTL enforced on READ — stale rows are ignored
+      const page = unpackCachedPage(String(data.content ?? ''));
+      return page ? { page, fetchedAt } : null;
+    } catch { return null; }
+  }
+
+  // Web cache write — best-effort upsert + prune of this household's stale rows (no cron; the read path
+  // already ignores expired rows, this just keeps the table bounded). Never throws.
+  async webCachePut(url: string, page: CachedPage): Promise<void> {
+    try {
+      const norm = normalizeWebUrl(url);
+      if (!norm) return;
+      const hid = await this.householdId();
+      await this.client.from('web_cache').upsert(
+        { household_id: hid, url_hash: webUrlHash(norm), url: norm, content: packCachedPage(page), fetched_at: new Date().toISOString() },
+        { onConflict: 'household_id,url_hash' },
+      );
+      await this.client.from('web_cache').delete()
+        .eq('household_id', hid).lt('fetched_at', new Date(Date.now() - WEB_CACHE_TTL_MS).toISOString());
+    } catch { /* best-effort — a failed cache write costs nothing but the next fetch */ }
+  }
 }
 
 // Local appliance backend: CAS read-modify-write the box's SQLite file under its single household. The
@@ -186,6 +230,31 @@ export class SqlitePersistence implements Persistence {
   // Forced wholesale overwrite (kept for compatibility + tests; prod read-modify-writes go through mutate()).
   async replace(dataKey: string, items: any[]): Promise<void> {
     await this.adapter.save(this.householdId(), dataKey, items);
+  }
+
+  // Web cache read — same fail-soft contract as the Supabase impl: fresh hits only, every error is a miss.
+  async webCacheGet(url: string): Promise<{ page: CachedPage; fetchedAt: string } | null> {
+    try {
+      const norm = normalizeWebUrl(url);
+      if (!norm) return null;
+      const row = this.adapter.getWebCache(this.householdId(), webUrlHash(norm));
+      if (!row || !isCacheFresh(row.fetched_at, Date.now())) return null; // TTL enforced on READ
+      const page = unpackCachedPage(row.content);
+      return page ? { page, fetchedAt: row.fetched_at } : null;
+    } catch { return null; }
+  }
+
+  // Web cache write — best-effort upsert; the adapter also prunes this household's stale rows. Never throws.
+  async webCachePut(url: string, page: CachedPage): Promise<void> {
+    try {
+      const norm = normalizeWebUrl(url);
+      if (!norm) return;
+      const now = Date.now();
+      this.adapter.putWebCache(
+        this.householdId(), webUrlHash(norm), norm, packCachedPage(page),
+        new Date(now).toISOString(), new Date(now - WEB_CACHE_TTL_MS).toISOString(),
+      );
+    } catch { /* best-effort — a failed cache write costs nothing but the next fetch */ }
   }
 }
 

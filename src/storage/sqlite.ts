@@ -35,6 +35,37 @@ export class SqliteAdapter implements StorageAdapter {
     // Box-level config (NOT household data): the household id, passphrase hash/salt, and session secret that
     // make this box an identity. Single key/value table; see boxConfig.ts for the typed helpers.
     this.db.exec('CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);');
+    // Async agent jobs (roadmap "Async agent jobs"): one row per queued agent turn — queued → running →
+    // done|error. MIRRORS the Supabase `agent_jobs` table (supabase/migrations/2026-07-06-post-capstone.sql);
+    // like family_data, scoping here is APP-ENFORCED (every statement filters by household_id). `actions` is
+    // the agent's actions array as JSON text (jsonb on the Supabase side); timestamps are ISO strings.
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS agent_jobs (
+        id           TEXT PRIMARY KEY,
+        household_id TEXT NOT NULL,
+        status       TEXT NOT NULL,
+        message      TEXT NOT NULL,
+        reply        TEXT,
+        actions      TEXT,
+        model        TEXT,
+        session_id   TEXT,
+        created_at   TEXT NOT NULL,
+        updated_at   TEXT NOT NULL
+      );
+    `);
+    // Web-page cache for the concierge's fetch_page tool (roadmap "Web cache") — mirrors the Supabase
+    // `web_cache` table. url_hash = sha256 of the NORMALIZED url (src/utils/webCache.ts); `content` is the
+    // packed { text, links } page. The 7-day TTL is enforced on READ by the caller; writes prune stale rows.
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS web_cache (
+        household_id TEXT NOT NULL,
+        url_hash     TEXT NOT NULL,
+        url          TEXT NOT NULL,
+        content      TEXT NOT NULL,
+        fetched_at   TEXT NOT NULL,
+        PRIMARY KEY (household_id, url_hash)
+      );
+    `);
   }
 
   // ── Box config (meta) — sync; local SQLite, used at auth time only. Not part of the StorageAdapter
@@ -46,6 +77,65 @@ export class SqliteAdapter implements StorageAdapter {
 
   setMeta(k: string, v: string): void {
     this.db.prepare('INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v').run(k, v);
+  }
+
+  // ── Agent jobs + web cache — like getMeta/setMeta these are helpers on the CONCRETE handle, not part of
+  // the StorageAdapter interface (which stays the household-DATA blob contract). Sync (node:sqlite); the
+  // async job/cache STORE wrappers live in src/storage/agentJobs.ts and src/mcp/persistence.ts. Every
+  // statement filters by household_id — the same app-enforced scoping family_data uses.
+
+  insertAgentJob(householdId: string, id: string, message: string): void {
+    const now = new Date().toISOString();
+    this.db
+      .prepare(`INSERT INTO agent_jobs (id, household_id, status, message, created_at, updated_at)
+                VALUES (?, ?, 'queued', ?, ?, ?)`)
+      .run(id, householdId, message, now, now);
+  }
+
+  // Patch a job's status (+ any completed fields). COALESCE keeps un-patched columns — the worker calls
+  // this twice: once for 'running' (status only), once for done/error (with the reply payload).
+  updateAgentJob(
+    householdId: string, id: string,
+    patch: { status: string; reply?: string; actions?: string; model?: string; sessionId?: string },
+  ): void {
+    this.db
+      .prepare(`UPDATE agent_jobs
+                SET status = ?, reply = COALESCE(?, reply), actions = COALESCE(?, actions),
+                    model = COALESCE(?, model), session_id = COALESCE(?, session_id), updated_at = ?
+                WHERE household_id = ? AND id = ?`)
+      .run(patch.status, patch.reply ?? null, patch.actions ?? null, patch.model ?? null,
+           patch.sessionId ?? null, new Date().toISOString(), householdId, id);
+  }
+
+  getAgentJob(householdId: string, id: string): {
+    id: string; household_id: string; status: string; message: string; reply: string | null;
+    actions: string | null; model: string | null; session_id: string | null; created_at: string; updated_at: string;
+  } | null {
+    const row = this.db
+      .prepare('SELECT * FROM agent_jobs WHERE household_id = ? AND id = ?')
+      .get(householdId, id) as any;
+    return row ?? null;
+  }
+
+  // Raw cache row (or null). Freshness (the 7-day TTL) is the CALLER's check — one shared pure helper
+  // (isCacheFresh) rather than per-backend SQL date math that could drift.
+  getWebCache(householdId: string, urlHash: string): { url: string; content: string; fetched_at: string } | null {
+    const row = this.db
+      .prepare('SELECT url, content, fetched_at FROM web_cache WHERE household_id = ? AND url_hash = ?')
+      .get(householdId, urlHash) as any;
+    return row ?? null;
+  }
+
+  // Upsert a fetched page + best-effort prune: any of THIS household's rows already past the TTL are dead
+  // (the read path ignores them), so clearing them on write keeps the table bounded without a cron.
+  putWebCache(householdId: string, urlHash: string, url: string, content: string, nowIso: string, staleBeforeIso: string): void {
+    this.db
+      .prepare(`INSERT INTO web_cache (household_id, url_hash, url, content, fetched_at) VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(household_id, url_hash) DO UPDATE SET url = excluded.url, content = excluded.content, fetched_at = excluded.fetched_at`)
+      .run(householdId, urlHash, url, content, nowIso);
+    this.db
+      .prepare('DELETE FROM web_cache WHERE household_id = ? AND fetched_at < ?')
+      .run(householdId, staleBeforeIso);
   }
 
   async load(householdId: string, key: string): Promise<StoredBlob> {

@@ -15,6 +15,7 @@ import { READ_TOOL_DEFS, shapeEvents, shapeUpcoming, shapeChores, shapeBills, sh
 import { resolveDoc, normalizeFolder } from '../utils/docActions';
 import { sanitizeStoreList } from '../constants';
 import { searchWeb, fetchPage, trustedBookingLinks } from '../utils/webResearch';
+import { cachedFraming } from '../utils/webCache';
 import { sanitizeForPrompt } from '../utils/promptSafety';
 
 // Library doc management (move = auto/reversible; delete = confirm/destructive). Custom handlers (they
@@ -255,7 +256,26 @@ async function handleWebTool(name: string, args: Record<string, unknown>): Promi
   }
   // fetch_page — return the page's TEXT and its LINKS so the agent can use the venue's published Reserve link.
   const url = typeof args.url === 'string' ? args.url : '';
+  // Web cache (roadmap "Web cache"): a FRESH cached copy skips the network. The persistence layer enforces
+  // the 7-day TTL on read and is FAIL-SOFT (table not migrated yet / no household / any error = miss), so
+  // the cache can only ever save a fetch, never break one. Cached links still feed the handoff provenance
+  // gate below, and the message carries the honest dated framing so the agent can't present a week-old
+  // page as live.
+  const cached = persistence?.webCacheGet ? await persistence.webCacheGet(url) : null;
+  if (cached) {
+    recordObserved([url, ...trustedBookingLinks(url, cached.page.links.map(l => l.href))]);
+    const cachedText = sanitizeForPrompt(cached.page.text, 20000);
+    const cachedLinks = cached.page.links.map(l => ({ text: sanitizeForPrompt(l.text, 120), href: l.href }));
+    return {
+      ok: true, tool: name, tier: 'auto', status: 'validated',
+      artifact: { url, text: cachedText, links: cachedLinks, cached: true, fetchedAt: cached.fetchedAt },
+      message: `Read ${cachedText.length} chars and ${cachedLinks.length} link(s) from the cached copy — ${cachedFraming(cached.fetchedAt)}.`,
+    };
+  }
   const { text, links } = await fetchPage(url);
+  // Cache the RAW extracted page for next time (best-effort, never throws). Sanitization runs on READ in
+  // both the live and cached paths, so a sanitizer improvement applies to old rows too.
+  if (persistence?.webCachePut) await persistence.webCachePut(url, { text, links });
   // Record the page itself + only its same-domain / known-booking-provider links (NOT every href, which
   // would let a planted cross-domain link pass the handoff provenance gate).
   recordObserved([url, ...trustedBookingLinks(url, links.map(l => l.href))]);
