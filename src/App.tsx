@@ -446,6 +446,8 @@ export default function App() {
           resolve(base64);
         };
         reader.onerror = (err) => reject(err);
+        // Without this, an aborted read never settles the promise and isParsing wedges forever.
+        reader.onabort = () => reject(new Error('PDF read aborted'));
       });
       reader.readAsDataURL(file);
       const pdfBase64 = await base64Promise;
@@ -1102,7 +1104,20 @@ export default function App() {
       // Find this user's OWN profile by auth userId OR (stable) Google email, and SELF-HEAL a
       // drifted/missing link so identity survives an auth id change — no spurious name prompt, no
       // split household. Persist the re-link immediately (the save-effect is suppressed in bootstrap).
-      const existingMembers: FamilyMember[] = cloudData.members?.length ? cloudData.members : [];
+      let loadedMembers: FamilyMember[] = cloudData.members?.length ? cloudData.members : [];
+      // Falsely-empty guard: a KNOWN household whose read returned no members while this device
+      // still caches some is exactly the shape of a dropped/raced read — re-read ONCE before
+      // believing it. A recheck that shows members wins (adopt them); only a confirmed-empty
+      // cloud reaches the recovery push below, which would otherwise overwrite newer members.
+      if (!switchedHousehold && !loadedMembers.length && familyMembers.length) {
+        const recheck = await withTimeout(loadHouseholdData(hid), BOOTSTRAP_STEP_TIMEOUT_MS, 'members recheck').catch(() => null);
+        if (gen !== bootstrapGenRef.current) return;
+        if (recheck?.members?.length) {
+          loadedMembers = recheck.members;
+          setFamilyMembers(loadedMembers);
+        }
+      }
+      const existingMembers: FamilyMember[] = loadedMembers;
       const ownIdx = matchOwnProfileIndex(existingMembers, user.id, user.email || undefined);
       if (ownIdx >= 0) {
         const { members: healed, changed } = healMemberLink(existingMembers, ownIdx, user.id, user.email || undefined);
@@ -1341,15 +1356,26 @@ export default function App() {
   const getEventsForDate = useCallback((dateStr: string) => eventsByDate.get(dateStr) || [], [eventsByDate]);
 
 
+  // The wall tablet runs for days, so "today" must roll at midnight — a minute tick that only
+  // touches state when the DATE actually changes (same idiom as the chore-reset watcher above).
+  const [dayKey, setDayKey] = useState(() => toLocalDateStr(new Date()));
+  useEffect(() => {
+    const iv = setInterval(() => setDayKey(prev => {
+      const cur = toLocalDateStr(new Date());
+      return cur === prev ? prev : cur;
+    }), 60 * 1000);
+    return () => clearInterval(iv);
+  }, []);
+
   // Find overlapping activity conflicts — memoized so it only recomputes when events change.
   const conflicts = useMemo(() => {
     // Time-aware detection (only overlapping TIMED events clash; all-day events never do),
     // then windowed to today … +2 weeks so no past/far-future noise. Both are pure + tested.
-    const today = new Date();
-    const horizon = new Date();
-    horizon.setDate(today.getDate() + 14);
-    return filterConflictWindow(detectConflicts(events), toLocalDateStr(today), toLocalDateStr(horizon));
-  }, [events]);
+    // dayKey (not new Date()) anchors the window so it can't go stale across midnight.
+    const horizon = parseLocalDate(dayKey);
+    horizon.setDate(horizon.getDate() + 14);
+    return filterConflictWindow(detectConflicts(events), dayKey, toLocalDateStr(horizon));
+  }, [events, dayKey]);
 
   // Recurring daily events (e.g. a Google series expanded into one card per day) —
   // surfaced as a warning so the user can bulk-delete the clutter. Memoized like conflicts.

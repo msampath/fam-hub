@@ -55,6 +55,11 @@ describe('resolveAssignees (multi-kid expansion)', () => {
     expect(resolveAssignees('leo, mia', FAM)).toEqual(['Leo', 'Mia']); // case-insensitive
     expect(resolveAssignees('Leo & Mia', FAM)).toEqual(['Leo', 'Mia']);
   });
+  it('keeps the ONE real kid from a compound list — never the first-kid fallback (Gemini review)', () => {
+    expect(resolveAssignees('Mia and Grandma', FAM)).toEqual(['Mia']); // was: fell through → ['Leo']
+    expect(resolveAssignees('Grandma & Mia', FAM)).toEqual(['Mia']);
+    expect(resolveAssignees('Grandma and Grandpa', FAM)).toEqual(['Leo']); // zero kids → unchanged fallback
+  });
   it('returns a single assignee for a single name or unknown', () => {
     expect(resolveAssignees('Leo', FAM)).toEqual(['Leo']);
     expect(resolveAssignees('Dad', FAM)).toEqual(['Leo']); // Parent → first Kid

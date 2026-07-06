@@ -43,7 +43,9 @@ export function resolveAssignees(name: any, familyMembers: FamilyMember[]): stri
       const k = kidNames.find(k => k.toLowerCase() === part.toLowerCase());
       if (k && !matched.includes(k)) matched.push(k);
     }
-    if (matched.length > 1) return matched;
+    // ANY real-kid match in an explicit list wins — "Leo and Grandma" must resolve to Leo, not
+    // fall through to resolveAssignee("Leo and Grandma"), whose fallback is the FIRST kid.
+    if (matched.length) return matched;
   }
 
   return [resolveAssignee(name, familyMembers)];

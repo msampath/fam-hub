@@ -24,6 +24,11 @@ describe('isTransientError', () => {
     expect(isTransientError(new Error('The model is OVERLOADED'))).toBe(true);
     expect(isTransientError(new Error('fetch failed'))).toBe(true);
     expect(isTransientError(new Error('ECONNRESET'))).toBe(true);
+    // AbortController cancellations (our fetch timeouts) are transient — the chain must advance,
+    // not short-circuit as if the request were schema-fatal.
+    expect(isTransientError(new Error('The operation was aborted'))).toBe(true);
+    expect(isTransientError(Object.assign(new Error('This operation was aborted'), { name: 'AbortError' }))).toBe(true);
+    expect(isTransientError(new Error('AbortError: signal is aborted without reason'))).toBe(true);
   });
 
   it('treats client/auth/schema errors as fatal (do NOT retry)', () => {

@@ -550,7 +550,9 @@ export function isTransientError(err: any): boolean {
   const code = err?.status ?? err?.code;
   if (typeof code === 'number' && [429, 500, 503].includes(code)) return true;
   const msg = String(err?.message || err || '').toUpperCase();
-  return /\b(429|500|503)\b|UNAVAILABLE|RESOURCE_EXHAUSTED|INTERNAL|OVERLOADED|ECONNRESET|ETIMEDOUT|FETCH FAILED/.test(msg);
+  // ABORT covers AbortController cancellations ("AbortError", "the operation was aborted") — our
+  // fetch timeouts cancel this way, and a timeout is transient, not a schema-shaped fatal.
+  return /\b(429|500|503)\b|UNAVAILABLE|RESOURCE_EXHAUSTED|INTERNAL|OVERLOADED|ECONNRESET|ETIMEDOUT|FETCH FAILED|ABORT/.test(msg);
 }
 
 // A failure is RECOVERABLE if it's transient (overload/network) OR the model returned
