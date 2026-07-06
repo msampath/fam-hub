@@ -81,8 +81,11 @@ export default function Manage({ account, onClose }: ManageProps) {
     newMemberAge, setNewMemberAge,
     inviteCodeInput, setInviteCodeInput, isJoiningHousehold, handleJoinHousehold,
     hasStepUpPin, setStepUpPin, verifyStepUpPin, digestPrefs, setDigestPrefs,
-    kidMode, setKidMode, copilotName, setCopilotName,
+    kidMode, setKidMode, copilotName, setCopilotName, clearCopilotHistory,
   } = useApp();
+  // Two-step confirm for the history wipe (it deletes household data on every device).
+  const [confirmClearHistory, setConfirmClearHistory] = useState(false);
+  const [historyClearedMsg, setHistoryClearedMsg] = useState(false);
   // Copilot rename (kid-pickable): local draft → Save writes the household setting (synced everywhere).
   const [copilotNameDraft, setCopilotNameDraft] = useState(copilotName);
   // Daily-briefing email prefs (single-element blob); merge-patch the one entry.
@@ -194,6 +197,29 @@ export default function Manage({ account, onClose }: ManageProps) {
             <button type="button" onClick={() => account.onSignOut()} className="flex items-center gap-2 rounded-[10px] px-3.5 py-2 text-sm font-bold" style={{ border: `2px solid ${C.elevated}`, background: C.card, color: C.red }}>
               <LogOut size={15} /> Sign out
             </button>
+          </div>
+          {/* History-log privacy: the copilot keeps a rolling window of Q+A turns and quick-add prompts
+              (household storage, all devices) — disclose that here and offer a real, two-step delete. */}
+          <div className="mt-3 text-xs font-semibold" style={{ color: C.muted }}>
+            The copilot keeps a rolling history of questions and quick-adds (shared with your household) to power routines and suggestions.
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            {!confirmClearHistory ? (
+              <button type="button" onClick={() => setConfirmClearHistory(true)} className="flex items-center gap-2 rounded-[10px] px-3.5 py-2 text-sm font-bold" style={{ border: `2px solid ${C.elevated}`, background: C.card, color: C.red }}>
+                <Trash2 size={15} /> Clear copilot history
+              </button>
+            ) : (
+              <>
+                <span className="text-xs font-bold" style={{ color: C.red }}>Delete the saved copilot + quick-add history for the whole household?</span>
+                <button type="button" onClick={() => { clearCopilotHistory(); setConfirmClearHistory(false); setHistoryClearedMsg(true); }} className="rounded-[10px] px-3.5 py-2 text-sm font-extrabold" style={{ border: `2px solid ${C.red}`, background: `${C.red}14`, color: C.red }}>
+                  Yes, clear it
+                </button>
+                <button type="button" onClick={() => setConfirmClearHistory(false)} className="rounded-[10px] px-3.5 py-2 text-sm font-bold" style={{ border: `2px solid ${C.elevated}`, background: C.card, color: C.muted }}>
+                  Cancel
+                </button>
+              </>
+            )}
+            {historyClearedMsg && !confirmClearHistory && <span className="text-xs font-semibold" style={{ color: C.emerald }}>History cleared.</span>}
           </div>
         </Section>
 

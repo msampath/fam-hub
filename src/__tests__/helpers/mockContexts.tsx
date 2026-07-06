@@ -182,6 +182,9 @@ export function makeAppCtx(overrides: Partial<AppCtx> = {}): AppCtx {
     copilotName: 'Copilot',
     setCopilotName: vi.fn(),
 
+    // History-log privacy wipe (Manage → Account)
+    clearCopilotHistory: vi.fn(),
+
     // Email scans (bills/packages/kids) + suggestion create
     scanEmailForBills: vi.fn(async () => ({ suggestions: [], scanned: 0 })),
     scanEmailForPackages: vi.fn(async () => ({ suggestions: [], scanned: 0 })),

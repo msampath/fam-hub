@@ -358,6 +358,10 @@ export default function App() {
     const saved = localStorage.getItem('famplan_quickaddlog');
     return safeParseArray(saved);
   });
+  // Privacy control (Manage → Account): wipe both audit/RL logs for the whole household. The emptied
+  // arrays ride the normal COLLECTIONS persistence (localStorage now, cloud write ~800ms later), so the
+  // clear propagates to every device — it is a real deletion of the stored window, not a view reset.
+  const clearCopilotHistory = () => { setCopilotLog([]); setQuickAddLog([]); };
   // Concierge action ledger (foundation A1): append-only audit trail of every concierge action —
   // 'applied' for auto creates, 'pending' for actions awaiting approval. Rides the COLLECTIONS
   // plumbing (household-scoped, RLS, cross-device), capped on append like the other logs.
@@ -3082,6 +3086,7 @@ export default function App() {
 
     // The family's name for the copilot (synced household setting)
     copilotName, setCopilotName,
+    clearCopilotHistory,
     setKrogerStore, krogerStoreId: settings[0]?.krogerStoreId || null,
     homeLat: settings[0]?.homeLat ?? null, homeLng: settings[0]?.homeLng ?? null,
 

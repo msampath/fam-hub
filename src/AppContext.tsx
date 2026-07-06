@@ -200,6 +200,9 @@ export interface AppCtx {
   copilotName: string;
   setCopilotName: (name: string) => void;
 
+  // Privacy: wipe the persisted copilot Q+A log + quick-add log (household-wide, all devices).
+  clearCopilotHistory: () => void;
+
   // Email scans (B1 bills / B2 packages / B3 kids) + shared tap-to-add suggestion create
   scanEmailForBills: () => Promise<{ suggestions: CopilotSuggestion[]; scanned: number; error?: string }>;
   scanEmailForPackages: () => Promise<{ suggestions: CopilotSuggestion[]; scanned: number; error?: string }>;
