@@ -21,6 +21,10 @@ export interface DevicePrefs {
   setAutoScanEnabled: Dispatch<SetStateAction<boolean>>;
   kidMode: boolean;
   setKidMode: Dispatch<SetStateAction<boolean>>;
+  // Photos screensaver (W6): show the local photo corpus behind the idle clock. Per-DEVICE on
+  // purpose — the wall tablet wants family photos; a parent's phone lockscreen doesn't.
+  photosScreensaver: boolean;
+  setPhotosScreensaver: Dispatch<SetStateAction<boolean>>;
 }
 
 export function useDevicePrefs(): DevicePrefs {
@@ -63,8 +67,13 @@ export function useDevicePrefs(): DevicePrefs {
     const saved = localStorage.getItem('famplan_kidmode');
     return saved ? JSON.parse(saved) : false;
   });
+  const [photosScreensaver, setPhotosScreensaver] = useState<boolean>(() => {
+    const saved = localStorage.getItem('famplan_photos_screensaver');
+    return saved ? JSON.parse(saved) : false;
+  });
 
   useEffect(() => { localStorage.setItem('famplan_idle_timeout', String(idleTimeoutMs)); }, [idleTimeoutMs]);
+  useEffect(() => { localStorage.setItem('famplan_photos_screensaver', JSON.stringify(photosScreensaver)); }, [photosScreensaver]);
   useEffect(() => { localStorage.setItem('famplan_autoscan', JSON.stringify(autoScanEnabled)); }, [autoScanEnabled]);
   useEffect(() => { localStorage.setItem('famplan_kidmode', JSON.stringify(kidMode)); }, [kidMode]);
   useEffect(() => { localStorage.setItem('famplan_signout_timeout', String(signOutMs)); }, [signOutMs]);
@@ -90,5 +99,6 @@ export function useDevicePrefs(): DevicePrefs {
     handleToggleReminders,
     autoScanEnabled, setAutoScanEnabled,
     kidMode, setKidMode,
+    photosScreensaver, setPhotosScreensaver,
   };
 }

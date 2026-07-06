@@ -5,6 +5,7 @@ import { useApp } from '../../AppContext';
 import { suggestionKey } from '../../utils/aiActions';
 import { isAgentConfigured } from '../../utils/agentClient';
 import { USER_COMPLETES } from '../../constants';
+import { useSpeechInput } from '../../hooks/useSpeechInput';
 import type { CopilotSuggestion } from '../../types';
 import ImportDrawer from './ImportDrawer';
 import Modal from './Modal';
@@ -169,6 +170,18 @@ export default function CopilotBar({ onOpenManage }: CopilotBarProps) {
     setOpen(true);
   };
 
+  // Voice input (W6): interim transcripts stream into the input; the FINAL transcript submits through
+  // the exact same pipeline as typing (grounding, critic, confirm tiers, Approvals) — hands-free entry,
+  // identical safety. Unsupported browsers never render the mic.
+  const speech = useSpeechInput((text, isFinal) => {
+    setCopilotInput(text);
+    if (isFinal && text.trim()) {
+      setCopilotInput('');
+      handleSendCopilotMessage(text.trim());
+      setOpen(true);
+    }
+  });
+
   // Per-turn escalate: re-run the user question that produced THIS local reply, forced to the cloud agent.
   const escalateTurn = (assistantIdx: number) => {
     if (isCopilotThinking) return;
@@ -209,16 +222,31 @@ export default function CopilotBar({ onOpenManage }: CopilotBarProps) {
         </button>
 
         {/* The single copilot input — full-width on its own row on mobile (order-last + w-full), inline flex-1 on desktop. */}
-        <form onSubmit={submit} className="order-last w-full md:order-none md:w-auto md:flex-1">
+        <form onSubmit={submit} className="order-last flex w-full items-center gap-2 md:order-none md:w-auto md:flex-1">
           <input
             value={copilotInput}
             onChange={e => setCopilotInput(e.target.value)}
             onFocus={() => setOpen(true)}
-            placeholder="Ask me, or tell me to do it…"
+            placeholder={speech.listening ? 'Listening…' : 'Ask me, or tell me to do it…'}
             aria-label="Ask the copilot"
-            className="w-full rounded-[14px] px-4 py-3 text-base font-semibold outline-none"
-            style={{ border: `2px solid ${C.elevated}`, boxShadow: brutShadow(C.elevated, 4), background: C.pill, color: C.primary }}
+            className="w-full min-w-0 flex-1 rounded-[14px] px-4 py-3 text-base font-semibold outline-none"
+            style={{ border: `2px solid ${speech.listening ? C.emerald : C.elevated}`, boxShadow: brutShadow(C.elevated, 4), background: C.pill, color: C.primary }}
           />
+          {/* Mic (W6, feature-detected): tap to speak; the final transcript submits like a typed ask. */}
+          {speech.supported && (
+            <button
+              type="button"
+              onClick={speech.toggle}
+              aria-label={speech.listening ? 'Stop listening' : 'Speak to the copilot'}
+              title={speech.listening ? 'Listening — tap to stop' : 'Speak instead of typing'}
+              className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[13px] text-lg"
+              style={speech.listening
+                ? { border: `2px solid ${C.emerald}`, background: `${C.emerald}1a`, color: C.emerald, animation: 'screensaverPulse 1.6s ease-in-out infinite' }
+                : { border: `2px solid ${C.elevated}`, background: C.card, color: C.muted }}
+            >
+              🎤
+            </button>
+          )}
         </form>
 
         {/* Actions (#) — proactive email finds to act on + manual inbox scans; opens the Actions modal.

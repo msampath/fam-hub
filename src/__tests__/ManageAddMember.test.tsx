@@ -12,6 +12,7 @@ const account: AccountSettings = {
   signOutMs: 0, onChangeSignOut: vi.fn(), remindersEnabled: false, onToggleReminders: vi.fn(),
   reminderTime: 0, onChangeReminderTime: vi.fn(), reminderLead: 0, onChangeReminderLead: vi.fn(),
   onRefresh: vi.fn(), isRefreshing: false, autoScanEnabled: false, onToggleAutoScan: vi.fn(),
+  photosScreensaver: false, onChangePhotosScreensaver: vi.fn(),
 };
 
 describe('Manage — add-member captures dietary/interests at creation (A4)', () => {

@@ -267,6 +267,7 @@ export default function App() {
     reminderLeadMinutes, setReminderLeadMinutes, handleToggleReminders,
     autoScanEnabled, setAutoScanEnabled,
     kidMode, setKidMode,
+    photosScreensaver, setPhotosScreensaver,
   } = devicePrefs;
   // Date string of the last day the digest fired (so it fires once/day). Ref + localStorage
   // so it survives reloads without re-creating the scheduler effect.
@@ -3160,6 +3161,7 @@ export default function App() {
         screensaverOn={screensaverOn}
         onWakeFromScreensaver={handleWakeFromScreensaver}
         isRefreshing={isRefreshing}
+        photosScreensaver={photosScreensaver}
         account={{
           user: googleUser,
           nickname: familyMembers[matchOwnProfileIndex(familyMembers, googleUser?.id, googleUser?.email ?? undefined)]?.name,
@@ -3167,6 +3169,8 @@ export default function App() {
           onLinkProfile: openNamePrompt,
           idleTimeoutMs,
           onChangeIdleTimeout: setIdleTimeoutMs,
+          photosScreensaver,
+          onChangePhotosScreensaver: setPhotosScreensaver,
           signOutMs,
           onChangeSignOut: setSignOutMs,
           remindersEnabled,

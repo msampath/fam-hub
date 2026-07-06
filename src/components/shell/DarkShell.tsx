@@ -22,13 +22,14 @@ interface DarkShellProps {
   screensaverOn: boolean;
   onWakeFromScreensaver: () => void;
   isRefreshing: boolean;
+  photosScreensaver?: boolean; // device pref: family photos behind the idle clock (W6)
   account: AccountSettings;
 }
 
 // The copilot-first dark shell (spec §4): one persistent copilot bar, page dots, and four
 // full-bleed horizontally-swipeable context pages. Replaces the old header + quick-add + tab
 // switcher. All pages read the existing AppContext / CalendarContext — no new state layer.
-export default function DarkShell({ screensaverOn, onWakeFromScreensaver, isRefreshing, account }: DarkShellProps) {
+export default function DarkShell({ screensaverOn, onWakeFromScreensaver, isRefreshing, photosScreensaver, account }: DarkShellProps) {
   const [activePage, setActivePage] = useState(0);
   const [manageOpen, setManageOpen] = useState(false);
   const [calendarOpen, setCalendarOpen] = useState(false);
@@ -142,7 +143,7 @@ export default function DarkShell({ screensaverOn, onWakeFromScreensaver, isRefr
       {calendarOpen && <CalendarOverlay onClose={() => setCalendarOpen(false)} />}
       <EventSheet />
       <GooglePushPicker />
-      {screensaverOn && <IdleScreensaver onWake={onWakeFromScreensaver} refreshing={isRefreshing} weather={ssWeather} />}
+      {screensaverOn && <IdleScreensaver onWake={onWakeFromScreensaver} refreshing={isRefreshing} weather={ssWeather} photosEnabled={photosScreensaver} />}
     </div>
   );
 }

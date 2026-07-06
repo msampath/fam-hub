@@ -23,6 +23,8 @@ export interface AccountSettings {
   onLinkProfile?: () => void;
   idleTimeoutMs: number;
   onChangeIdleTimeout: (ms: number) => void;
+  photosScreensaver: boolean;
+  onChangePhotosScreensaver: (on: boolean) => void;
   signOutMs: number;
   onChangeSignOut: (ms: number) => void;
   remindersEnabled: boolean;
@@ -211,6 +213,12 @@ export default function Manage({ account, onClose }: ManageProps) {
             <label className="flex items-center justify-between gap-3 text-sm font-semibold" style={{ color: C.primary }}>
               <span>Screensaver after</span>
               <Select value={account.idleTimeoutMs} onChange={account.onChangeIdleTimeout} options={IDLE_TIMEOUT_OPTIONS} />
+            </label>
+            <label className="flex items-center justify-between gap-3 text-sm font-semibold" style={{ color: C.primary }}>
+              <span>Photos screensaver <span className="text-xs font-normal" style={{ color: C.muted }}>(family photos behind the clock, from the box's photos folder — this device only)</span></span>
+              <button type="button" onClick={() => account.onChangePhotosScreensaver(!account.photosScreensaver)} className="rounded-[10px] px-3 py-1.5 text-xs font-extrabold" style={{ border: `2px solid ${account.photosScreensaver ? C.emerald : C.elevated}`, color: account.photosScreensaver ? C.emerald : C.muted, background: account.photosScreensaver ? `${C.emerald}14` : 'transparent' }}>
+                {account.photosScreensaver ? 'On' : 'Off'}
+              </button>
             </label>
             <label className="flex items-center justify-between gap-3 text-sm font-semibold" style={{ color: C.primary }}>
               <span>Auto sign-out</span>

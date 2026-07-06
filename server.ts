@@ -3,7 +3,7 @@ import type { Request, Response, NextFunction } from 'express';
 import compression from 'compression';
 import helmet from 'helmet';
 import path from 'path';
-import { readFileSync } from 'node:fs';
+import { readFileSync, promises as fsp } from 'node:fs';
 import dotenv from 'dotenv';
 import { randomUUID, scryptSync, randomBytes, timingSafeEqual, createHash } from 'crypto';
 import { GoogleGenAI, Type } from '@google/genai';
@@ -1611,6 +1611,71 @@ app.post('/api/vision-scan-pantry', requireAuth, aiRateLimit, async (req, res) =
   } catch (error: any) {
     console.error('Error scanning pantry photo: ', error);
     return aiErrorResponse(res, error, 'An error occurred while scanning the photo');
+  }
+});
+
+// ── Photos screensaver corpus (W6) ── a watched LOCAL folder (PHOTOS_DIR, default ./data/photos —
+// beside the appliance's SQLite file): the family drops photos in by USB/network share, or the
+// (post-OAuth-verification) Google-Photos Picker import uploads here. createTime = a `<name>.json`
+// sidecar's {createTime} when present (the Picker path writes real capture times), else file mtime —
+// the screensaver's date-window weighting works off whichever it gets. Bytes never leave the box.
+const PHOTOS_DIR = path.resolve(process.env.PHOTOS_DIR || './data/photos');
+const PHOTO_EXT = /\.(jpe?g|png|webp|gif)$/i;
+const photoPathFor = (name: string): string | null => {
+  const base = path.basename(String(name || ''));
+  if (base !== name || !PHOTO_EXT.test(base)) return null; // traversal-proof: a bare basename only
+  return path.join(PHOTOS_DIR, base);
+};
+
+app.get('/api/photos/list', requireAuth, async (_req, res) => {
+  try {
+    const entries = await fsp.readdir(PHOTOS_DIR).catch(() => [] as string[]);
+    const photos: { name: string; createTime: string }[] = [];
+    for (const name of entries.slice(0, 1000)) {
+      if (!PHOTO_EXT.test(name)) continue;
+      try {
+        const st = await fsp.stat(path.join(PHOTOS_DIR, name));
+        let createTime = st.mtime.toISOString();
+        try {
+          const sidecar = JSON.parse(await fsp.readFile(path.join(PHOTOS_DIR, `${name}.json`), 'utf8'));
+          if (typeof sidecar?.createTime === 'string' && !Number.isNaN(Date.parse(sidecar.createTime))) createTime = sidecar.createTime;
+        } catch { /* no sidecar → mtime */ }
+        photos.push({ name, createTime });
+        if (photos.length >= 500) break; // sane corpus cap for a wall tablet
+      } catch { /* unreadable entry → skip */ }
+    }
+    return res.json({ photos });
+  } catch (e: any) {
+    console.error('photos/list error:', e?.message || e);
+    return res.json({ photos: [] }); // best-effort: the screensaver falls back to the plain clock
+  }
+});
+
+app.get('/api/photos/file/:name', requireAuth, (req, res) => {
+  const p = photoPathFor(req.params.name);
+  if (!p) return res.status(400).json({ error: 'Invalid photo name.' });
+  return res.sendFile(p, err => { if (err && !res.headersSent) res.status(404).json({ error: 'Photo not found.' }); });
+});
+
+// Import landing endpoint (the browser-side Picker flow downloads each picked photo within Google's
+// 60-minute baseUrl window and uploads it here with its REAL createTime; also usable by any authed
+// uploader). Size-capped; name is traversal-proofed by photoPathFor.
+app.post('/api/photos/upload', requireAuth, async (req, res) => {
+  try {
+    const { name, imageBase64, createTime } = req.body || {};
+    const p = photoPathFor(String(name || ''));
+    if (!p || !imageBase64) return res.status(400).json({ error: 'A valid image name and data are required.' });
+    const buf = Buffer.from(String(imageBase64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+    if (!buf.length || buf.length > 15 * 1024 * 1024) return res.status(400).json({ error: 'Image must be under 15 MB.' });
+    await fsp.mkdir(PHOTOS_DIR, { recursive: true });
+    await fsp.writeFile(p, buf);
+    if (typeof createTime === 'string' && !Number.isNaN(Date.parse(createTime))) {
+      await fsp.writeFile(`${p}.json`, JSON.stringify({ createTime }));
+    }
+    return res.json({ ok: true, name: path.basename(p) });
+  } catch (e: any) {
+    console.error('photos/upload error:', e?.message || e);
+    return res.status(500).json({ error: 'Upload failed.' });
   }
 });
 
