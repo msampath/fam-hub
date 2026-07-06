@@ -3,6 +3,7 @@ import { uuid } from '../utils/uuid';
 import { safeParseArray } from './usePersistedCollection';
 import { apiFetch } from '../supabase';
 import { normalizeShoppingItems } from '../utils/aiActions';
+import { mergeShoppingItems } from '../utils/shoppingMerge';
 import { aiErrorMessage } from '../utils/aiErrors';
 import { fileToScanPayload } from '../utils/imagePrep';
 import { diffDetectedVsPantry, type PantryDiff } from '../utils/visionPantry';
@@ -90,11 +91,15 @@ export function useShopping({ authorStamp, storeList, krogerListStore }: UseShop
   const groceryTexts = (items: { text?: string; store?: string }[]) =>
     normalizeShoppingItems(items, VALID_STORES).filter(i => i.store === krogerStoreList).map(i => i.text);
 
+  // Append AI/quick-add items through the merge helper so a batch NEVER duplicates against the live
+  // list (a checked-off "milk" gets re-activated, not doubled). Returns added + re-activated so the
+  // caller's "added N" messaging still reflects what actually changed.
   const appendShoppingItems = (items: { text?: string; store?: string }[]) => {
     const stamp = authorStamp();
-    const newItems = normalizeShoppingItems(items, VALID_STORES).map(i => ({ ...i, ...stamp }));
-    if (newItems.length) setShoppingList(prev => [...newItems, ...prev]);
-    return newItems.length;
+    const incoming = normalizeShoppingItems(items, VALID_STORES).map(i => ({ ...i, ...stamp }));
+    const { list, added, reactivated } = mergeShoppingItems(shoppingList, incoming);
+    if (added + reactivated) setShoppingList(list);
+    return added + reactivated;
   };
 
   const handleAddPantryItem = () => {

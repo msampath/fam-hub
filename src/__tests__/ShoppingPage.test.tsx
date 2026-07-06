@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect } from 'vitest';
-import { screen } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import ShoppingPage from '../components/shell/pages/ShoppingPage';
 import { renderWithApp } from './helpers/mockContexts';
@@ -67,26 +67,62 @@ describe('ShoppingPage', () => {
     expect(screen.getByText(/Your shopping list is empty/i)).toBeInTheDocument();
   });
 
-  it('per-store Clear removes only that store\'s completed non-staples (staples + other stores stay)', async () => {
+  it('per-store Clear is ALWAYS present and empties that store (checked + unchecked), keeping staples', async () => {
     const user = userEvent.setup();
     const list = [
       item({ id: 'c1', text: 'Paper towels', store: 'Costco', completed: true }),
-      item({ id: 'c2', text: 'Rice', store: 'Costco', completed: true, staple: true }),
-      item({ id: 'c3', text: 'Batteries', store: 'Costco' }),
-      item({ id: 'g1', text: 'Bananas', store: 'Grocery Store', completed: true }),
+      item({ id: 'c2', text: 'Rice', store: 'Costco', staple: true }),          // staple stays
+      item({ id: 'c3', text: 'Batteries', store: 'Costco' }),                    // UNCHECKED — still cleared
+      item({ id: 'g1', text: 'Bananas', store: 'Grocery Store' }),              // other store stays
     ];
     const { ctx } = renderWithApp(<ShoppingPage />, { shoppingList: list });
-    // Only groups WITH completed non-staples offer Clear: Costco (c1) and Grocery Store (g1).
-    await user.click(screen.getByLabelText('Clear done items in Costco'));
+    await user.click(screen.getByLabelText('Clear the Costco list'));
     const updater = (ctx.setShoppingList as any).mock.calls.at(-1)[0];
-    expect(updater(list).map((i: ShoppingItem) => i.id)).toEqual(['c2', 'c3', 'g1']); // c1 gone; staple + pending + other store stay
+    expect(updater(list).map((i: ShoppingItem) => i.id)).toEqual(['c2', 'g1']); // c1 + c3 gone; staple + other store stay
   });
 
-  it('hides per-store Clear when the group has no completed non-staples (and in kid mode)', () => {
-    renderWithApp(<ShoppingPage />, { shoppingList: [item({ id: 'c3', text: 'Batteries', store: 'Costco' })] });
-    expect(screen.queryByLabelText('Clear done items in Costco')).not.toBeInTheDocument();
-    renderWithApp(<ShoppingPage />, { shoppingList: [item({ id: 'c1', text: 'Paper towels', store: 'Costco', completed: true })], kidMode: true });
-    expect(screen.queryByLabelText('Clear done items in Costco')).not.toBeInTheDocument();
+  it('shows per-store Clear even with nothing checked off; hides it only in kid mode / all-staple groups', () => {
+    // Each render is scoped with `within(container)` — multiple renders in one test share `screen`.
+    // Unchecked-only group STILL shows Clear (the always-present requirement).
+    const a = renderWithApp(<ShoppingPage />, { shoppingList: [item({ id: 'c3', text: 'Batteries', store: 'Costco' })] });
+    expect(within(a.container).getByLabelText('Clear the Costco list')).toBeInTheDocument();
+    // Kid mode → hidden (destructive).
+    const b = renderWithApp(<ShoppingPage />, { shoppingList: [item({ id: 'c1', text: 'Paper towels', store: 'Costco' })], kidMode: true });
+    expect(within(b.container).queryByLabelText('Clear the Costco list')).not.toBeInTheDocument();
+    // A group of only staples → nothing to clear, so no button.
+    const c = renderWithApp(<ShoppingPage />, { shoppingList: [item({ id: 'c2', text: 'Rice', store: 'Costco', staple: true })] });
+    expect(within(c.container).queryByLabelText('Clear the Costco list')).not.toBeInTheDocument();
+  });
+
+  it('an unchecked box re-checks and a checked box UN-checks (toggle both ways)', async () => {
+    const user = userEvent.setup();
+    const { ctx } = renderWithApp(<ShoppingPage />, { shoppingList: [item({ id: 'g1', text: 'Milk', completed: true })] });
+    await user.click(screen.getByLabelText(/Mark Milk not done/i)); // the checked item's box says "not done"
+    const updater = (ctx.setShoppingList as any).mock.calls.at(-1)[0];
+    expect(updater([item({ id: 'g1', text: 'Milk', completed: true })])[0].completed).toBe(false);
+  });
+
+  it('re-typing a checked-off item RE-ACTIVATES it instead of duplicating', async () => {
+    const user = userEvent.setup();
+    const list = [item({ id: 'g1', text: 'Milk', store: 'Grocery Store', completed: true })];
+    const { ctx } = renderWithApp(<ShoppingPage />, { shoppingList: list, newShopText: 'milk', newShopStore: 'Grocery Store' });
+    await user.click(screen.getByText('Add'));
+    const next = (ctx.setShoppingList as any).mock.calls.at(-1)[0]; // addItem passes the NEW list directly
+    expect(next).toHaveLength(1);            // NOT duplicated
+    expect(next[0].id).toBe('g1');           // same row, re-activated
+    expect(next[0].completed).toBe(false);
+  });
+
+  it('surfaces a checked-off match as a tappable suggestion while typing, and re-activates it on tap', async () => {
+    const user = userEvent.setup();
+    const list = [item({ id: 'g1', text: 'Milk', store: 'Grocery Store', completed: true })];
+    const { ctx } = renderWithApp(<ShoppingPage />, { shoppingList: list, newShopText: 'mil' });
+    // /\(done\)/ keeps this off the item-row checkbox ("Mark Milk not done").
+    const chip = screen.getByRole('button', { name: /Milk.*\(done\)/i });
+    expect(chip).toBeInTheDocument();
+    await user.click(chip);
+    const updater = (ctx.setShoppingList as any).mock.calls.at(-1)[0]; // pickSuggestion → reAddStaple updater
+    expect(updater(list)[0].completed).toBe(false);
   });
 
   it('dish-ask auto-offer: sends the offered texts to Kroger and dismisses (step 5)', async () => {

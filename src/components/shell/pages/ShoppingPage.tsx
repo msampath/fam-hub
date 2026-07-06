@@ -4,6 +4,7 @@ import { useApp } from '../../../AppContext';
 import { uuid } from '../../../utils/uuid';
 import { exampleDish } from '../../../utils/shoppingHints';
 import type { ShoppingItem } from '../../../types';
+import { mergeShoppingItem } from '../../../utils/shoppingMerge';
 import { C, brutShadow } from '../theme';
 
 // Icons for the well-known default stores; any household-defined store falls back to 📦. The store
@@ -33,32 +34,53 @@ export default function ShoppingPage() {
     ...Array.from(new Set(shoppingList.map(i => i.store).filter(s => s && !storeList.includes(s)))),
   ].map(id => ({ id, icon: STORE_ICON[id] ?? '📦' }));
 
+  const [addNote, setAddNote] = useState<string | null>(null); // transient feedback under the add form
+
   const toggle = (id: string) =>
     setShoppingList(prev => prev.map(i => (i.id === id ? { ...i, completed: !i.completed } : i)));
   const deleteItem = (id: string) => setShoppingList(prev => prev.filter(i => i.id !== id));
   const toggleStaple = (id: string) => setShoppingList(prev => prev.map(i => (i.id === id ? { ...i, staple: !i.staple } : i)));
-  // Clear completed items, but KEEP staples (they're recurring) so they can be re-added.
+  // Clear completed items across all stores, but KEEP staples (they're recurring).
   const clearCompleted = () => setShoppingList(prev => prev.filter(i => !i.completed || i.staple));
-  // Same, scoped to ONE store's list (per-group Clear button).
-  const clearStoreCompleted = (store: string) =>
-    setShoppingList(prev => prev.filter(i => i.store !== store || !i.completed || i.staple));
-  // One-tap re-add a checked-off staple as a fresh pending item (dedupe by text+store).
-  const reAddStaple = (item: ShoppingItem) => setShoppingList(prev => {
-    if (prev.some(i => i.text.toLowerCase() === item.text.toLowerCase() && i.store === item.store && !i.completed)) return prev;
-    return [{ ...item, id: 'shop-' + uuid(), completed: false, ...authorStamp() }, ...prev];
-  });
+  // Per-store Clear (always visible): empty this store's list — checked AND unchecked — but KEEP staples
+  // (the recurring "don't lose these" items). Single tap, no confirm (matches the per-item delete); kid
+  // mode hides it (destructive), like the other destructive taps.
+  const clearStore = (store: string) =>
+    setShoppingList(prev => prev.filter(i => i.store !== store || i.staple));
+  // Re-add a checked-off staple = UNCHECK it in place (never a duplicate row): it becomes active again
+  // and stays a starred staple. (Was a fresh-copy prepend; the merge contract makes uncheck-in-place right.)
+  const reAddStaple = (item: ShoppingItem) =>
+    setShoppingList(prev => prev.map(i => (i.id === item.id ? { ...i, completed: false } : i)));
 
-  // Manual quick-add (alongside the copilot): direct prepend to the list.
+  // Manual quick-add — routed through the merge contract so it NEVER duplicates: a checked-off match is
+  // re-activated (unchecked), an already-active match is a no-op, else it's added.
   const addItem = (e: FormEvent) => {
     e.preventDefault();
     const text = newShopText.trim();
     if (!text) return;
-    const item: ShoppingItem = {
-      // Clamp a stale selection (a store renamed/removed in Manage after this select initialized).
-      id: 'shop-' + uuid(), text, completed: false, store: storeList.includes(newShopStore) ? newShopStore : storeList[0],
+    const store = storeList.includes(newShopStore) ? newShopStore : storeList[0]; // clamp a stale selection
+    const incoming: ShoppingItem = {
+      id: 'shop-' + uuid(), text, completed: false, store,
       quantity: newShopQty.trim() || undefined, ...authorStamp(),
     };
-    setShoppingList(prev => [item, ...prev]);
+    const { list, outcome } = mergeShoppingItem(shoppingList, incoming);
+    setShoppingList(list);
+    setAddNote(outcome === 'reactivated' ? `Re-added "${text}" — it was checked off.`
+      : outcome === 'exists' ? `"${text}" is already on your ${store} list.`
+      : null);
+    setNewShopText('');
+    setNewShopQty('');
+  };
+
+  // Live suggestions: as the user types, surface EXISTING matches (checked-off first) so they re-activate
+  // one instead of typing a duplicate — the "show up as a suggestion" behavior. Capped, query ≥ 2 chars.
+  const q = newShopText.trim().toLowerCase();
+  const suggestions = q.length >= 2
+    ? [...shoppingList].sort((a, b) => Number(b.completed) - Number(a.completed))
+        .filter(i => i.text.toLowerCase().includes(q)).slice(0, 3)
+    : [];
+  const pickSuggestion = (item: ShoppingItem) => {
+    if (item.completed) { reAddStaple(item); setAddNote(`Re-added "${item.text}".`); }
     setNewShopText('');
     setNewShopQty('');
   };
@@ -267,36 +289,57 @@ export default function ShoppingPage() {
         )}
 
         {/* Manual quick-add (alongside the copilot) */}
-        <form onSubmit={addItem} className="flex flex-wrap items-center gap-2">
-          <input
-            value={newShopText}
-            onChange={e => setNewShopText(e.target.value)}
-            placeholder="Add an item…"
-            aria-label="Add shopping item"
-            className="min-w-0 flex-1 rounded-[12px] px-3.5 py-2.5 text-base font-semibold outline-none"
-            style={{ background: C.card, border: `2px solid ${C.elevated}`, color: C.primary }}
-          />
-          <input
-            value={newShopQty}
-            onChange={e => setNewShopQty(e.target.value)}
-            placeholder="Qty"
-            aria-label="Quantity"
-            className="w-20 rounded-[12px] px-3 py-2.5 text-base font-semibold outline-none"
-            style={{ background: C.card, border: `2px solid ${C.elevated}`, color: C.primary }}
-          />
-          <select
-            value={newShopStore}
-            onChange={e => setNewShopStore(e.target.value as typeof newShopStore)}
-            aria-label="Store"
-            className="rounded-[12px] px-3 py-2.5 text-sm font-semibold outline-none"
-            style={{ background: C.card, border: `2px solid ${C.elevated}`, color: C.primary }}
-          >
-            {STORES.map(s => <option key={s.id} value={s.id} style={{ background: C.card }}>{s.icon} {s.id}</option>)}
-          </select>
-          <button type="submit" className="flex items-center gap-1.5 rounded-[12px] px-4 py-2.5 text-sm font-extrabold" style={{ border: `2px solid ${C.indigo}`, boxShadow: brutShadow(C.indigoShadow, 3), background: `${C.indigo}14`, color: C.indigo }}>
-            <Plus size={16} /> Add
-          </button>
-        </form>
+        <div className="flex flex-col gap-2">
+          <form onSubmit={addItem} className="flex flex-wrap items-center gap-2">
+            <input
+              value={newShopText}
+              onChange={e => { setNewShopText(e.target.value); if (addNote) setAddNote(null); }}
+              placeholder="Add an item…"
+              aria-label="Add shopping item"
+              className="min-w-0 flex-1 rounded-[12px] px-3.5 py-2.5 text-base font-semibold outline-none"
+              style={{ background: C.card, border: `2px solid ${C.elevated}`, color: C.primary }}
+            />
+            <input
+              value={newShopQty}
+              onChange={e => setNewShopQty(e.target.value)}
+              placeholder="Qty"
+              aria-label="Quantity"
+              className="w-20 rounded-[12px] px-3 py-2.5 text-base font-semibold outline-none"
+              style={{ background: C.card, border: `2px solid ${C.elevated}`, color: C.primary }}
+            />
+            <select
+              value={newShopStore}
+              onChange={e => setNewShopStore(e.target.value as typeof newShopStore)}
+              aria-label="Store"
+              className="rounded-[12px] px-3 py-2.5 text-sm font-semibold outline-none"
+              style={{ background: C.card, border: `2px solid ${C.elevated}`, color: C.primary }}
+            >
+              {STORES.map(s => <option key={s.id} value={s.id} style={{ background: C.card }}>{s.icon} {s.id}</option>)}
+            </select>
+            <button type="submit" className="flex items-center gap-1.5 rounded-[12px] px-4 py-2.5 text-sm font-extrabold" style={{ border: `2px solid ${C.indigo}`, boxShadow: brutShadow(C.indigoShadow, 3), background: `${C.indigo}14`, color: C.indigo }}>
+              <Plus size={16} /> Add
+            </button>
+          </form>
+          {/* Live suggestions from what's already on the list (checked-off first) — tap to re-activate
+              instead of adding a duplicate. This is what keeps a re-typed item from doubling. */}
+          {suggestions.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {suggestions.map(item => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => pickSuggestion(item)}
+                  className="flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-semibold"
+                  style={{ border: `2px solid ${item.completed ? C.amber : C.elevated}`, background: item.completed ? `${C.amber}14` : C.card, color: item.completed ? C.amber : C.muted }}
+                  title={item.completed ? 'Checked off — tap to re-add' : `Already on your ${item.store} list`}
+                >
+                  {item.completed ? '↩︎ ' : '✓ '}{item.text} · {item.store}{item.completed ? ' (done)' : ''}
+                </button>
+              ))}
+            </div>
+          )}
+          {addNote && <div className="text-[12px] font-semibold" style={{ color: C.muted }}>{addNote}</div>}
+        </div>
 
         {groups.length === 0 ? (
           <div className="rounded-[20px] px-4 py-12 text-center text-sm font-semibold" style={{ border: `2px solid ${C.elevated}`, color: C.ink }}>
@@ -308,12 +351,12 @@ export default function ShoppingPage() {
               <div key={group.id} className="rounded-[20px] p-5" style={{ border: `2px solid ${C.elevated}`, background: C.card }}>
                 <div className="mb-3.5 flex items-center gap-2.5 pb-3 text-sm font-extrabold uppercase tracking-[0.08em]" style={{ color: C.primary, borderBottom: `2px solid ${C.elevated}` }}>
                   <span>{group.icon}</span>{group.id}
-                  {/* Per-store Clear: only this store's checked-off items (staples stay, like the global one). */}
-                  {!kidMode && group.items.some(i => i.completed && !i.staple) && (
+                  {/* Per-store Clear — ALWAYS present (empties this store's list; staples stay). Kid mode hides it. */}
+                  {!kidMode && group.items.some(i => !i.staple) && (
                     <button
                       type="button"
-                      onClick={() => clearStoreCompleted(group.id)}
-                      aria-label={`Clear done items in ${group.id}`}
+                      onClick={() => clearStore(group.id)}
+                      aria-label={`Clear the ${group.id} list`}
                       className="ml-auto rounded-[8px] px-2.5 py-1 text-[11px] font-bold normal-case tracking-normal"
                       style={{ border: `2px solid ${C.elevated}`, background: C.app, color: C.muted }}
                     >
