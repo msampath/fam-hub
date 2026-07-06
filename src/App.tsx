@@ -2867,7 +2867,12 @@ export default function App() {
       const res = await apiFetch('/api/copilot', {
         method: 'POST',
         body: JSON.stringify({
-          events: events,
+          // W8 perf: ship only today-or-later events. VERIFIED server-side: /api/copilot immediately
+          // runs filterUpcomingEvents and every downstream read (prompt, availability, sanitize,
+          // suggestions) uses that filtered list — months of past events were upload dead weight on
+          // every turn. One day of slack absorbs client/server timezone skew; the server's own filter
+          // stays the authority on what "upcoming" means.
+          events: events.filter(e => String(e.end || e.start || '').slice(0, 10) >= toLocalDateStr(new Date(Date.now() - 24 * 3600 * 1000))),
           prompt: query,
           familyMembers: familyMembers.map(m => ({ name: m.name, age: m.age })), // names + ages (don't guess ages)
           home: settings[0], // home location (if set) for weather grounding; server ignores if absent
