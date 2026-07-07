@@ -48,6 +48,10 @@ export default function ShoppingPage() {
   // mode hides it (destructive), like the other destructive taps.
   const clearStore = (store: string) =>
     setShoppingList(prev => prev.filter(i => i.store !== store || i.staple));
+  // Master check/uncheck for ONE store's list: any pending → check ALL; all checked → uncheck ALL.
+  // Reversible (nothing is removed — Clear is the destructive one); staples toggle like any item.
+  const toggleStore = (store: string, completed: boolean) =>
+    setShoppingList(prev => prev.map(i => (i.store === store ? { ...i, completed } : i)));
   // Re-add a checked-off staple = UNCHECK it in place (never a duplicate row): it becomes active again
   // and stays a starred staple. (Was a fresh-copy prepend; the merge contract makes uncheck-in-place right.)
   const reAddStaple = (item: ShoppingItem) =>
@@ -353,6 +357,19 @@ export default function ShoppingPage() {
                       style={{ border: `2px solid ${C.emerald}`, background: `${C.emerald}14`, color: C.emerald }}
                     >
                       🛒 {krogerBusy ? 'Matching…' : `Send to ${storeBindings[group.id].name}`}
+                    </button>
+                  )}
+                  {/* Master check/uncheck — one tap marks the whole list done (or brings it all back).
+                      Reversible, but still a bulk action → kid mode hides it, like Clear. */}
+                  {!kidMode && group.items.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => toggleStore(group.id, group.items.some(i => !i.completed))}
+                      aria-label={group.items.some(i => !i.completed) ? `Check all ${group.id} items` : `Uncheck all ${group.id} items`}
+                      className="ml-auto rounded-[8px] px-2.5 py-1 text-[11px] font-bold normal-case tracking-normal"
+                      style={{ border: `2px solid ${C.elevated}`, background: C.app, color: C.muted }}
+                    >
+                      {group.items.some(i => !i.completed) ? '✓ Check all' : 'Uncheck all'}
                     </button>
                   )}
                   {/* Per-store Clear — ALWAYS present (empties this store's list; staples stay). Kid mode hides it. */}

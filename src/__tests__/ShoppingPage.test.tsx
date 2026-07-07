@@ -94,6 +94,31 @@ describe('ShoppingPage', () => {
     expect(within(c.container).queryByLabelText('Clear the Costco list')).not.toBeInTheDocument();
   });
 
+  it("master Check all marks ONLY that store's items done; flips to Uncheck all and reverses", async () => {
+    const user = userEvent.setup();
+    const list = [
+      item({ id: 'c1', text: 'Paper towels', store: 'Costco', completed: true }),
+      item({ id: 'c2', text: 'Batteries', store: 'Costco' }),                    // pending → "Check all" shows
+      item({ id: 'g1', text: 'Bananas', store: 'Grocery Store' }),               // other store untouched
+    ];
+    const a = renderWithApp(<ShoppingPage />, { shoppingList: list });
+    await user.click(within(a.container).getByLabelText('Check all Costco items'));
+    const checkAll = (a.ctx.setShoppingList as any).mock.calls.at(-1)[0](list);
+    expect(checkAll.find((i: ShoppingItem) => i.id === 'c2').completed).toBe(true);
+    expect(checkAll.find((i: ShoppingItem) => i.id === 'g1').completed).toBeFalsy(); // only Costco toggled
+
+    // All checked → the same button reads "Uncheck all" and brings everything back.
+    const done = [item({ id: 'c1', text: 'Paper towels', store: 'Costco', completed: true })];
+    const b = renderWithApp(<ShoppingPage />, { shoppingList: done });
+    await user.click(within(b.container).getByLabelText('Uncheck all Costco items'));
+    const uncheckAll = (b.ctx.setShoppingList as any).mock.calls.at(-1)[0](done);
+    expect(uncheckAll[0].completed).toBe(false);
+
+    // Kid mode → hidden (bulk action, same rule as Clear).
+    const c = renderWithApp(<ShoppingPage />, { shoppingList: list, kidMode: true });
+    expect(within(c.container).queryByLabelText('Check all Costco items')).not.toBeInTheDocument();
+  });
+
   it('an unchecked box re-checks and a checked box UN-checks (toggle both ways)', async () => {
     const user = userEvent.setup();
     const { ctx } = renderWithApp(<ShoppingPage />, { shoppingList: [item({ id: 'g1', text: 'Milk', completed: true })] });
