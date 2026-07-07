@@ -9,6 +9,7 @@
 // applies auto actions exactly as before and now also records them in the Action Ledger. The new
 // tiers ('confirm'/'stepup') and the Inbox/PIN that act on them arrive in A2/A3.
 import type { CalendarEvent, FamilyMember, ShoppingItem, RiskTier } from '../types';
+import { ACTION_CONTRACT, COPILOT_ACTIONS, type ActionType } from '../mcp/actionContract';
 import {
   buildEventFromPayload,
   buildEventUpdateFromPayload,
@@ -47,146 +48,72 @@ export interface ConciergeTool {
   validate: (payload: any, ctx: ToolValidateCtx) => unknown | null;
 }
 
+// Build a registry entry, sourcing its risk tier + apply mode from the shared ACTION_CONTRACT (single
+// source of truth) so a tool's gating can't drift from the contract the Express sanitizer + Python agent
+// also read. applyMode follows the tier: auto tier auto-applies; confirm/stepup stage for approval. The
+// per-tool `validate` still DELEGATES to the aiActions.ts trust boundary — the registry never reimplements it.
+type ToolValidate = (payload: any, ctx: ToolValidateCtx) => unknown | null;
+function tool(name: ActionType, validate: ToolValidate): ConciergeTool {
+  const tier = ACTION_CONTRACT[name].tier;
+  return { name, riskTier: tier, applyMode: tier === 'auto' ? 'auto' : 'confirm', validate };
+}
+
 export const TOOL_REGISTRY: Record<string, ConciergeTool> = {
-  create_event: {
-    name: 'create_event',
-    riskTier: 'auto',
-    applyMode: 'auto',
-    validate: (p, ctx) => buildEventFromPayload(p, 'cop', ctx.familyMembers, ctx.today),
-  },
-  add_chore: {
-    name: 'add_chore',
-    riskTier: 'auto',
-    applyMode: 'auto',
-    validate: (p, ctx) => {
-      const chores = buildChoresFromPayload(p, ctx.familyMembers);
-      return chores.length ? chores : null;
-    },
-  },
+  create_event: tool('create_event', (p, ctx) => buildEventFromPayload(p, 'cop', ctx.familyMembers, ctx.today)),
+  add_chore: tool('add_chore', (p, ctx) => {
+    const chores = buildChoresFromPayload(p, ctx.familyMembers);
+    return chores.length ? chores : null;
+  }),
   // Chore delete/edit (confirm tier — destructive/mutating): same pattern as delete_document. The
   // validator only shape-checks the reference; the client resolves it against the live chores list and
   // applies on approval (the chores collection is client-owned + RLS-synced).
-  delete_chore: {
-    name: 'delete_chore',
-    riskTier: 'confirm',
-    applyMode: 'confirm',
-    validate: (p) => buildChoreRef(p),
-  },
+  delete_chore: tool('delete_chore', (p) => buildChoreRef(p)),
   // Bulk clear — no payload needed (the client stages every current chore id for one approval).
-  clear_chores: {
-    name: 'clear_chores',
-    riskTier: 'confirm',
-    applyMode: 'confirm',
-    validate: () => ({ all: true }),
-  },
-  update_chore: {
-    name: 'update_chore',
-    riskTier: 'confirm',
-    applyMode: 'confirm',
-    validate: (p, ctx) => buildChoreUpdate(p, ctx.familyMembers),
-  },
+  clear_chores: tool('clear_chores', () => ({ all: true })),
+  update_chore: tool('update_chore', (p, ctx) => buildChoreUpdate(p, ctx.familyMembers)),
   // Goals as tracked objects (A6) — auto tier (reversible, internal): the agent records/updates a goal
   // and its plan (steps[]). Client-owned (not in TOOL_COLLECTION); the client upserts it into the goals
   // collection on ingest, which RLS-syncs so the scheduler can later read + nudge it.
-  set_goal: {
-    name: 'set_goal',
-    riskTier: 'auto',
-    applyMode: 'auto',
-    validate: (p) => buildGoalFromPayload(p),
-  },
+  set_goal: tool('set_goal', (p) => buildGoalFromPayload(p)),
   // Delete a goal (completes CRUD) — auto tier, client-owned like set_goal. Client removes the match.
-  delete_goal: {
-    name: 'delete_goal',
-    riskTier: 'auto',
-    applyMode: 'auto',
-    validate: (p) => buildGoalDelete(p),
-  },
+  delete_goal: tool('delete_goal', (p) => buildGoalDelete(p)),
   // The weekly dinner plan — auto tier (reversible, internal), client-owned like set_goal (NOT in
   // TOOL_COLLECTION): the client upserts it by weekStart into the mealplan collection on ingest.
-  set_meal_plan: {
-    name: 'set_meal_plan',
-    riskTier: 'auto',
-    applyMode: 'auto',
-    validate: (p, ctx) => buildMealPlanFromPayload(p, ctx.today),
-  },
+  set_meal_plan: tool('set_meal_plan', (p, ctx) => buildMealPlanFromPayload(p, ctx.today)),
   // Delete a meal plan (completes CRUD) — auto tier, client-owned like set_meal_plan; consistent with
   // set_meal_plan's replace-a-week (also auto, also destroys prior state). Client removes the match.
-  delete_meal_plan: {
-    name: 'delete_meal_plan',
-    riskTier: 'auto',
-    applyMode: 'auto',
-    validate: (p) => buildMealPlanDelete(p),
-  },
-  add_shopping_item: {
-    name: 'add_shopping_item',
-    riskTier: 'auto',
-    applyMode: 'auto',
-    validate: (p, ctx) => {
-      // Accept either a single {text,store} or a {items:[...]} payload (mirrors applyCopilotActions).
-      const raw = Array.isArray(p?.items) ? p.items : [{ text: p?.text, store: p?.store }];
-      const items = normalizeShoppingItems(raw, ctx.validStores);
-      return items.length ? items : null;
-    },
-  },
-  update_event: {
-    name: 'update_event',
-    riskTier: 'confirm',
-    applyMode: 'confirm',
-    validate: (p, ctx) => buildEventUpdateFromPayload(p, ctx.events, ctx.familyMembers),
-  },
+  delete_meal_plan: tool('delete_meal_plan', (p) => buildMealPlanDelete(p)),
+  add_shopping_item: tool('add_shopping_item', (p, ctx) => {
+    // Accept either a single {text,store} or a {items:[...]} payload (mirrors applyCopilotActions).
+    const raw = Array.isArray(p?.items) ? p.items : [{ text: p?.text, store: p?.store }];
+    const items = normalizeShoppingItems(raw, ctx.validStores);
+    return items.length ? items : null;
+  }),
+  update_event: tool('update_event', (p, ctx) => buildEventUpdateFromPayload(p, ctx.events, ctx.familyMembers)),
   // Event delete (confirm tier — destructive): shape-check-then-client-resolve, like delete_chore. The
   // client resolves the reference against the live events on approval and removes the match.
-  delete_event: {
-    name: 'delete_event',
-    riskTier: 'confirm',
-    applyMode: 'confirm',
-    validate: (p) => buildEventRef(p),
-  },
+  delete_event: tool('delete_event', (p) => buildEventRef(p)),
   // Shopping-item delete (confirm tier) — same shape-check-then-client-resolve pattern as delete_chore.
-  delete_shopping_item: {
-    name: 'delete_shopping_item',
-    riskTier: 'confirm',
-    applyMode: 'confirm',
-    validate: (p) => buildShoppingItemRef(p),
-  },
+  delete_shopping_item: tool('delete_shopping_item', (p) => buildShoppingItemRef(p)),
   // Reservation DRAFT (B3) — confirm tier, NO money moves (no-payment invariant): stages a booking
   // deep-link the parent opens to book themselves. Amazon add-to-cart (B4) registers the same way.
-  reserve: {
-    name: 'reserve',
-    riskTier: 'confirm',
-    applyMode: 'confirm',
-    validate: (p) => buildReservationDraft(p),
-  },
+  reserve: tool('reserve', (p) => buildReservationDraft(p)),
   // Amazon add-to-cart DRAFT (B4) — confirm tier, no checkout (no-payment invariant); same draft
   // mechanism as reserve (a cart/search link the parent completes in the Amazon app).
-  add_to_cart: {
-    name: 'add_to_cart',
-    riskTier: 'confirm',
-    applyMode: 'confirm',
-    validate: (p) => buildCartDraft(p),
-  },
+  add_to_cart: tool('add_to_cart', (p) => buildCartDraft(p)),
   // Library doc management via chat. move_document just recategorizes (reversible) → auto; delete_document
   // is destructive → confirm (staged in Approvals). Both resolve the target doc by id OR name at apply time
   // (App handler / MCP handler); the validators here only shape-check the reference.
-  move_document: {
-    name: 'move_document',
-    riskTier: 'auto',
-    applyMode: 'auto',
-    validate: (p) => (p?.id || p?.name ? { id: p?.id, name: p?.name, folder: p?.folder } : null),
-  },
-  delete_document: {
-    name: 'delete_document',
-    riskTier: 'confirm',
-    applyMode: 'confirm',
-    validate: (p) => (p?.id || p?.name ? { id: p?.id, name: p?.name } : null),
-  },
+  move_document: tool('move_document', (p) => (p?.id || p?.name ? { id: p?.id, name: p?.name, folder: p?.folder } : null)),
+  delete_document: tool('delete_document', (p) => (p?.id || p?.name ? { id: p?.id, name: p?.name } : null)),
   // NOTE (B5 Home Assistant control) is intentionally NOT registered yet: it's a 'stepup' physical
   // action with no executor until C2 wires HA, and shipping a PIN-ceremony that silently no-ops is a
   // fabricated-success anti-pattern. The validator `buildHaActionDraft` (aiActions.ts) is the scaffold;
   // register `home_control` here + in the server allowlist + the harness prompt together with the C2 executor.
 };
 
-// The allowlist of action types the concierge accepts, derived from the registry. server.ts keeps its
-// OWN literal `ALLOWED_COPILOT_ACTIONS`; a parity test (toolRegistry.test.ts) asserts the two match so
-// they can't silently drift.
-export const ALLOWED_COPILOT_ACTIONS = Object.keys(TOOL_REGISTRY);
+// The allowlist of action types the concierge accepts — the client-applied actions in the shared
+// ACTION_CONTRACT (client:true). server.ts derives its OWN allowlist from the SAME contract; a parity
+// test (toolRegistry.test.ts) asserts the two match AND that TOOL_REGISTRY registers exactly these, so
+// the three declarations can't silently drift.
+export const ALLOWED_COPILOT_ACTIONS = COPILOT_ACTIONS;

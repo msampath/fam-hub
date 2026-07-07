@@ -35,13 +35,14 @@
 !/.github/workflows/
 /.github/workflows/*
 !/.github/workflows/appliance-images.yml
-# scripts/: allow ONLY the installer + the eval runner + the voice-bridge PoC (the dir also holds a
-# Playwright profile + scratch — keep those ignored).
+# scripts/: allow ONLY the installer + the eval runner + the voice-bridge PoC + the action-contract
+# generator (the dir also holds a Playwright profile + scratch — keep those ignored).
 !/scripts/
 /scripts/*
 !/scripts/install.sh
 !/scripts/eval-quickpath.ts
 !/scripts/voice-bridge-poc.mjs
+!/scripts/genActionContract.ts
 
 # .claude/: ship ONLY the repo's dev-workflow skills (add-a-specialist / verify-suite /
 # add-copilot-action); local runner config (launch.json, settings.local.json) stays untracked.

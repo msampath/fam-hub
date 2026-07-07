@@ -89,3 +89,16 @@ def test_collect_actions_dedups_across_events_with_a_shared_seen_set():
     e2 = _Event([_FR(_mcp("create_event", artifact={"title": "Zoo"}))])  # re-emitted (same tool+artifact)
     actions = bridge.collect_actions(e1, seen) + bridge.collect_actions(e2, seen)
     assert len(actions) == 1
+
+
+def test_mutating_tools_is_derived_from_the_shared_contract_mirror():
+    # MUTATING_TOOLS is no longer a hand-kept literal — it's derived from action_contract.json (the committed
+    # mirror of the TS single source of truth, src/mcp/actionContract.ts). The TS freshness test keeps the
+    # JSON in lockstep; here we prove the Python loader derives the right set (and drops the IoT stub).
+    import pathlib
+    contract = json.loads((pathlib.Path(bridge.__file__).parent / "action_contract.json").read_text(encoding="utf-8"))
+    expected = {name for name, spec in contract.items() if spec.get("mutating")}
+    assert bridge.MUTATING_TOOLS == expected
+    # The known writers are in; the honest IoT stub (home_control) never mutates and is out.
+    assert {"create_event", "prepare_handoff", "suggest_event", "set_goal", "delete_meal_plan"} <= bridge.MUTATING_TOOLS
+    assert "home_control" not in bridge.MUTATING_TOOLS

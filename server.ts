@@ -21,6 +21,7 @@ import {
   buildCartAddBody, KROGER_MATCH_SCHEMA, krogerSearchTerm, krogerFallbackTerm, type ProductCandidate,
 } from './src/utils/krogerApi';
 import { buildRevisePrompt } from './src/utils/reviseDraft';
+import { COPILOT_ACTIONS, selectorSatisfied } from './src/mcp/actionContract';
 import { validateExtractedEvents } from './src/utils/extractedEvents';
 import { filterUnrequestedHolidayDeletes } from './src/utils/holidayGuard';
 import { buildBriefing, type Briefing } from './src/utils/briefing';
@@ -862,9 +863,10 @@ export function dedupeActions(actions: any[]): any[] {
 // actions whose type isn't allowed; for update_event requires a target selector (id or matchTitle)
 // so a malformed "update everything" can't slip through. Pairs with the deferred copilot-action-
 // validation security item. Order-preserving.
-// Exported so a unit test can assert parity with the client Tool Registry (src/utils/toolRegistry.ts
-// ALLOWED_COPILOT_ACTIONS) — the two allowlists must never drift.
-export const ALLOWED_COPILOT_ACTIONS = new Set(['create_event', 'update_event', 'delete_event', 'add_chore', 'add_shopping_item', 'reserve', 'add_to_cart', 'move_document', 'delete_document', 'delete_chore', 'clear_chores', 'update_chore', 'delete_shopping_item', 'set_goal', 'delete_goal', 'set_meal_plan', 'delete_meal_plan']);
+// Derived from the SHARED action contract (src/mcp/actionContract.ts) — the SAME source the client Tool
+// Registry reads — so the allowlist is declared once, not re-typed here. A parity test still asserts the
+// two agree (belt and suspenders).
+export const ALLOWED_COPILOT_ACTIONS = new Set(COPILOT_ACTIONS);
 // Collision key for find-vs-create: date + a normalized title (lowercased, punctuation/whitespace
 // collapsed) so a model paraphrase ("Zoo!" vs "zoo") still matches an existing calendar event.
 function eventCollisionKey(start: any, title: any): string {
@@ -875,42 +877,14 @@ export function sanitizeCopilotActions(actions: any[], existingEvents: any[] = [
   const existing = new Set((Array.isArray(existingEvents) ? existingEvents : []).map(e => eventCollisionKey(e?.start, e?.title)));
   return actions.filter(a => {
     if (!a || !ALLOWED_COPILOT_ACTIONS.has(a.type)) return false;
-    if (a.type === 'update_event') {
-      const p = a.payload || {};
-      return !!(p.id || (typeof p.matchTitle === 'string' && p.matchTitle.trim()));
-    }
-    // Library doc tools need a doc reference (id or name) to resolve the target.
-    if (a.type === 'move_document' || a.type === 'delete_document') {
-      const p = a.payload || {};
-      return !!(p.id || (typeof p.name === 'string' && p.name.trim()));
-    }
-    // Chore delete/edit need a reference (id, or title/matchTitle) so a malformed "delete everything"
-    // can't slip through (clear_chores is the explicit bulk verb and needs no selector).
-    if (a.type === 'delete_chore') {
-      const p = a.payload || {};
-      return !!(p.id || (typeof p.title === 'string' && p.title.trim()));
-    }
-    if (a.type === 'update_chore') {
-      const p = a.payload || {};
-      return !!(p.id || (typeof p.matchTitle === 'string' && p.matchTitle.trim()));
-    }
-    if (a.type === 'delete_shopping_item') {
-      const p = a.payload || {};
-      return !!(p.id || (typeof p.text === 'string' && p.text.trim()));
-    }
-    // Event delete needs a reference (id or title) — defense in depth so a target-less destructive
-    // delete_event can't pass the allowlist (mirrors delete_chore).
-    if (a.type === 'delete_event') {
-      const p = a.payload || {};
-      return !!(p.id || (typeof p.title === 'string' && p.title.trim()));
-    }
-    // A goal needs text (the goal itself) — drop an empty set_goal.
-    if (a.type === 'set_goal') {
-      const p = a.payload || {};
-      return typeof p.text === 'string' && !!p.text.trim();
-    }
+    // Required-selector gate, sourced from the SHARED action contract (src/mcp/actionContract.ts) — one
+    // predicate per action, so a targeted/destructive action can't slip through target-less ("delete
+    // everything"). This replaces the per-type if-ladder that only covered SOME actions; the contract now
+    // covers all of them (e.g. delete_goal/delete_meal_plan/set_meal_plan gained the server-side check too).
+    if (!selectorSatisfied(a.type, a.payload)) return false;
     // Drop a create_event that collides with an event already on the calendar — the find-vs-create
-    // rule lived only in the prompt, so a weak model could still auto-create a duplicate (Bug 3).
+    // rule lived only in the prompt, so a weak model could still auto-create a duplicate (Bug 3). (Kept
+    // inline, not in the contract: it needs the existingEvents set, not just the payload shape.)
     if (a.type === 'create_event') {
       const p = a.payload || {};
       if (p.start && p.title && existing.has(eventCollisionKey(p.start, p.title))) return false;
