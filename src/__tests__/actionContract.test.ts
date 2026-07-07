@@ -68,6 +68,12 @@ describe('selectorSatisfied — the server-side required-reference gate', () => 
     expect(selectorSatisfied('delete_meal_plan', { all: true })).toBe(true);
     expect(selectorSatisfied('delete_meal_plan', {})).toBe(false);
   });
+  it('pantry: add takes anything (none), delete needs id or text', () => {
+    expect(selectorSatisfied('add_pantry_item', {})).toBe(true);
+    expect(selectorSatisfied('delete_pantry_item', { text: 'rice' })).toBe(true);
+    expect(selectorSatisfied('delete_pantry_item', { id: 'pantry-1' })).toBe(true);
+    expect(selectorSatisfied('delete_pantry_item', {})).toBe(false);
+  });
   it('reserve/add_to_cart/doc tools', () => {
     expect(selectorSatisfied('reserve', { title: 'Cafe Flora' })).toBe(true);
     expect(selectorSatisfied('reserve', {})).toBe(false);

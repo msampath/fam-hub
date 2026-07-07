@@ -32,6 +32,7 @@ import type {
   CalendarEvent,
   WebSource,
   ShoppingItem,
+  PantryItem,
   Chore,
   XpBankEntry,
   ConnectedCalendar,
@@ -2958,6 +2959,14 @@ export default function App() {
     const planDeletes = (Array.isArray(actions) ? actions : [])
       .filter(a => a?.tool === 'delete_meal_plan' && a.artifact)
       .map(a => a.artifact as MealPlanDelete);
+    // Pantry (client-owned auto, like goals): the agent adds/removes on-hand inventory notes; the client
+    // applies the artifact to the pantry collection (RLS-synced). add is a PantryItem; delete is an id/text ref.
+    const pantryAdds = (Array.isArray(actions) ? actions : [])
+      .filter(a => a?.tool === 'add_pantry_item' && a.artifact)
+      .map(a => a.artifact as PantryItem);
+    const pantryDeletes = (Array.isArray(actions) ? actions : [])
+      .filter(a => a?.tool === 'delete_pantry_item' && a.artifact)
+      .map(a => a.artifact as { id?: string; text?: string });
     const { appliedCount, ledger, summary } = buildAgentActionResult(actions, () => 'led-' + uuid(), authorStamp());
     // Tie this turn's staged approvals to the goal it serves (Phase 1: same-turn association) so approving
     // one ADVANCES the goal's plan (the resume hook in resolveLedgerUpdate). Only the EXTERNAL/booking drafts
@@ -2976,6 +2985,9 @@ export default function App() {
     for (const d of goalDeletes) { if (d.all) setGoalsList([]); else if (d.id) deleteGoal(d.id); }
     for (const p of plans) upsertMealPlan(p);
     for (const d of planDeletes) deleteMealPlan(d);
+    // Pantry: prepend new items (skip an exact-text dupe); remove by id, else by exact text (case-insensitive).
+    for (const item of pantryAdds) setPantryList(prev => prev.some(x => x.text.toLowerCase() === item.text.toLowerCase()) ? prev : [item, ...prev]);
+    for (const d of pantryDeletes) setPantryList(prev => prev.filter(x => (d.id ? x.id !== d.id : x.text.toLowerCase() !== String(d.text || '').toLowerCase())));
     if (staged.length) setActionLedger(prev => [...prev, ...staged].slice(-LEDGER_CAP));
     // (The agent's create_event writes reach the parent's real Google Calendar via the silent auto-push effect
     // when a Push rule is connected — so we no longer stage a redundant "Push N events?" approval here. See the
@@ -2984,12 +2996,13 @@ export default function App() {
     if (goalId) staged.forEach(e => { if (GOAL_STEP_TOOLS.has(e.tool)) blockGoalStep(goalId, e.id); });
     const goalNote = goals.length ? `🎯 Tracking goal: ${goals[goals.length - 1].text}` : goalDeletes.length ? '🎯 Goal removed.' : '';
     const mealNote = plans.length ? `🍽 Dinner plan set — ${plans[plans.length - 1].days.length} day${plans[plans.length - 1].days.length === 1 ? '' : 's'} on the Today strip.` : planDeletes.length ? '🍽 Meal plan updated on the Today strip.' : '';
+    const pantryNote = (pantryAdds.length || pantryDeletes.length) ? '🥫 Pantry updated.' : '';
     // suggest_event is auto-tier + client-owned (like set_goal): the agent's outings picks ride back as
     // tap-to-add chips on this turn's assistant message (rendered by CopilotBar), NOT Approve-queue rows.
     const suggestions = (Array.isArray(actions) ? actions : [])
       .filter(a => a?.tool === 'suggest_event' && a.artifact)
       .map(a => a.artifact as CopilotSuggestion);
-    return { summary: [summary, goalNote, mealNote].filter(Boolean).join(' '), suggestions };
+    return { summary: [summary, goalNote, mealNote, pantryNote].filter(Boolean).join(' '), suggestions };
   };
 
   // Cloud-agent turn (Gemini ADK multi-agent over MCP). Returns true if it HANDLED the turn; false → the

@@ -53,6 +53,18 @@
     "client": true,
     "selector": "idOrText"
   },
+  "add_pantry_item": {
+    "tier": "auto",
+    "mutating": true,
+    "client": true,
+    "selector": "none"
+  },
+  "delete_pantry_item": {
+    "tier": "auto",
+    "mutating": true,
+    "client": true,
+    "selector": "idOrText"
+  },
   "set_goal": {
     "tier": "auto",
     "mutating": true,

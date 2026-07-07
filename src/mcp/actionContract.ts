@@ -55,6 +55,10 @@ export const ACTION_CONTRACT = {
   update_chore:         { tier: 'confirm', mutating: true, client: true,  selector: 'idOrMatchTitle' },
   add_shopping_item:    { tier: 'auto',    mutating: true, client: true,  selector: 'none' },
   delete_shopping_item: { tier: 'confirm', mutating: true, client: true,  selector: 'idOrText' },
+  // Pantry inventory (what's on hand at home) — client-owned auto, like set_goal: the client applies the
+  // artifact to the famplan_pantry collection. Low-stakes freeform notes, so delete is auto (not staged).
+  add_pantry_item:      { tier: 'auto',    mutating: true, client: true,  selector: 'none' },
+  delete_pantry_item:   { tier: 'auto',    mutating: true, client: true,  selector: 'idOrText' },
   set_goal:             { tier: 'auto',    mutating: true, client: true,  selector: 'goalText' },
   delete_goal:          { tier: 'auto',    mutating: true, client: true,  selector: 'idOrAll' },
   set_meal_plan:        { tier: 'auto',    mutating: true, client: true,  selector: 'days' },

@@ -22,6 +22,8 @@ import {
   buildGoalDelete,
   buildMealPlanFromPayload,
   buildMealPlanDelete,
+  buildPantryItemFromPayload,
+  buildPantryItemRef,
   normalizeShoppingItems,
   buildReservationDraft,
   buildCartDraft,
@@ -95,6 +97,11 @@ export const TOOL_REGISTRY: Record<string, ConciergeTool> = {
   delete_event: tool('delete_event', (p) => buildEventRef(p)),
   // Shopping-item delete (confirm tier) — same shape-check-then-client-resolve pattern as delete_chore.
   delete_shopping_item: tool('delete_shopping_item', (p) => buildShoppingItemRef(p)),
+  // Pantry inventory (what's on hand at home) — auto tier, client-owned like set_goal: the client applies
+  // the artifact to the pantry collection. add_pantry_item mints a PantryItem; delete_pantry_item is a ref
+  // (id/text) the client resolves against the live pantry. Distinct from the shopping list (buy vs. have).
+  add_pantry_item: tool('add_pantry_item', (p) => buildPantryItemFromPayload(p)),
+  delete_pantry_item: tool('delete_pantry_item', (p) => buildPantryItemRef(p)),
   // Reservation DRAFT (B3) — confirm tier, NO money moves (no-payment invariant): stages a booking
   // deep-link the parent opens to book themselves. Amazon add-to-cart (B4) registers the same way.
   reserve: tool('reserve', (p) => buildReservationDraft(p)),

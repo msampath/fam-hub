@@ -170,6 +170,28 @@ const REGISTRY_TOOL_DEFS: Omit<McpToolDef, 'run'>[] = [
     },
   },
   {
+    name: 'add_pantry_item',
+    description: 'Add an item/note to the family PANTRY — what they already have on hand at home (e.g. "add milk to the pantry", "note we\'re low on yogurt"). Auto-applied, reversible. This is NOT the shopping list: use add_shopping_item for things to BUY, add_pantry_item for things they HAVE.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: 'The pantry item/note, e.g. "milk", "500g besan", "low on yogurt".' },
+      },
+      required: ['text'],
+    },
+  },
+  {
+    name: 'delete_pantry_item',
+    description: 'Remove an item from the pantry inventory (auto-applied). Identify it by its exact "text" (or "id"). Use when the parent says something is used up / no longer on hand.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: 'The pantry item text to remove.' },
+        id: { type: 'string', description: 'The pantry item id (if known).' },
+      },
+    },
+  },
+  {
     name: 'update_event',
     description: 'Move/reschedule/change an EXISTING event, OR mark it free/busy — WITHOUT deleting it (confirm '
       + 'tier — staged for approval). Set `freeBusy:"free"` to make an event stop blocking the day (e.g. a '

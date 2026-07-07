@@ -19,7 +19,7 @@ describe('toolRegistry allowlist parity', () => {
   });
   it('registers exactly the known tools (home_control deferred to C2 — not registered yet)', () => {
     expect([...ALLOWED_COPILOT_ACTIONS].sort()).toEqual(
-      ['add_chore', 'add_shopping_item', 'add_to_cart', 'clear_chores', 'create_event', 'delete_chore', 'delete_document', 'delete_event', 'delete_goal', 'delete_meal_plan', 'delete_shopping_item', 'move_document', 'reserve', 'set_goal', 'set_meal_plan', 'update_chore', 'update_event'],
+      ['add_chore', 'add_pantry_item', 'add_shopping_item', 'add_to_cart', 'clear_chores', 'create_event', 'delete_chore', 'delete_document', 'delete_event', 'delete_goal', 'delete_meal_plan', 'delete_pantry_item', 'delete_shopping_item', 'move_document', 'reserve', 'set_goal', 'set_meal_plan', 'update_chore', 'update_event'],
     );
   });
   it('doc tools: move = auto (reversible), delete = confirm (destructive)', () => {
@@ -153,6 +153,24 @@ describe('delete_meal_plan tool (CRUD delete — auto tier, client-owned)', () =
     expect(TOOL_REGISTRY.delete_meal_plan.validate({ meal: 'brunch' }, ctx)).toBeNull();   // bad meal, no other selector
     expect(TOOL_REGISTRY.delete_meal_plan.validate({ all: false }, ctx)).toBeNull();
     expect(TOOL_REGISTRY.delete_meal_plan.validate(null, ctx)).toBeNull();
+  });
+});
+
+describe('pantry tools (on-hand inventory — auto tier, client-owned)', () => {
+  it('add_pantry_item is auto-tier and mints a clamped PantryItem; null without text', () => {
+    expect(TOOL_REGISTRY.add_pantry_item.riskTier).toBe('auto');
+    expect(TOOL_REGISTRY.add_pantry_item.applyMode).toBe('auto');
+    const item = TOOL_REGISTRY.add_pantry_item.validate({ text: '  500g besan  ' }, ctx) as any;
+    expect(item).toMatchObject({ text: '500g besan' });
+    expect(item.id).toMatch(/^pantry-/);
+    expect(TOOL_REGISTRY.add_pantry_item.validate({ text: '   ' }, ctx)).toBeNull();
+    expect(TOOL_REGISTRY.add_pantry_item.validate({}, ctx)).toBeNull();
+  });
+  it('delete_pantry_item is auto-tier and shape-checks a reference (text or id); null without one', () => {
+    expect(TOOL_REGISTRY.delete_pantry_item.riskTier).toBe('auto');
+    expect(TOOL_REGISTRY.delete_pantry_item.validate({ text: 'yogurt' }, ctx)).toEqual({ text: 'yogurt' });
+    expect(TOOL_REGISTRY.delete_pantry_item.validate({ id: 'pantry-1' }, ctx)).toEqual({ id: 'pantry-1' });
+    expect(TOOL_REGISTRY.delete_pantry_item.validate({}, ctx)).toBeNull();
   });
 });
 

@@ -2,7 +2,7 @@
 // These are the trust boundary for model output: they clamp/coerce every field before
 // it becomes app data. Kept pure (no React/state) so they're unit-testable; the App
 // handlers are thin glue that call these then the state setters.
-import type { CalendarEvent, Chore, Category, FamilyMember, ShoppingItem, Goal, GoalStep, CopilotSuggestion, MealPlan, MealPlanDay } from '../types';
+import type { CalendarEvent, Chore, Category, FamilyMember, ShoppingItem, Goal, GoalStep, CopilotSuggestion, MealPlan, MealPlanDay, PantryItem } from '../types';
 import { uuid } from './uuid';
 import { fallbackStore } from '../constants';
 import { parseLocalDate, toLocalDateStr } from './dates';
@@ -317,6 +317,25 @@ export function buildMealPlanDelete(p: any): MealPlanDelete | null {
   const ws = String(p.weekStart || '').slice(0, 10);
   if (/^\d{4}-\d{2}-\d{2}$/.test(ws)) out.weekStart = ws;
   return (out.all || out.meal || out.weekStart) ? out : null;
+}
+
+// Build a validated PantryItem from an AI `add_pantry_item` payload — the pantry is the family's on-hand
+// inventory (freeform notes: "milk", "500g besan", "low on yogurt"), NOT the shopping list. Client-owned
+// like set_goal: pure + clamped; the client prepends the result into the pantry collection. Null without text.
+export function buildPantryItemFromPayload(p: any): PantryItem | null {
+  const raw = p?.text ?? p?.item;
+  if (!raw || !String(raw).trim()) return null;
+  return { id: 'pantry-' + uuid(), text: String(raw).trim().slice(0, 200) };
+}
+// Shape-check a pantry reference for delete_pantry_item — an id and/or the item text (the client resolves it
+// against the live pantry and removes matches). At least one selector required so an empty payload can never
+// mean "clear the pantry". Mirrors buildShoppingItemRef. Null without a reference.
+export function buildPantryItemRef(p: any): { id?: string; text?: string } | null {
+  if (!p || typeof p !== 'object') return null;
+  const id = p.id ? String(p.id) : undefined;
+  const text = p.text ? String(p.text).trim().slice(0, 200) : undefined;
+  if (!id && !text) return null;
+  return { ...(id ? { id } : {}), ...(text ? { text } : {}) };
 }
 
 // Stable key for a copilot suggestion (date + lowercased title) — used to mark which suggestions
