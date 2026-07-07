@@ -40,8 +40,16 @@ describe('DinnersStrip', () => {
     expect(screen.queryByText(/Ancient stew/)).toBeNull();
   });
 
+  it('a lunch plan coexists with the same week\'s dinners, chips meal-tagged (the lunches bug)', () => {
+    const lunch: MealPlan = { id: 'meal-2', weekStart: PLAN.weekStart, meal: 'lunch', status: 'active', days: [{ date: today, dish: 'Puliodharai', note: 'we have everything we need' }] };
+    renderWithApp(<DinnersStrip />, { mealPlans: [PLAN, lunch] });
+    const lunchChip = screen.getByLabelText(/lunch: Puliodharai/);
+    expect(lunchChip.textContent).toMatch(/lunch · /i); // the meal tag on a non-dinner chip
+    expect(screen.getByLabelText(/dinner: Paneer butter masala/)).toBeInTheDocument(); // dinners still there
+  });
+
   it('empty state invites a plan through the copilot', () => {
     renderWithApp(<DinnersStrip />, { mealPlans: [] });
-    expect(screen.getByText(/No dinner plan yet/)).toBeInTheDocument();
+    expect(screen.getByText(/No meal plan yet/)).toBeInTheDocument();
   });
 });

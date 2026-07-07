@@ -285,7 +285,9 @@ export function buildMealPlanFromPayload(p: any, todayStr: string): MealPlan | n
   // weekStart = the Monday of the earliest day (getDay(): 0=Sun → back 6; 1=Mon → back 0).
   const first = parseLocalDate(days[0].date);
   first.setDate(first.getDate() - ((first.getDay() + 6) % 7));
-  return { id: 'meal-' + uuid(), weekStart: toLocalDateStr(first), days, status: 'active' };
+  // Which meal the plan covers — dinner unless the family said otherwise ("plan next week's LUNCHES").
+  const meal = (['breakfast', 'lunch', 'dinner'] as const).find(m => m === p.meal) ?? 'dinner';
+  return { id: 'meal-' + uuid(), weekStart: toLocalDateStr(first), meal, days, status: 'active' };
 }
 
 // Stable key for a copilot suggestion (date + lowercased title) — used to mark which suggestions

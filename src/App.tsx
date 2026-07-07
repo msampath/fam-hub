@@ -780,11 +780,12 @@ export default function App() {
       return [{ ...goal, ...authorStamp() }, ...prev].slice(0, 50);
     });
   };
-  // Upsert the week's dinner plan (set_meal_plan): REPLACE by weekStart — an adjustment turn re-issues
-  // the whole week, so merge semantics would resurrect swapped-out dishes. Newest week first, cap 8.
+  // Upsert a week's meal plan (set_meal_plan): REPLACE by (weekStart, meal) — an adjustment turn
+  // re-issues the whole week for THAT meal, so merge semantics would resurrect swapped-out dishes,
+  // and lunches must not clobber the same week's dinners. Newest week first, cap 8 plans.
   const upsertMealPlan = (plan: MealPlan) => {
     setMealPlans(prev => {
-      const rest = prev.filter(p => p.weekStart !== plan.weekStart);
+      const rest = prev.filter(p => p.weekStart !== plan.weekStart || (p.meal || 'dinner') !== (plan.meal || 'dinner'));
       return [{ ...plan, ...authorStamp() }, ...rest]
         .sort((a, b) => b.weekStart.localeCompare(a.weekStart))
         .slice(0, 8);
@@ -2989,9 +2990,13 @@ export default function App() {
         .filter(g => g.status !== 'done' && g.status !== 'abandoned')
         .slice(0, 5)
         .map(g => ({ id: g.id, text: g.text, status: g.status, ...(g.nextAction ? { nextAction: g.nextAction } : {}), steps: (g.steps || []).map(s => ({ title: s.title, status: s.status })) }));
-      // The newest week's dinner plan — an adjustment turn ("swap Thursday to rajma") must re-issue
-      // the FULL week via set_meal_plan, which needs the current one in the prompt (api.py injects it).
-      const mealplan = (mealPlans[0]?.days || []).map(d => ({ date: d.date, dish: d.dish, ...(d.note ? { note: d.note } : {}) }));
+      // The newest week's meal plans (dinner AND lunch/breakfast, labeled) — an adjustment turn
+      // ("swap Thursday's lunch") must re-issue the FULL week for THAT meal (api.py injects this).
+      const sortedPlans = [...mealPlans].sort((a, b) => (b.weekStart || '').localeCompare(a.weekStart || ''));
+      const newestWeek = sortedPlans[0]?.weekStart;
+      const mealplan = sortedPlans
+        .filter(p => p.weekStart === newestWeek)
+        .flatMap(p => (p.days || []).map(d => ({ date: d.date, dish: d.dish, meal: p.meal || 'dinner', ...(d.note ? { note: d.note } : {}) })));
       r = await askConciergeAgent(jwt, agentSessionId, query, { history, family, goals, copilotName, stores: storeList, mealplan });
     } catch (e) {
       console.warn('Agent turn failed; falling back to local copilot.', e);

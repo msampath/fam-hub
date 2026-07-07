@@ -50,28 +50,44 @@ export function buildCalendarNudges(events: CalendarEvent[], today: string, hori
   return nudges.sort((a, b) => a.date.localeCompare(b.date));
 }
 
-// Dinner lines from the meal plan (owner decision: dinners live in the briefing + the Today strip,
-// never as calendar events). Tonight always leads; tomorrow follows when planned. Pure.
-export function buildDinnerLines(mealPlanDays: { date: string; dish: string }[] | undefined, today: string): string[] {
-  const days = Array.isArray(mealPlanDays) ? mealPlanDays : [];
+// Meal lines from the meal-plan collection (owner decision: meals live in the briefing + the Today
+// strip, never as calendar events). Picks the NEWEST week's plans — one plan per meal (breakfast /
+// lunch / dinner coexist) — and emits today + tomorrow lines per meal, chronological. Pure.
+const MEAL_LINE_ORDER = ['breakfast', 'lunch', 'dinner'] as const;
+const MEAL_LABEL: Record<string, [string, string]> = {
+  breakfast: ['Breakfast today', 'Breakfast tomorrow'],
+  lunch: ['Lunch today', 'Lunch tomorrow'],
+  dinner: ['Dinner tonight', 'Tomorrow'],
+};
+export function buildDinnerLines(mealPlans: { weekStart?: string; meal?: string; days?: { date: string; dish: string }[] }[] | undefined, today: string): string[] {
+  const sorted = (Array.isArray(mealPlans) ? mealPlans : [])
+    .filter(p => Array.isArray(p?.days))
+    .sort((a, b) => String(b.weekStart || '').localeCompare(String(a.weekStart || '')));
+  const week = sorted[0]?.weekStart;
+  const plans = sorted.filter(p => p.weekStart === week);
   const tomorrow = addOneDayUTC(today);
-  const dishFor = (d: string) => days.find(x => x?.date === d && x?.dish)?.dish;
   const out: string[] = [];
-  const tonight = dishFor(today);
-  const next = dishFor(tomorrow);
-  if (tonight) out.push(`🍽 Dinner tonight: ${tonight}`);
-  if (next) out.push(`🍽 Tomorrow: ${next}`);
+  for (const meal of MEAL_LINE_ORDER) {
+    const plan = plans.find(p => (p.meal || 'dinner') === meal);
+    if (!plan) continue;
+    const dishFor = (d: string) => plan.days!.find(x => x?.date === d && x?.dish)?.dish;
+    const [todayLabel, tomorrowLabel] = MEAL_LABEL[meal];
+    const now = dishFor(today);
+    const next = dishFor(tomorrow);
+    if (now) out.push(`🍽 ${todayLabel}: ${now}`);
+    if (next) out.push(`🍽 ${tomorrowLabel}: ${next}`);
+  }
   return out;
 }
 
 // The full on-demand briefing: today's agenda (events + due chores) + calendar-driven nudges
-// (+ the dinner lines when a meal plan covers today/tomorrow).
+// (+ the meal lines when the newest week's plans cover today/tomorrow).
 export function buildBriefing(events: CalendarEvent[], chores: Chore[], today: string, horizonDays = 14,
-  mealPlanDays?: { date: string; dish: string }[]): Briefing {
+  mealPlans?: { weekStart?: string; meal?: string; days?: { date: string; dish: string }[] }[]): Briefing {
   const daily = buildDailyReminder(events, chores, today);
   return {
     title: daily?.title ?? 'Today: nothing scheduled',
-    lines: [...(daily ? daily.body.split('\n') : []), ...buildDinnerLines(mealPlanDays, today)],
+    lines: [...(daily ? daily.body.split('\n') : []), ...buildDinnerLines(mealPlans, today)],
     nudges: buildCalendarNudges(events, today, horizonDays),
   };
 }

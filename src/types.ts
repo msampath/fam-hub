@@ -187,7 +187,10 @@ export interface MealPlanDay {
 }
 export interface MealPlan extends Authored {
   id: string;
-  weekStart: string;              // Monday of the week, YYYY-MM-DD — the upsert key
+  weekStart: string;              // Monday of the week, YYYY-MM-DD — upsert key with `meal`
+  meal?: 'breakfast' | 'lunch' | 'dinner'; // which meal this plan covers (absent = dinner, the default) —
+                                  // lunches and dinners for the same week are SEPARATE plans (live bug:
+                                  // the planner refused "plan next week's lunches" when dinner-only)
   days: MealPlanDay[];            // ≤7, unique dates, sorted
   status: 'active' | 'archived';
 }

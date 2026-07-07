@@ -51,6 +51,7 @@ describe('routeTurn', () => {
   it('meal-plan READS stay local; meal-plan WRITES go to the agent', () => {
     expect(routeTurn("what's for dinner?", { agentReachable: true })).toBe('local');
     expect(routeTurn("what's for dinner on Tuesday", { agentReachable: true })).toBe('local');
+    expect(routeTurn("what's for lunch tomorrow?", { agentReachable: true })).toBe('local');
     expect(routeTurn("plan next week's dinners: Mon paneer butter masala, Tue tacos", { agentReachable: true })).toBe('agent');
     expect(routeTurn("swap Thursday's dinner to rajma", { agentReachable: true })).toBe('agent');
   });

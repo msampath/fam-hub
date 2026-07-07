@@ -41,16 +41,19 @@ describe('FACTS blocks neutralize injection in stored text', () => {
     expect(out.split('\n').filter(l => l.startsWith('- ')).length).toBe(1);
   });
 
-  it('MEALS FACTS: newest week only, today tagged, a malicious dish stays on one line', () => {
+  it('MEALS FACTS: newest week only, meal-labeled, today tagged, a malicious dish stays on one line', () => {
     const plans = [
       { weekStart: '2026-06-08', days: [{ date: '2026-06-09', dish: 'Old week — must not appear' }] },
       { weekStart: '2026-06-15', days: [{ date: '2026-06-18', dish: nasty, note: 'quick' }, { date: '2026-06-19', dish: 'Tacos' }] },
+      // A LUNCH plan for the SAME week coexists (the dinner-only refusal was a live bug).
+      { weekStart: '2026-06-15', meal: 'lunch', days: [{ date: '2026-06-18', dish: 'Puliodharai' }] },
     ];
     const out = buildMealsFacts(plans, '2026-06-18')!;
     expect(out).toContain('MEALS');
-    expect(out).toContain('2026-06-18 (today):');
+    expect(out).toContain('2026-06-18 (today) [dinner]:');
+    expect(out).toContain('2026-06-18 (today) [lunch]: Puliodharai');
     expect(out).not.toContain('Old week');
-    expect(out.split('\n').filter(l => l.startsWith('- ')).length).toBe(2); // injected newlines collapsed
+    expect(out.split('\n').filter(l => l.startsWith('- ')).length).toBe(3); // injected newlines collapsed
     expect(buildMealsFacts([], '2026-06-18')).toBeUndefined();
     expect(buildMealsFacts(undefined, '2026-06-18')).toBeUndefined();
   });

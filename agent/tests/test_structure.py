@@ -45,6 +45,11 @@ def test_meal_planner_slice_and_persona():
     assert "set_meal_plan" in prompts.MEAL_PLANNER
     assert "FULL updated week" in prompts.MEAL_PLANNER
     assert "ONE deduped set" in prompts.MEAL_PLANNER
+    # The lunches-refusal bug (live 2026-07-06): the planner handles ANY meal and never quibbles.
+    assert "NEVER refuse" in prompts.MEAL_PLANNER
+    assert "lunch" in prompts.MEAL_PLANNER.lower()
+    # Covered days ("we have everything we need" / eating out) become notes, not shopping items.
+    assert "add NO" in prompts.MEAL_PLANNER
 
 
 def test_outings_treats_web_content_as_untrusted():

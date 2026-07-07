@@ -47,8 +47,8 @@ export interface AgentTurnContext {
   copilotName?: string;
   // Household-defined store lists (Phase-5) — so the shopping specialist routes to THEIR lists.
   stores?: string[];
-  // The CURRENT week's dinner plan — an adjustment turn ("swap Thursday") re-issues the full week.
-  mealplan?: { date: string; dish: string; note?: string }[];
+  // The CURRENT week's meal plans, meal-labeled — an adjustment turn re-issues that meal's full week.
+  mealplan?: { date: string; dish: string; meal?: string; note?: string }[];
 }
 
 // Coerce a raw JSON action element into the AgentAction shape. Defense-in-depth at the wire boundary (the

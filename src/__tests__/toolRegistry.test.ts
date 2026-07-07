@@ -111,6 +111,13 @@ describe('set_meal_plan tool (weekly dinner planner, auto tier, client-owned)', 
     const plan = TOOL_REGISTRY.set_meal_plan.validate({ days: [{ date: '2026-06-21', dish: 'Roast chicken' }] }, ctx) as any;
     expect(plan.weekStart).toBe('2026-06-15'); // 2026-06-21 is a Sunday → its week's Monday
   });
+  it('plans ANY meal — lunch when asked, dinner by default, garbage → dinner (the lunches-refusal bug)', () => {
+    const lunch = TOOL_REGISTRY.set_meal_plan.validate({ meal: 'lunch', days: [{ date: '2026-06-22', dish: 'Puliodharai', note: 'we have everything we need' }] }, ctx) as any;
+    expect(lunch.meal).toBe('lunch');
+    expect(lunch.days[0].note).toBe('we have everything we need');
+    expect((TOOL_REGISTRY.set_meal_plan.validate({ days: [{ date: '2026-06-22', dish: 'Dal' }] }, ctx) as any).meal).toBe('dinner');
+    expect((TOOL_REGISTRY.set_meal_plan.validate({ meal: 'brunch', days: [{ date: '2026-06-22', dish: 'Dal' }] }, ctx) as any).meal).toBe('dinner');
+  });
   it('null when nothing valid survives (empty, garbage, or all out-of-window)', () => {
     expect(TOOL_REGISTRY.set_meal_plan.validate({}, ctx)).toBeNull();
     expect(TOOL_REGISTRY.set_meal_plan.validate({ days: [] }, ctx)).toBeNull();

@@ -51,21 +51,35 @@ describe('buildBriefing', () => {
 });
 
 describe('buildDinnerLines (the meal planner in the briefing)', () => {
-  const days = [
-    { date: '2026-06-24', dish: 'Paneer butter masala' },
-    { date: '2026-06-25', dish: 'Tacos' },
-    { date: '2026-06-27', dish: 'Roast chicken' },
-  ];
+  const dinnerPlan = {
+    weekStart: '2026-06-22',
+    days: [
+      { date: '2026-06-24', dish: 'Paneer butter masala' },
+      { date: '2026-06-25', dish: 'Tacos' },
+      { date: '2026-06-27', dish: 'Roast chicken' },
+    ],
+  };
   it('tonight + tomorrow when both are planned', () => {
-    expect(buildDinnerLines(days, TODAY)).toEqual(['🍽 Dinner tonight: Paneer butter masala', '🍽 Tomorrow: Tacos']);
+    expect(buildDinnerLines([dinnerPlan], TODAY)).toEqual(['🍽 Dinner tonight: Paneer butter masala', '🍽 Tomorrow: Tacos']);
   });
   it('tomorrow-only when tonight is unplanned; empty when neither is', () => {
-    expect(buildDinnerLines(days, '2026-06-26')).toEqual(['🍽 Tomorrow: Roast chicken']);
-    expect(buildDinnerLines(days, '2026-06-30')).toEqual([]);
+    expect(buildDinnerLines([dinnerPlan], '2026-06-26')).toEqual(['🍽 Tomorrow: Roast chicken']);
+    expect(buildDinnerLines([dinnerPlan], '2026-06-30')).toEqual([]);
     expect(buildDinnerLines(undefined, TODAY)).toEqual([]);
   });
+  it('lunch + dinner plans for the same week both speak, chronological order', () => {
+    const lunchPlan = { weekStart: '2026-06-22', meal: 'lunch', days: [{ date: '2026-06-24', dish: 'Puliodharai' }] };
+    expect(buildDinnerLines([dinnerPlan, lunchPlan], TODAY)).toEqual([
+      '🍽 Lunch today: Puliodharai',
+      '🍽 Dinner tonight: Paneer butter masala',
+      '🍽 Tomorrow: Tacos',
+    ]);
+    // Only the NEWEST week speaks — an older week's plan is history.
+    const oldWeek = { weekStart: '2026-06-15', days: [{ date: TODAY, dish: 'Stale stew' }] };
+    expect(buildDinnerLines([dinnerPlan, oldWeek], TODAY)[0]).toBe('🍽 Dinner tonight: Paneer butter masala');
+  });
   it('rides into buildBriefing lines after the agenda', () => {
-    const b = buildBriefing([ev('1', 'Dentist', TODAY)], [], TODAY, 14, days);
+    const b = buildBriefing([ev('1', 'Dentist', TODAY)], [], TODAY, 14, [dinnerPlan]);
     expect(b.lines[b.lines.length - 2]).toBe('🍽 Dinner tonight: Paneer butter masala');
     expect(b.lines[b.lines.length - 1]).toBe('🍽 Tomorrow: Tacos');
   });

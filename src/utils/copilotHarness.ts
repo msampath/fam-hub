@@ -83,25 +83,29 @@ export function buildConversationBlock(
 }
 
 // The user-message half of the harnessed prompt: DATE FACTS + optional AVAILABILITY + optional
-// MEALS FACTS: the family's own dinner plan (newest week), so "what's for dinner (Tuesday)?" is a
-// deterministic read — routed LOCAL by the router, answered from this block, never invented. Pure.
+// MEALS FACTS: the family's own meal plans (the newest week — one plan per meal, so lunches and
+// dinners coexist), so "what's for dinner/lunch (Tuesday)?" is a deterministic read — routed LOCAL
+// by the router, answered from this block, never invented. Pure.
 export function buildMealsFacts(mealplan: any[] | undefined, today: string): string | undefined {
-  const days = (Array.isArray(mealplan) ? mealplan : [])
-    .slice()
-    .sort((a, b) => String(b?.weekStart || '').localeCompare(String(a?.weekStart || '')))[0]?.days;
-  if (!Array.isArray(days) || !days.length) return undefined;
-  const lines = days
-    .filter((d: any) => d?.date && d?.dish)
-    .slice(0, 7)
-    .map((d: any) => {
+  const sorted = (Array.isArray(mealplan) ? mealplan : [])
+    .filter((p: any) => Array.isArray(p?.days))
+    .sort((a, b) => String(b?.weekStart || '').localeCompare(String(a?.weekStart || '')));
+  const week = sorted[0]?.weekStart;
+  const plans = sorted.filter((p: any) => p.weekStart === week).slice(0, 3);
+  const lines: string[] = [];
+  for (const p of plans) {
+    const meal = ['breakfast', 'lunch', 'dinner'].includes(p?.meal) ? p.meal : 'dinner';
+    for (const d of (p.days as any[]).slice(0, 7)) {
+      if (!d?.date || !d?.dish) continue;
       const date = String(d.date).slice(0, 10);
       const tag = date === today ? ' (today)' : '';
       const note = d.note ? ` — ${sanitizeForPrompt(String(d.note), 60)}` : '';
-      return `- ${date}${tag}: ${sanitizeForPrompt(String(d.dish), 80)}${note}`;
-    });
+      lines.push(`- ${date}${tag} [${meal}]: ${sanitizeForPrompt(String(d.dish), 80)}${note}`);
+    }
+  }
   if (!lines.length) return undefined;
-  return 'MEALS (the family\'s dinner plan — answer "what\'s for dinner" questions from THIS list only; '
-    + 'if a day isn\'t listed, say no dinner is planned for it):\n' + lines.join('\n');
+  return 'MEALS (the family\'s meal plan, [meal]-labeled — answer "what\'s for dinner/lunch" questions '
+    + 'from THIS list only; if a day/meal isn\'t listed, say nothing is planned for it):\n' + lines.join('\n');
 }
 
 // WEATHER FACTS + optional HISTORY FACTS + roster + optional recent conversation + the parent's

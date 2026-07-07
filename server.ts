@@ -3061,9 +3061,9 @@ app.post('/api/morning-briefing', requireAuth, aiRateLimit, async (req, res) => 
     const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
     const evList = Array.isArray(events) ? events : [];
     const chList = Array.isArray(chores) ? chores : [];
-    // mealplan = MealPlan[] (the client sends the collection); the newest week's days feed the dinner lines.
-    const mealDays = Array.isArray(mealplan) && mealplan[0]?.days ? mealplan[0].days : [];
-    const briefing = buildBriefing(evList, chList, today, 14, mealDays);
+    // mealplan = MealPlan[] (the client sends the collection); buildDinnerLines picks the newest
+    // week's plans itself (one per meal — breakfast/lunch/dinner lines as covered).
+    const briefing = buildBriefing(evList, chList, today, 14, Array.isArray(mealplan) ? mealplan : []);
     // The ADK concierge AUTHORS the narrative from the deterministically-extracted facts, so the in-app
     // preview is genuinely agent-generated (matching the emailed digest). Best-effort: if the agent is
     // unreachable, agentSummary stays undefined and the card renders the structured briefing (title/lines/
@@ -3421,9 +3421,9 @@ async function runDailyDigest(): Promise<void> {
     ]);
     const events = asTypedArray<CalendarEvent>(ev.data?.data);
     const choresArr = asTypedArray<Chore>(ch.data?.data);
-    // The newest week's dinners ride into the digest's briefing lines ("Dinner tonight: …").
-    const mealDays = ((mp.data?.data as any[]) || [])[0]?.days || [];
-    const briefing = buildBriefing(events, choresArr, today, 14, mealDays);
+    // The meal-plan collection rides into the digest's briefing lines ("Lunch today / Dinner
+    // tonight: …" — buildDinnerLines picks the newest week's plans per meal).
+    const briefing = buildBriefing(events, choresArr, today, 14, (mp.data?.data as any[]) || []);
 
     // Home location → today's weather + air quality. Fetched once here and reused by BOTH the proactive
     // umbrella nudge and the email's weather line (best-effort; cached; null/empty when no home is set).

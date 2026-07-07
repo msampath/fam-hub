@@ -217,22 +217,24 @@ async def chat(body: ChatIn, authorization: str | None = Header(default=None)):
                 "this block. NEVER say a goal/step was changed or completed unless you called set_goal this turn.\n"
                 + "\n".join(lines) + "\n\n"
             )
-    # CURRENT WEEK'S DINNERS — same injection pattern as goals: an adjustment turn ("swap Thursday to
-    # rajma") must re-issue set_meal_plan with the FULL updated week, which needs the current one.
+    # CURRENT WEEK'S MEALS — same injection pattern as goals: an adjustment turn ("swap Thursday's
+    # lunch to rajma") must re-issue set_meal_plan with the FULL updated week FOR THAT MEAL.
     meals_block = ""
     if body.mealplan:
         def _mclean(v: object, n: int) -> str:
             return " ".join(str(v).split())[:n]
         mlines = []
-        for d in body.mealplan[:7]:
+        for d in body.mealplan[:14]:
             if not isinstance(d, dict) or not d.get("date") or not d.get("dish"):
                 continue
+            meal = _mclean(d.get("meal") or "dinner", 10)
             note = f" ({_mclean(d.get('note'), 60)})" if d.get("note") else ""
-            mlines.append(f"- {_mclean(d.get('date'), 10)}: {_mclean(d.get('dish'), 80)}{note}")
+            mlines.append(f"- {_mclean(d.get('date'), 10)} [{meal}]: {_mclean(d.get('dish'), 80)}{note}")
         if mlines:
             meals_block = (
-                "CURRENT DINNER PLAN (this week, authoritative). To change ANY day, call set_meal_plan with "
-                "the FULL updated week (it replaces by week) and add only the new dish's missing ingredients.\n"
+                "CURRENT MEAL PLAN (this week, authoritative; [meal] labels each line). To change ANY day, "
+                "call set_meal_plan with that SAME `meal` and the FULL updated week for it (it replaces per "
+                "week+meal), and add only the new dish's missing ingredients.\n"
                 + "\n".join(mlines) + "\n\n"
             )
     # Kid-pickable copilot name: one grounded line so every engine answers to the family's name for it.
