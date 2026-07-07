@@ -343,47 +343,56 @@ export default function ShoppingPage() {
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             {groups.map(group => (
               <div key={group.id} className="rounded-[20px] p-5" style={{ border: `2px solid ${C.elevated}`, background: C.card }}>
-                <div className="mb-3.5 flex items-center gap-2.5 pb-3 text-sm font-extrabold uppercase tracking-[0.08em]" style={{ color: C.primary, borderBottom: `2px solid ${C.elevated}` }}>
+                <div className="mb-3.5 flex items-center gap-3 pb-3 text-sm font-extrabold uppercase tracking-[0.08em]" style={{ color: C.primary, borderBottom: `2px solid ${C.elevated}` }}>
+                  {/* Master check/uncheck — a CHECKBOX in the same left column as the item checkboxes below
+                      (✓ = all done, – = some done, empty = none). One tap marks the list done or brings it
+                      back. Reversible, but a bulk action → kid mode hides it, like Clear. */}
+                  {!kidMode && group.items.length > 0 && (() => {
+                    const allDone = group.items.every(i => i.completed);
+                    const someDone = group.items.some(i => i.completed);
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => toggleStore(group.id, !allDone)}
+                        aria-label={allDone ? `Uncheck all ${group.id} items` : `Check all ${group.id} items`}
+                        title={allDone ? 'Uncheck all' : 'Check all'}
+                        className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-[7px] text-sm font-black"
+                        style={{ border: `2px solid ${allDone ? C.emerald : C.elevated}`, background: allDone ? C.emerald : 'transparent', color: allDone ? C.app : C.muted }}
+                      >
+                        {allDone ? '✓' : someDone ? '–' : ''}
+                      </button>
+                    );
+                  })()}
                   <span>{group.icon}</span>{group.id}
-                  {/* Per-list SEND (the binding model): this list's pending items → ITS bound store. */}
-                  {!kidMode && storeBindings[group.id] && group.items.some(i => !i.completed) && (
-                    <button
-                      type="button"
-                      disabled={krogerBusy}
-                      onClick={() => sendShoppingToKroger(group.items.filter(i => !i.completed).map(i => i.text), storeBindings[group.id].locationId, storeBindings[group.id].name)}
-                      aria-label={`Send the ${group.id} list to ${storeBindings[group.id].name}`}
-                      title={`Match this list to products at ${storeBindings[group.id].name} and stage a cart for approval`}
-                      className="ml-auto rounded-[8px] px-2.5 py-1 text-[11px] font-extrabold normal-case tracking-normal disabled:opacity-50"
-                      style={{ border: `2px solid ${C.emerald}`, background: `${C.emerald}14`, color: C.emerald }}
-                    >
-                      🛒 {krogerBusy ? 'Matching…' : `Send to ${storeBindings[group.id].name}`}
-                    </button>
-                  )}
-                  {/* Master check/uncheck — one tap marks the whole list done (or brings it all back).
-                      Reversible, but still a bulk action → kid mode hides it, like Clear. */}
-                  {!kidMode && group.items.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => toggleStore(group.id, group.items.some(i => !i.completed))}
-                      aria-label={group.items.some(i => !i.completed) ? `Check all ${group.id} items` : `Uncheck all ${group.id} items`}
-                      className="ml-auto rounded-[8px] px-2.5 py-1 text-[11px] font-bold normal-case tracking-normal"
-                      style={{ border: `2px solid ${C.elevated}`, background: C.app, color: C.muted }}
-                    >
-                      {group.items.some(i => !i.completed) ? '✓ Check all' : 'Uncheck all'}
-                    </button>
-                  )}
-                  {/* Per-store Clear — ALWAYS present (empties this store's list; staples stay). Kid mode hides it. */}
-                  {!kidMode && group.items.some(i => !i.staple) && (
-                    <button
-                      type="button"
-                      onClick={() => clearStore(group.id)}
-                      aria-label={`Clear the ${group.id} list`}
-                      className="ml-auto rounded-[8px] px-2.5 py-1 text-[11px] font-bold normal-case tracking-normal"
-                      style={{ border: `2px solid ${C.elevated}`, background: C.app, color: C.muted }}
-                    >
-                      Clear
-                    </button>
-                  )}
+                  {/* Right-side actions grouped so their spacing is stable regardless of which are shown. */}
+                  <div className="ml-auto flex items-center gap-2">
+                    {/* Per-list SEND (the binding model): this list's pending items → ITS bound store. */}
+                    {!kidMode && storeBindings[group.id] && group.items.some(i => !i.completed) && (
+                      <button
+                        type="button"
+                        disabled={krogerBusy}
+                        onClick={() => sendShoppingToKroger(group.items.filter(i => !i.completed).map(i => i.text), storeBindings[group.id].locationId, storeBindings[group.id].name)}
+                        aria-label={`Send the ${group.id} list to ${storeBindings[group.id].name}`}
+                        title={`Match this list to products at ${storeBindings[group.id].name} and stage a cart for approval`}
+                        className="rounded-[8px] px-2.5 py-1 text-[11px] font-extrabold normal-case tracking-normal disabled:opacity-50"
+                        style={{ border: `2px solid ${C.emerald}`, background: `${C.emerald}14`, color: C.emerald }}
+                      >
+                        🛒 {krogerBusy ? 'Matching…' : `Send to ${storeBindings[group.id].name}`}
+                      </button>
+                    )}
+                    {/* Per-store Clear — ALWAYS present (empties this store's list; staples stay). Kid mode hides it. */}
+                    {!kidMode && group.items.some(i => !i.staple) && (
+                      <button
+                        type="button"
+                        onClick={() => clearStore(group.id)}
+                        aria-label={`Clear the ${group.id} list`}
+                        className="rounded-[8px] px-2.5 py-1 text-[11px] font-bold normal-case tracking-normal"
+                        style={{ border: `2px solid ${C.elevated}`, background: C.app, color: C.muted }}
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
                 </div>
                 {group.items.map(item => (
                   <div key={item.id} className="flex items-center gap-3 py-2" style={{ borderBottom: '1px solid #141929' }}>

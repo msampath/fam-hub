@@ -50,6 +50,17 @@ def test_meal_planner_slice_and_persona():
     assert "lunch" in prompts.MEAL_PLANNER.lower()
     # Covered days ("we have everything we need" / eating out) become notes, not shopping items.
     assert "add NO" in prompts.MEAL_PLANNER
+    # "next week" = the next 7 days starting tomorrow — never plan today (live: lunch planned at 7:45 PM).
+    assert "STARTING TOMORROW" in prompts.MEAL_PLANNER
+    # Dietary is binding — a lacto-veg family got ground meat suggested for their tacos.
+    assert "DIET IS BINDING" in prompts.MEAL_PLANNER
+    assert "lacto-vegetarian" in prompts.MEAL_PLANNER
+
+
+def test_diet_honored_where_ingredients_are_derived():
+    # Both meal planner AND single-dish shopping derive ingredients — both must respect the roster's diet.
+    for text in (prompts.MEAL_PLANNER, prompts.SHOPPING):
+        assert "NO meat, poultry, or fish" in text
 
 
 def test_outings_treats_web_content_as_untrusted():

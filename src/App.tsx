@@ -2983,7 +2983,12 @@ export default function App() {
       // Hand the agent the SAME context the copilot has: recent conversation + the family roster (names +
       // ages) so an escalated turn hears the user's framing and doesn't guess ages.
       const history = copilotMessages.slice(-8).map(m => ({ role: m.role, text: m.text }));
-      const family = familyMembers.map(m => (m.age ? `${m.name} (${m.age}, ${m.role})` : `${m.name} (${m.role})`)).join(', ');
+      // Name (age, role, diet) — diet is BINDING for food/meal suggestions (a lacto-veg family got
+      // ground meat suggested for their tacos because this line dropped the dietary field).
+      const family = familyMembers.map(m => {
+        const bits = [m.age ? String(m.age) : null, m.role, m.dietary?.trim() || null].filter(Boolean);
+        return `${m.name} (${bits.join(', ')})`;
+      }).join(', ');
       // The family's CURRENT active goals — so the agent can reference the right id to mark a step/goal done and
       // honestly "recheck" (it has no get_goals tool; this rides in the prompt, surviving model fallback).
       const goals = goalsList

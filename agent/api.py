@@ -165,12 +165,20 @@ async def chat(body: ChatIn, authorization: str | None = Header(default=None)):
     # Date-ground the request: the agent has no harness, so without this it resolves "next Saturday" / "Jul 4"
     # against the model's training bias (e.g. the wrong year). Prepend today's date so the tool-calling
     # specialist fills start_date in the CURRENT year. (The in-app copilot gets this via DATE FACTS.)
-    today = datetime.date.today()
-    context = f"(Context: today is {today.strftime('%A')}, {today.isoformat()}. Resolve any relative or " \
-              f"year-less dates from this."
+    # Now (date + LOCAL time) so a specialist resolves "next week" correctly AND knows how much of today
+    # is left — the meal planner must not plan a meal for a day that's already mostly over (it planned
+    # lunch for TODAY at 7:45 PM). %-I isn't portable (fails on Windows), so build the hour by hand.
+    now = datetime.datetime.now()
+    today = now.date()
+    _h12 = now.hour % 12 or 12
+    time_label = f"{_h12}:{now.minute:02d} {'AM' if now.hour < 12 else 'PM'}"
+    context = f"(Context: now is {now.strftime('%A')}, {today.isoformat()}, {time_label} local time. " \
+              f"Resolve any relative or year-less dates from this; 'tomorrow' is the next calendar day."
     if body.family:
-        # Use the REAL ages; never assume a child's age.
-        context += f" Family members: {body.family}. Use these exact ages — do not guess."
+        # Use the REAL ages; never guess. DIETARY (when present) is BINDING for any food/meal/shopping
+        # suggestion — a vegetarian/lacto-vegetarian household never gets meat, poultry, or fish.
+        context += f" Family members: {body.family}. Use these exact ages — do not guess. Honor every " \
+                   f"member's dietary restriction in any food, meal, or shopping suggestion."
     if body.stores:
         # Household-defined store lists (Phase-5): clamp count+length; the shopping specialist routes
         # items to THESE names instead of the default Costco/Indian Store/Grocery Store/Other set.
