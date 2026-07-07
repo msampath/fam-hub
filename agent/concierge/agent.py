@@ -1,7 +1,8 @@
 """Family-Hub concierge — ADK multi-agent over the Node MCP toolset.
 
-KAGGLE_EVAL: Agent / Multi-agent (ADK) + Agent CLI — a root concierge that DELEGATES to seven tool-scoped
-specialists, each given only its slice of the MCP toolbelt (tool_filter). Honest framing: most specialists
+KAGGLE_EVAL: Agent / Multi-agent (ADK) + Agent CLI — a root concierge that DELEGATES to tool-scoped
+specialists, each LOADED from a self-contained skill folder (skills/<name>/SKILL.md — persona, tool slice,
+description) and given only its slice of the MCP toolbelt (tool_filter). Honest framing: most specialists
 are thin NL→one-CRUD-call adapters — the split buys tool-scoping + routing reliability, not per-agent
 autonomy; only `outings` runs a full multi-step loop. The tools, the no-payment
 invariant, and the risk tiers are served by the Node MCP server (src/mcp/server.ts) over stdio — this
@@ -27,6 +28,7 @@ from google.adk.tools.mcp_tool.mcp_toolset import MCPToolset, StdioConnectionPar
 from mcp import StdioServerParameters
 
 from . import prompts
+from .skills import SKILLS
 
 # Repo root = two levels up from this file (agent/concierge/agent.py -> repo root). The MCP server runs
 # from here so `src/mcp/server.ts` + node_modules resolve.
@@ -79,8 +81,8 @@ def _mcp(tool_names: list[str], access_token: str | None = None) -> MCPToolset:
     mcp_cjs = os.environ.get("MCP_SERVER_CJS")
     if not mcp_cjs:
         # Prefer a prebuilt esbuild bundle when present, even in LOCAL dev: `node <bundle>` spawns in ms,
-        # while `npx tsx` cold-transpiles on EVERY spawn — and build_root_agent spawns 7 MCP children at once
-        # (one per specialist), so the concurrent tsx cold-start intermittently blew the MCP session timeout,
+        # while `npx tsx` cold-transpiles on EVERY spawn — and build_root_agent spawns one MCP child per
+        # specialist at once, so the concurrent tsx cold-start intermittently blew the MCP session timeout,
         # leaving a specialist tool-less → "Tool 'find_places' not found" → 502. Run `npm run build:mcp` after
         # editing src/mcp/* to refresh the bundle (delete it to force the always-fresh `npx tsx` path).
         default_bundle = REPO_ROOT / "dist" / "mcp-server.cjs"
@@ -104,40 +106,11 @@ def _mcp(tool_names: list[str], access_token: str | None = None) -> MCPToolset:
     )
 
 
-# Each specialist's scoped slice of the MCP toolbelt (its tool_filter). Declared as data so the
-# agent-eval suite can assert the allowlists — e.g. that NO specialist is granted a payment/checkout
-# tool (the no-payment invariant, structurally) — without spawning the MCP child.
-SPECIALIST_TOOLS: dict[str, list[str]] = {
-    "calendar_agent": ["create_event", "update_event", "delete_event"],
-    # delete_chore/clear_chores/update_chore are CONFIRM-tier (destructive/mutating): staged for the
-    # parent's approval, applied client-side — the agent never silently wipes the chore board.
-    "chores_agent": ["add_chore", "delete_chore", "clear_chores", "update_chore"],
-    "shopping_agent": ["add_shopping_item", "add_to_cart", "delete_shopping_item"],  # add_to_cart stages a DRAFT, never checks out
-    # NO `reserve` search-link shortcut (removed): the agent must do the real legwork. search_local_knowledge
-    # grounds picks on the local corpus; web_search/fetch_page research real logistics (does it even TAKE/need a
-    # reservation? hours, pass/ticket URLs); prepare_handoff stages the loop-closing draft — but ONLY with a
-    # REAL, server-verified booking URL (the MCP server fetches it to confirm it loads before staging).
-    # set_goal lets the outings agent record a multi-step trip as a TRACKED goal (the family sees the plan
-    # + follows it through). Auto-tier, reversible — not a payment/booking tool, so the no-payment invariant holds.
-    # A multi-day getaway must complete in ONE loop (ADK specialists can't call a sibling's tools), so outings
-    # also gets: get_events (READ — detect a calendar conflict on the trip dates), create_event (draft the trip
-    # event), and delete_event/update_event (CONFIRM-tier — offer to CLEAR or RESCHEDULE a conflicting event,
-    # staged for approval). update_event is needed because the OUTINGS conflict block offers "move it" as well.
-    "outings_agent": ["find_places", "search_local_knowledge", "web_search", "fetch_page", "prepare_handoff",
-                      "set_goal", "delete_goal", "suggest_event", "get_events", "create_event", "delete_event", "update_event"],
-    # READ-only — gathers the day's data + local-knowledge nudges (e.g. a newsletter's "VegFest is Saturday").
-    "briefing_agent": ["get_events", "get_chores", "get_upcoming", "search_local_knowledge"],
-    "bills_agent": ["get_bills"],                                    # READ-only — reports bills (never pays)
-    # Manages the Docs Library: find docs, recategorize (move), or delete (staged for confirmation).
-    "files_agent": ["search_local_knowledge", "move_document", "delete_document"],
-    # The weekly meal planner — a deliberately WIDE specialist (the loop spans two domains): records
-    # the week via set_meal_plan (auto-tier, client-owned), derives the consolidated shopping set via
-    # add_shopping_item, reads the calendar for constraints (get_events — busy nights want quick
-    # dinners), and may research a dish's ingredients (local corpus first, then the web). set_goal so
-    # a longer ask ("plan the month") can be tracked. No destructive or payment-shaped tool.
-    "meal_planner_agent": ["set_meal_plan", "delete_meal_plan", "add_shopping_item", "get_events",
-                           "search_local_knowledge", "web_search", "fetch_page", "set_goal"],
-}
+# Each specialist's scoped slice of the MCP toolbelt (its tool_filter) — now DERIVED from the skill
+# folders (skills/<name>/SKILL.md frontmatter `tools:`). Kept as this dict so the agent-eval suite can
+# assert the allowlists — e.g. that NO specialist is granted a payment/checkout tool (the no-payment
+# invariant, structurally) — without spawning the MCP child. To change a slice, edit its SKILL.md.
+SPECIALIST_TOOLS: dict[str, list[str]] = {name: list(s.tools) for name, s in SKILLS.items()}
 
 
 def build_root_agent(access_token: str | None = None, model: object | None = None,
@@ -151,53 +124,24 @@ def build_root_agent(access_token: str | None = None, model: object | None = Non
     `model` is explicitly set, because a fallback/local attempt must swap the WHOLE graph."""
     m = model or MODEL
     root_model = (router_model or ROUTER_MODEL or m) if model is None else m
-    calendar_agent = Agent(
-        name="calendar_agent", model=m,
-        description="Creates and reschedules household calendar events.",
-        instruction=prompts.CALENDAR, tools=[_mcp(SPECIALIST_TOOLS["calendar_agent"], access_token)],
-    )
-    chores_agent = Agent(
-        name="chores_agent", model=m,
-        description="Assigns kids' chores (handles multi-kid phrases).",
-        instruction=prompts.CHORES, tools=[_mcp(SPECIALIST_TOOLS["chores_agent"], access_token)],
-    )
-    shopping_agent = Agent(
-        name="shopping_agent", model=m,
-        description="Adds shopping-list items and stages Amazon cart DRAFTS (no checkout).",
-        instruction=prompts.SHOPPING, tools=[_mcp(SPECIALIST_TOOLS["shopping_agent"], access_token)],
-    )
-    outings_agent = Agent(
-        name="outings_agent", model=m,
-        description="Finds real nearby venues to recommend, and stages reservation DRAFTS (no booking/payment).",
-        instruction=prompts.OUTINGS, tools=[_mcp(SPECIALIST_TOOLS["outings_agent"], access_token)],
-    )
-    briefing_agent = Agent(
-        name="briefing_agent", model=m,
-        description="Reviews the day/week ahead (events, due chores, what's coming up) and gives a briefing with nudges.",
-        instruction=prompts.BRIEFING, tools=[_mcp(SPECIALIST_TOOLS["briefing_agent"], access_token)],
-    )
-    bills_agent = Agent(
-        name="bills_agent", model=m,
-        description="Reports household bills found from email (payee, amount, due date). Never pays anything.",
-        instruction=prompts.BILLS, tools=[_mcp(SPECIALIST_TOOLS["bills_agent"], access_token)],
-    )
-    files_agent = Agent(
-        name="files_agent", model=m,
-        description="Manages the Docs Library: finds, recategorizes (move), and deletes saved documents.",
-        instruction=prompts.FILES, tools=[_mcp(SPECIALIST_TOOLS["files_agent"], access_token)],
-    )
-    meal_planner_agent = Agent(
-        name="meal_planner_agent", model=m,
-        description="Plans the week's dinners (given or proposed) and derives ONE consolidated shopping list for the week.",
-        instruction=prompts.MEAL_PLANNER, tools=[_mcp(SPECIALIST_TOOLS["meal_planner_agent"], access_token)],
-    )
+    # One specialist per loaded skill (name + description + persona + tool slice all come from its SKILL
+    # folder) — adding a specialist is dropping in a skills/<name>/ folder, no code change here.
+    sub_agents = [
+        Agent(
+            name=skill.name, model=m,
+            description=skill.description,
+            instruction=skill.instruction,
+            tools=[_mcp(list(skill.tools), access_token)],
+        )
+        for skill in SKILLS.values()
+    ]
     # The root concierge routes to a specialist via ADK's LLM-driven delegation (sub_agents). It holds no
     # tools of its own — it decides WHO acts; the specialist acts with its scoped toolbelt.
     return Agent(
         name="concierge", model=root_model,
         description="The family's safe household concierge — routes requests to specialist agents.",
         instruction=prompts.ROOT,
-        sub_agents=[calendar_agent, chores_agent, shopping_agent, outings_agent, briefing_agent, bills_agent, files_agent, meal_planner_agent],
+        sub_agents=sub_agents,
     )
 
 

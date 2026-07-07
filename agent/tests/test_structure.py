@@ -97,6 +97,21 @@ def test_outings_puts_itinerary_and_links_on_events():
     assert "REAL link you found" in prompts.OUTINGS
 
 
+def test_skills_load_from_folders():
+    # The refactor: each specialist is a self-contained skills/<name>/SKILL.md (frontmatter + persona).
+    from concierge.skills import SKILLS, load_skills
+    assert set(SKILLS) == set(agent.SPECIALIST_TOOLS), "loaded skills must match the derived tool slices"
+    # Each skill carries a description, a non-empty tool slice, and an instruction ending in the SAFETY footer.
+    for name, s in SKILLS.items():
+        assert s.description and s.tools and "NO MONEY EVER MOVES THROUGH YOU" in s.instruction, name
+    # The two content-reading skills get the external-content guard; the others do not.
+    assert "UNTRUSTED DATA" in SKILLS["bills_agent"].instruction
+    assert "UNTRUSTED DATA" in SKILLS["files_agent"].instruction
+    assert "UNTRUSTED DATA" not in SKILLS["calendar_agent"].instruction
+    # SPECIALIST_TOOLS is DERIVED from the folders (single source of truth), not a hand-kept duplicate.
+    assert agent.SPECIALIST_TOOLS == {n: list(s.tools) for n, s in load_skills().items()}
+
+
 def test_goal_crud_complete():
     # delete_goal completes goal CRUD (the agent could create/update but not hard-delete). outings_agent
     # owns set_goal, so it also owns delete_goal; ROOT + OUTINGS instruct removing a goal, not just abandoning.
