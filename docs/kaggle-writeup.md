@@ -2,7 +2,7 @@
 
 *An agent that runs your family's week.*
 
-> **Draft for the Kaggle Writeup editor** (AI Agents: Intensive Vibe Coding Capstone · **Track: Concierge Agents**). Paste into the Writeup; attach the cover image + video; set the project links. Word target ≤2,500 (this draft ≈2,470 — updated 2026-07-06 in-window with the meal-planner + cart-loop chain; if Kaggle flags the count, trim the "(a lacto-vegetarian family's tacos use black beans, never meat)" parenthetical and the Roadmap section; after saving, VERIFY the status still shows Submitted).
+> **Draft for the Kaggle Writeup editor** (AI Agents: Intensive Vibe Coding Capstone · **Track: Concierge Agents**). Paste into the Writeup; attach the cover image + video; set the project links. Word target ≤2,500 (this draft ≈2,375 by plain count — trimmed 2026-07-06 to clear Kaggle's stricter counter after it read the 2,470 version as 2,530; after saving, VERIFY the status still shows Submitted).
 >
 > Links to fill at submission: https://family-hub-web-420776046740.us-central1.run.app (Cloud Run) · video: https://youtu.be/4S2k9VOpdBc · repo: https://github.com/msampath/fam-hub
 
@@ -64,7 +64,7 @@ Elsewhere in the loop: the quick path runs a **bounded critic** (invalid actions
 
 Shipped after the video was recorded — inside the submission window, public on the repo — the concierge gained the two loops that most fully express the thesis, and they chain.
 
-**Plan the week.** *"Plan next week's lunches: rajma chawal, tacos, paneer butter masala…"* → one wide specialist plans the week — honoring the calendar, each member's diet (a lacto-vegetarian family's tacos use black beans, never meat), and days the family flags as covered — then derives **one** consolidated, buy-unit, store-routed shopping list. Full CRUD; the plan lands on a Today strip, not as noisy calendar events.
+**Plan the week.** *"Plan next week's lunches: rajma chawal, tacos, paneer butter masala…"* → one wide specialist plans the week — honoring the calendar, each member's diet (a vegetarian household's tacos come out with beans, not meat), and days the family flags as covered — then derives **one** consolidated, buy-unit, store-routed shopping list. Full CRUD; the plan lands on a Today strip, not as noisy calendar events.
 
 **Provision it.** The Kroger Cart API (Fred Meyer/QFC) turns that list into a **real cart write**, on the same safety spine:
 
@@ -99,7 +99,7 @@ The demo agent service runs `--allow-unauthenticated` with per-visitor RLS as th
 
 ## Roadmap: the $0 local concierge
 
-The deliberate next arc is **cloud → local**: the quick path already ships an Ollama integration behind a flag (`LOCAL_LLM_ENABLED`, schema-converted structured output, think-mode support, Gemini fallback), benchmarked on `gpt-oss:20b` (16 GB VRAM). Post-capstone: an eval harness replaying the app's golden prompts across engines (action validity, critic pass-rate, grounding adherence), the ADK concierge on a local model via LiteLLM, and the per-turn Escalate control re-enabled as the local↔cloud bridge — a household concierge whose data and inference never leave the house. Also queued: routine mining from the append-only logs (learned staples and rhythms as reviewable suggestions), durable agent jobs, and Home Assistant integration behind the existing step-up tier. The next rung of the authority ladder is deliberate too: **browser-assisted form-fill** (an agent-driven browser types the gathered details into the venue's form and stops before submit) is designed for the step-up PIN tier — but it stays roadmap until the pre-submit side effects (inventory holds), bot-defense/ToS reality, and the PII-injection surface of auto-typing into fetched pages each have an answer. Today the human types; that's a feature. Where a retailer offers a *sanctioned* path, the ladder climbs sooner — the Kroger cart loop above landed in-window this way, and an Instacart adapter (shoppable lists across 1,500+ banners) is the next connection card.
+The deliberate next arc is **cloud → local**: the quick path already ships an Ollama integration behind a flag (`LOCAL_LLM_ENABLED`, schema-converted structured output, Gemini fallback), benchmarked on `gpt-oss:20b`. Post-capstone: the ADK concierge on a local model via LiteLLM and an eval harness replaying golden prompts across engines — a concierge whose data and inference never leave the house. The authority ladder climbs deliberately: **browser-assisted form-fill** (type the gathered details, stop before submit) is designed for the step-up tier but stays roadmap until the pre-submit side effects and PII surface have answers — today the human types; that's a feature. Where a retailer offers a *sanctioned* path it climbs sooner: the Kroger loop landed in-window this way, and an Instacart adapter (shoppable lists across 1,500+ banners, covering Costco) is the next connection card.
 
 ## The build
 
