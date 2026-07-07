@@ -2,7 +2,8 @@
 // This week's dinners strip (the meal planner's Today surface): newest week's day chips, today
 // highlighted, ✨ on agent-proposed days, read-only with the copilot hint. Kid-safe as-is.
 import { describe, it, expect } from 'vitest';
-import { screen } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import DinnersStrip from '../components/shell/DinnersStrip';
 import { renderWithApp } from './helpers/mockContexts';
 import { toLocalDateStr, addOneDayUTC } from '../utils/dates';
@@ -46,6 +47,16 @@ describe('DinnersStrip', () => {
     const lunchChip = screen.getByLabelText(/lunch: Puliodharai/);
     expect(lunchChip.textContent).toMatch(/lunch · /i); // the meal tag on a non-dinner chip
     expect(screen.getByLabelText(/dinner: Paneer butter masala/)).toBeInTheDocument(); // dinners still there
+  });
+
+  it('a per-meal Clear deletes that meal for that week (manual CRUD); kid mode hides it', async () => {
+    const user = userEvent.setup();
+    const { ctx } = renderWithApp(<DinnersStrip />, { mealPlans: [PLAN] });
+    await user.click(screen.getByLabelText('Clear the dinner plan'));
+    expect(ctx.deleteMealPlan).toHaveBeenCalledWith({ meal: 'dinner', weekStart: PLAN.weekStart });
+    // Kid mode → no Clear (bulk/destructive).
+    const k = renderWithApp(<DinnersStrip />, { mealPlans: [PLAN], kidMode: true });
+    expect(within(k.container).queryByLabelText('Clear the dinner plan')).not.toBeInTheDocument();
   });
 
   it('empty state invites a plan through the copilot', () => {

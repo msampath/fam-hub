@@ -39,7 +39,7 @@ def test_meal_planner_slice_and_persona():
     # carries NO destructive or payment-shaped tool; its persona pins the two contract points the
     # client depends on: re-issue the FULL week (replace-by-week) and ONE consolidated shopping set.
     tools = set(agent.SPECIALIST_TOOLS["meal_planner_agent"])
-    assert {"set_meal_plan", "add_shopping_item", "get_events"} <= tools
+    assert {"set_meal_plan", "delete_meal_plan", "add_shopping_item", "get_events"} <= tools
     assert not (tools & {"delete_event", "delete_chore", "clear_chores", "delete_shopping_item",
                          "add_to_cart", "reserve", "prepare_handoff"})
     assert "set_meal_plan" in prompts.MEAL_PLANNER
@@ -54,13 +54,17 @@ def test_meal_planner_slice_and_persona():
     assert "STARTING TOMORROW" in prompts.MEAL_PLANNER
     # Dietary is binding — a lacto-veg family got ground meat suggested for their tacos.
     assert "DIET IS BINDING" in prompts.MEAL_PLANNER
-    assert "lacto-vegetarian" in prompts.MEAL_PLANNER
+    assert "lacto-vegetarian" in prompts.MEAL_PLANNER.lower()
+    # CRUD: the planner can DELETE, not just replace ("I cannot delete the entire meal plan").
+    assert "delete_meal_plan" in prompts.MEAL_PLANNER
 
 
 def test_diet_honored_where_ingredients_are_derived():
     # Both meal planner AND single-dish shopping derive ingredients — both must respect the roster's diet.
     for text in (prompts.MEAL_PLANNER, prompts.SHOPPING):
-        assert "NO meat, poultry, or fish" in text
+        assert "NO meat, poultry, or fish" in text or "no meat, poultry, or fish" in text
+        # Lacto-vegetarian is NOT vegan — dairy stays (the bug was over-stripping paneer/cream).
+        assert "DAIRY IS" in text.upper() or "dairy is fine" in text.lower()
 
 
 def test_outings_treats_web_content_as_untrusted():

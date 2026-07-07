@@ -11,7 +11,7 @@ const DAY_LABEL = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MEAL_ORDER = { breakfast: 0, lunch: 1, dinner: 2 } as const;
 
 export default function DinnersStrip() {
-  const { mealPlans, copilotName } = useApp();
+  const { mealPlans, copilotName, deleteMealPlan, kidMode } = useApp();
   // Newest week's plans — a week can carry SEPARATE plans per meal (dinner + lunch coexist; the
   // dinner-only refusal of "plan next week's lunches" was a live bug). Breakfast → lunch → dinner.
   const sorted = [...mealPlans].sort((a, b) => (b.weekStart || '').localeCompare(a.weekStart || ''));
@@ -37,7 +37,8 @@ export default function DinnersStrip() {
           {plans.map(plan => {
             const meal = plan.meal || 'dinner';
             return (
-              <div key={`${plan.weekStart}-${meal}`} className="flex gap-2 overflow-x-auto pb-1">
+              <div key={`${plan.weekStart}-${meal}`} className="flex items-start gap-2">
+              <div className="flex flex-1 gap-2 overflow-x-auto pb-1">
                 {plan.days.map(d => {
                   const isToday = d.date === today;
                   const dow = DAY_LABEL[parseLocalDate(d.date).getDay()];
@@ -60,6 +61,20 @@ export default function DinnersStrip() {
                     </div>
                   );
                 })}
+              </div>
+              {/* Manual delete (completes CRUD alongside the copilot's delete_meal_plan). Kid mode hides it. */}
+              {!kidMode && (
+                <button
+                  type="button"
+                  onClick={() => deleteMealPlan({ meal, weekStart: plan.weekStart })}
+                  aria-label={`Clear the ${meal} plan`}
+                  title={`Clear the ${meal} plan`}
+                  className="mt-0.5 flex-shrink-0 rounded-[8px] px-2 py-1 text-[11px] font-bold"
+                  style={{ border: `2px solid ${C.elevated}`, background: C.app, color: C.muted }}
+                >
+                  Clear
+                </button>
+              )}
               </div>
             );
           })}

@@ -135,7 +135,7 @@ SPECIALIST_TOOLS: dict[str, list[str]] = {
     # add_shopping_item, reads the calendar for constraints (get_events — busy nights want quick
     # dinners), and may research a dish's ingredients (local corpus first, then the web). set_goal so
     # a longer ask ("plan the month") can be tracked. No destructive or payment-shaped tool.
-    "meal_planner_agent": ["set_meal_plan", "add_shopping_item", "get_events",
+    "meal_planner_agent": ["set_meal_plan", "delete_meal_plan", "add_shopping_item", "get_events",
                            "search_local_knowledge", "web_search", "fetch_page", "set_goal"],
 }
 

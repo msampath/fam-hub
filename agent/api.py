@@ -178,7 +178,8 @@ async def chat(body: ChatIn, authorization: str | None = Header(default=None)):
         # Use the REAL ages; never guess. DIETARY (when present) is BINDING for any food/meal/shopping
         # suggestion — a vegetarian/lacto-vegetarian household never gets meat, poultry, or fish.
         context += f" Family members: {body.family}. Use these exact ages — do not guess. Honor every " \
-                   f"member's dietary restriction in any food, meal, or shopping suggestion."
+                   f"member's dietary restriction in any food, meal, or shopping suggestion (lacto-vegetarian " \
+                   f"= no meat/poultry/fish but dairy is fine; only vegan drops dairy and egg)."
     if body.stores:
         # Household-defined store lists (Phase-5): clamp count+length; the shopping specialist routes
         # items to THESE names instead of the default Costco/Indian Store/Grocery Store/Other set.

@@ -258,6 +258,21 @@ const REGISTRY_TOOL_DEFS: Omit<McpToolDef, 'run'>[] = [
     },
   },
   {
+    name: 'delete_meal_plan',
+    description: 'DELETE a meal plan (use this to remove one — do NOT say you can only replace it). '
+      + 'Auto-applied. Pass `meal` ("lunch"/"dinner"/"breakfast") to remove that meal\'s plan, and/or '
+      + '`weekStart` (YYYY-MM-DD, the Monday) for a specific week; pass `all:true` to clear EVERY meal '
+      + 'plan. At least one of meal / weekStart / all is required.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        meal: { type: 'string', description: '"dinner" | "lunch" | "breakfast" — which meal\'s plan to delete.' },
+        weekStart: { type: 'string', description: 'The week\'s Monday YYYY-MM-DD (omit to delete that meal across weeks).' },
+        all: { type: 'boolean', description: 'true = delete every meal plan.' },
+      },
+    },
+  },
+  {
     name: 'reserve',
     description: 'Stage a reservation DRAFT — a booking deep-link the parent opens to book themselves. NEVER books or pays (no-payment invariant). Confirm tier.',
     inputSchema: {

@@ -69,7 +69,7 @@ import { mergeDeduplicateEvents, detectRecurringGroups, filterHiddenEvents, appl
 import { buildDailyReminder, shouldFireDailyReminder, dueEventReminders, type ReminderContent } from './utils/reminders';
 import { filterConflictWindow, detectConflicts } from './utils/conflicts';
 import type { RecurringGroup } from './utils/events';
-import { buildEventFromPayload, buildEventUpdateFromPayload, buildChoreFromPayload, buildChoresFromPayload, choreDedupeKey, suggestionKey, buildReservationDraft, buildCartDraft, resolveEventDeletion } from './utils/aiActions';
+import { buildEventFromPayload, buildEventUpdateFromPayload, buildChoreFromPayload, buildChoresFromPayload, choreDedupeKey, suggestionKey, buildReservationDraft, buildCartDraft, resolveEventDeletion, type MealPlanDelete } from './utils/aiActions';
 import type { GeneratedChore } from './utils/chorePlan';
 import { aiErrorMessage } from './utils/aiErrors';
 import { mergeBills, type ParsedBillLike } from './utils/billsStore';
@@ -791,6 +791,14 @@ export default function App() {
         .slice(0, 8);
     });
   };
+  // Delete meal plans matching a delete_meal_plan selector (auto-tier, client-owned like set_meal_plan) —
+  // and the DinnersStrip's per-meal clear button. Keeps a plan unless it matches ALL given selectors.
+  const deleteMealPlan = (d: MealPlanDelete) =>
+    setMealPlans(prev => prev.filter(p => {
+      if (d.all) return false;
+      const matches = (!d.meal || (p.meal || 'dinner') === d.meal) && (!d.weekStart || p.weekStart === d.weekStart);
+      return !matches;
+    }));
   // When a goal-tied action is STAGED for approval, mark the goal's next pending step "blocked" (waiting on
   // the human) and link it to that Approvals entry — so the goal card shows "waiting on you" and the resume
   // hook can match the step back when it's approved. (Pure reducer in utils/goals.)
@@ -2942,6 +2950,10 @@ export default function App() {
     const plans = (Array.isArray(actions) ? actions : [])
       .filter(a => a?.tool === 'set_meal_plan' && a.artifact)
       .map(a => a.artifact as MealPlan);
+    // delete_meal_plan (CRUD): auto-tier, client-applied — remove plans matching each selector.
+    const planDeletes = (Array.isArray(actions) ? actions : [])
+      .filter(a => a?.tool === 'delete_meal_plan' && a.artifact)
+      .map(a => a.artifact as MealPlanDelete);
     const { appliedCount, ledger, summary } = buildAgentActionResult(actions, () => 'led-' + uuid(), authorStamp());
     // Tie this turn's staged approvals to the goal it serves (Phase 1: same-turn association) so approving
     // one ADVANCES the goal's plan (the resume hook in resolveLedgerUpdate). Only the EXTERNAL/booking drafts
@@ -2958,6 +2970,7 @@ export default function App() {
     if (appliedCount) await refreshHouseholdData(); // auto-tier writes already persisted server-side → resync local
     for (const g of goals) upsertGoal(g);
     for (const p of plans) upsertMealPlan(p);
+    for (const d of planDeletes) deleteMealPlan(d);
     if (staged.length) setActionLedger(prev => [...prev, ...staged].slice(-LEDGER_CAP));
     // (The agent's create_event writes reach the parent's real Google Calendar via the silent auto-push effect
     // when a Push rule is connected — so we no longer stage a redundant "Push N events?" approval here. See the
@@ -2965,7 +2978,7 @@ export default function App() {
     // Each goal-step approval marks the goal's next pending step "waiting on you" (zips in order).
     if (goalId) staged.forEach(e => { if (GOAL_STEP_TOOLS.has(e.tool)) blockGoalStep(goalId, e.id); });
     const goalNote = goals.length ? `🎯 Tracking goal: ${goals[goals.length - 1].text}` : '';
-    const mealNote = plans.length ? `🍽 Dinner plan set — ${plans[plans.length - 1].days.length} day${plans[plans.length - 1].days.length === 1 ? '' : 's'} on the Today strip.` : '';
+    const mealNote = plans.length ? `🍽 Dinner plan set — ${plans[plans.length - 1].days.length} day${plans[plans.length - 1].days.length === 1 ? '' : 's'} on the Today strip.` : planDeletes.length ? '🍽 Meal plan updated on the Today strip.' : '';
     // suggest_event is auto-tier + client-owned (like set_goal): the agent's outings picks ride back as
     // tap-to-add chips on this turn's assistant message (rendered by CopilotBar), NOT Approve-queue rows.
     const suggestions = (Array.isArray(actions) ? actions : [])
@@ -3260,7 +3273,7 @@ export default function App() {
     isScanningPantry, pantryScan, handleScanPantryPhoto, confirmPantryScan, dismissPantryScan,
     shoppingAiError, setShoppingAiError,
     goalsList, toggleGoal, deleteGoal, toggleStep,
-    mealPlans,
+    mealPlans, deleteMealPlan,
     choresList, setChoresList,
     authorStamp,
     familyMembers,

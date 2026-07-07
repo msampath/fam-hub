@@ -19,6 +19,7 @@ import {
   buildChoreUpdate,
   buildGoalFromPayload,
   buildMealPlanFromPayload,
+  buildMealPlanDelete,
   normalizeShoppingItems,
   buildReservationDraft,
   buildCartDraft,
@@ -99,6 +100,14 @@ export const TOOL_REGISTRY: Record<string, ConciergeTool> = {
     riskTier: 'auto',
     applyMode: 'auto',
     validate: (p, ctx) => buildMealPlanFromPayload(p, ctx.today),
+  },
+  // Delete a meal plan (completes CRUD) — auto tier, client-owned like set_meal_plan; consistent with
+  // set_meal_plan's replace-a-week (also auto, also destroys prior state). Client removes the match.
+  delete_meal_plan: {
+    name: 'delete_meal_plan',
+    riskTier: 'auto',
+    applyMode: 'auto',
+    validate: (p) => buildMealPlanDelete(p),
   },
   add_shopping_item: {
     name: 'add_shopping_item',

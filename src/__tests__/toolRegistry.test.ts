@@ -19,7 +19,7 @@ describe('toolRegistry allowlist parity', () => {
   });
   it('registers exactly the known tools (home_control deferred to C2 — not registered yet)', () => {
     expect([...ALLOWED_COPILOT_ACTIONS].sort()).toEqual(
-      ['add_chore', 'add_shopping_item', 'add_to_cart', 'clear_chores', 'create_event', 'delete_chore', 'delete_document', 'delete_event', 'delete_shopping_item', 'move_document', 'reserve', 'set_goal', 'set_meal_plan', 'update_chore', 'update_event'],
+      ['add_chore', 'add_shopping_item', 'add_to_cart', 'clear_chores', 'create_event', 'delete_chore', 'delete_document', 'delete_event', 'delete_meal_plan', 'delete_shopping_item', 'move_document', 'reserve', 'set_goal', 'set_meal_plan', 'update_chore', 'update_event'],
     );
   });
   it('doc tools: move = auto (reversible), delete = confirm (destructive)', () => {
@@ -123,6 +123,22 @@ describe('set_meal_plan tool (weekly dinner planner, auto tier, client-owned)', 
     expect(TOOL_REGISTRY.set_meal_plan.validate({ days: [] }, ctx)).toBeNull();
     expect(TOOL_REGISTRY.set_meal_plan.validate({ days: [{ date: '2025-01-01', dish: 'Ancient' }] }, ctx)).toBeNull();
     expect(TOOL_REGISTRY.set_meal_plan.validate({ days: [{ date: '2026-06-24' }] }, ctx)).toBeNull(); // no dish
+  });
+});
+
+describe('delete_meal_plan tool (CRUD delete — auto tier, client-owned)', () => {
+  it('is auto-tier and validates a selector (meal / weekStart / all)', () => {
+    expect(TOOL_REGISTRY.delete_meal_plan.riskTier).toBe('auto');
+    expect(TOOL_REGISTRY.delete_meal_plan.validate({ meal: 'lunch' }, ctx)).toEqual({ meal: 'lunch' });
+    expect(TOOL_REGISTRY.delete_meal_plan.validate({ weekStart: '2026-06-22' }, ctx)).toEqual({ weekStart: '2026-06-22' });
+    expect(TOOL_REGISTRY.delete_meal_plan.validate({ meal: 'dinner', weekStart: '2026-06-22' }, ctx)).toEqual({ meal: 'dinner', weekStart: '2026-06-22' });
+    expect(TOOL_REGISTRY.delete_meal_plan.validate({ all: true }, ctx)).toEqual({ all: true });
+  });
+  it('rejects an empty/garbage payload — never lets "nothing" mean delete-everything', () => {
+    expect(TOOL_REGISTRY.delete_meal_plan.validate({}, ctx)).toBeNull();
+    expect(TOOL_REGISTRY.delete_meal_plan.validate({ meal: 'brunch' }, ctx)).toBeNull();   // bad meal, no other selector
+    expect(TOOL_REGISTRY.delete_meal_plan.validate({ all: false }, ctx)).toBeNull();
+    expect(TOOL_REGISTRY.delete_meal_plan.validate(null, ctx)).toBeNull();
   });
 });
 

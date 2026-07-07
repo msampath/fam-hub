@@ -15,6 +15,7 @@ MUTATING_TOOLS = {"create_event", "update_event", "delete_event", "add_chore", "
                   "delete_chore", "clear_chores", "update_chore", "delete_shopping_item",
                   "set_goal",  # set_goal is auto-tier; the client upserts its artifact into the goals collection
                   "set_meal_plan",  # auto-tier; the client upserts the week into the mealplan collection
+                  "delete_meal_plan",  # auto-tier; the client removes matching plans (completes CRUD)
                   "suggest_event"}  # auto-tier; the client renders its artifact as a tap-to-add chip (not a write)
 
 

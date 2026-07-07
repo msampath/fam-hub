@@ -75,6 +75,8 @@ export interface AppCtx {
   toggleStep: (goalId: string, stepIndex: number) => void;
   // Weekly dinner plans (the meal planner) — newest week first; DinnersStrip reads these.
   mealPlans: MealPlan[];
+  // Delete meal plans by selector (the strip's per-meal clear + the agent's delete_meal_plan).
+  deleteMealPlan: (d: { meal?: 'breakfast' | 'lunch' | 'dinner'; weekStart?: string; all?: boolean }) => void;
   setShoppingAiError: React.Dispatch<React.SetStateAction<string | null>>;
 
   // Chores

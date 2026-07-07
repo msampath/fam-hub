@@ -290,6 +290,22 @@ export function buildMealPlanFromPayload(p: any, todayStr: string): MealPlan | n
   return { id: 'meal-' + uuid(), weekStart: toLocalDateStr(first), meal, days, status: 'active' };
 }
 
+export interface MealPlanDelete { meal?: 'breakfast' | 'lunch' | 'dinner'; weekStart?: string; all?: boolean }
+// Validate a delete_meal_plan payload — completes CRUD on the planner (the agent could create/update
+// but not delete: "I cannot delete the entire meal plan"). Remove by meal and/or weekStart, or
+// {all:true} to clear every plan. At least ONE selector is required so an empty/garbage payload can
+// NEVER mean "delete everything". Pure; client-applied like set_meal_plan (auto-tier). Null if empty.
+export function buildMealPlanDelete(p: any): MealPlanDelete | null {
+  if (!p || typeof p !== 'object') return null;
+  const out: MealPlanDelete = {};
+  if (p.all === true) out.all = true;
+  const meal = (['breakfast', 'lunch', 'dinner'] as const).find(m => m === p.meal);
+  if (meal) out.meal = meal;
+  const ws = String(p.weekStart || '').slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(ws)) out.weekStart = ws;
+  return (out.all || out.meal || out.weekStart) ? out : null;
+}
+
 // Stable key for a copilot suggestion (date + lowercased title) — used to mark which suggestions
 // have already been added so the ＋Create button can flip to ✓ Added. Pure.
 export function suggestionKey(s: { start?: string; title?: string }): string {
