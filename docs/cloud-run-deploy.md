@@ -11,7 +11,7 @@ drafts into Approvals).
   Browser ─▶  family-hub-web        ──server-to-server──▶  concierge-agent
               (Dockerfile.web)        AGENT_BASE_URL          (Dockerfile)
               Express + React           /chat                 Python ADK + Node MCP child
-              · in-app copilot                                · 7 tool-scoped specialists
+              · in-app copilot                                · 8 tool-scoped specialists
               · morning agent: Resend email                   · per-request visitor-JWT isolation
                 + planner → confirm-tier drafts
                         │                                            │
@@ -82,7 +82,7 @@ gcloud run deploy concierge-agent \
 ```
 
 Why these flags:
-- **`--memory 2Gi --cpu 2 --concurrency 4`** — each `/chat` spawns **7 Node MCP children** (one per specialist). High concurrency × 7 children would exhaust memory; cap it.
+- **`--memory 2Gi --cpu 2 --concurrency 4`** — each `/chat` spawns **8 Node MCP children** (one per specialist). High concurrency × 8 children would exhaust memory; cap it.
 - **`--min-instances 1`** — keeps one instance warm so the MCP children don't cold-start mid-demo (the documented session-timeout risk). **Set back to 0 after the demo to stop paying for idle.**
 - **`--timeout 300`** — multi-agent runs make 3–5 model calls; the default 60s can clip a slow outings loop.
 - **`CONCIERGE_FALLBACK`** — comma-separated model chain tried in order when the primary throws a

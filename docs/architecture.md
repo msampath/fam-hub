@@ -16,7 +16,7 @@ local **SQLite** file on the appliance.
 | --- | --- | --- |
 | **Client** | React 19 + Vite + TypeScript | The whole UI + state hub (`src/App.tsx`), persisted collections, the Copilot bar, calendar/chores/shopping, the Approvals queue. |
 | **Web server** | Express (`server.ts`) | Auth + rate-limit, the Copilot quick-path (Gemini + grounding), parse/geocode endpoints, the agent proxy, the **morning agent** (digest email + a planner pass that stages confirm-tier drafts), inbox scans (bills/packages/kids/newsletters — fields only), Google-OAuth token refresh, SSRF-guarded scraping. |
-| **Agent service** | Python + Google ADK (`agent/`, FastAPI) | A root **concierge** engine routing to 7 tool-scoped specialists (calendar, chores, shopping, outings, briefing, bills, files). Runs on Gemini. |
+| **Agent service** | Python + Google ADK (`agent/`, FastAPI) | A root **concierge** engine routing to 8 tool-scoped specialists (calendar, chores, shopping, meal-planner, outings, briefing, bills, files). Runs on Gemini. |
 | **Tool server** | Node MCP server (`src/mcp/`) | The agent's toolbelt over stdio: calendar/chores/shopping writes, goals, web research, booking hand-offs, doc management — each tier-gated. |
 | **Storage** | Supabase Postgres **or** SQLite | Household data as JSON collections. Cloud: RLS-scoped `family_data`. Appliance: a local SQLite DB behind Express. |
 
@@ -40,7 +40,7 @@ flowchart LR
   end
   subgraph AGENT["AGENT · Python ADK (agent/)"]
     ROOT["concierge (router)"]
-    SPEC["7 specialists"]
+    SPEC["8 specialists"]
   end
   MCP["Node MCP toolbelt (src/mcp/)"]
   subgraph EXT["EXTERNAL"]

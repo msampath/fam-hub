@@ -34,6 +34,14 @@ Delete all chores, they're messed up
 → **chores_agent** · `clear_chores` → **requires confirmation** · *Point at:* it does **not** wipe silently —
 it stages the deletion in **Approvals** for your OK. *This is the security beat: destructive = confirm-tier.*
 
+```
+Plan next week's dinners: Mon paneer butter masala, Tue tacos, Wed we're out, Thu dal, Fri roast chicken
+```
+→ **meal_planner_agent** · `set_meal_plan` + `add_shopping_item` (auto) · *Point at:* one wide specialist
+plans the week on the **This week's meals** strip AND derives **one** consolidated, diet-aware,
+store-routed shopping list (tacos → beans for a veg household; "we're out" adds nothing). Then
+*"delete the planned dinners"* → `delete_meal_plan`. *The agentic chain: plan → list → (Kroger) real cart.*
+
 ---
 
 ## Segment 4c — The full research loop (outings)

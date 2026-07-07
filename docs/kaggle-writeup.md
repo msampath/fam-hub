@@ -2,7 +2,7 @@
 
 *An agent that runs your family's week.*
 
-> **Draft for the Kaggle Writeup editor** (AI Agents: Intensive Vibe Coding Capstone · **Track: Concierge Agents**). Paste into the Writeup; attach the cover image + video; set the project links. Word target ≤2,500 (this draft ≈2,400 — updated 2026-07-06 in-window with the "Added agentic scope" cart-loop section; after saving on Kaggle, VERIFY the status still shows Submitted).
+> **Draft for the Kaggle Writeup editor** (AI Agents: Intensive Vibe Coding Capstone · **Track: Concierge Agents**). Paste into the Writeup; attach the cover image + video; set the project links. Word target ≤2,500 (this draft ≈2,470 — updated 2026-07-06 in-window with the meal-planner + cart-loop chain; if Kaggle flags the count, trim the "(a lacto-vegetarian family's tacos use black beans, never meat)" parenthetical and the Roadmap section; after saving, VERIFY the status still shows Submitted).
 >
 > Links to fill at submission: https://family-hub-web-420776046740.us-central1.run.app (Cloud Run) · video: https://youtu.be/4S2k9VOpdBc · repo: https://github.com/msampath/fam-hub
 
@@ -27,7 +27,7 @@ The valuable work is multi-step and open-ended: *"plan a Mount Rainier day trip 
 React shell ─▶ Express (server.ts) ──▶ quick path: deterministic FACTS harness + one model call
                     │  /api/agent/chat (same-origin proxy, CSP-safe)
                     ▼
-        FastAPI + ADK root Concierge ─ LLM delegation ▶ 7 tool-scoped specialists
+        FastAPI + ADK root Concierge ─ LLM delegation ▶ 8 tool-scoped specialists
                     │  MCP over stdio (Node child process, per-request)
                     ▼
         MCP toolbelt (Tool Registry) ─▶ Supabase Postgres (writes under the VISITOR's JWT)
@@ -37,7 +37,7 @@ Cloud Scheduler ─▶ morning agent: digest email + grounded planner → confir
 Gmail (opt-in, fields only) ─▶ inbox scans: bills → collection · packages/kids' events → one-tap adds
 ```
 
-**Two engines, one copilot.** Simple asks run a *quick path*: the server pre-fetches verified FACTS blocks (dates, per-person availability, weather + AQI + pollen, real nearby venues with drive times, real ticketed events, the household's document corpus) and makes **one** grounded model call. This is a deliberate reliability pattern — the model reasons over server-verified data instead of tool-calling for reads, so a small model can't hallucinate a venue. Action and planning turns route to the **ADK multi-agent concierge**: a root router that holds *no tools* and delegates to seven specialists (calendar / chores / shopping / outings / briefing / bills / files), each connected to the MCP toolbelt through a per-specialist `tool_filter` — a specialist *cannot call a tool outside its slice*. The split buys tool-scoping and small-model routing reliability; `outings_agent` is the deep loop (research → plan → execute → handoff), and the others are honest thin adapters.
+**Two engines, one copilot.** Simple asks run a *quick path*: the server pre-fetches verified FACTS blocks (dates, per-person availability, weather + AQI + pollen, real nearby venues with drive times, real ticketed events, the household's document corpus) and makes **one** grounded model call. This is a deliberate reliability pattern — the model reasons over server-verified data instead of tool-calling for reads, so a small model can't hallucinate a venue. Action and planning turns route to the **ADK multi-agent concierge**: a root router that holds *no tools* and delegates to eight specialists (calendar / chores / shopping / meal-planner / outings / briefing / bills / files), each connected to the MCP toolbelt through a per-specialist `tool_filter` — a specialist *cannot call a tool outside its slice*. The split buys tool-scoping and small-model routing reliability; `outings_agent` is the deep loop (research → plan → execute → handoff), and the others are honest thin adapters.
 
 **Capabilities ≠ specialists — agents exist where durable data exists.** One taxonomy note the design enforces: inbox intelligence surfaces three kinds of finds from email (bills, package tracking, kids' events — parsed fields only, bodies never stored), yet only *bills* grew a specialist. That's deliberate: bills persist as their own queryable collection, so there's real state for an agent to answer from (`get_bills`, read-only). Package and event finds are one-tap suggestions that become *calendar* records the moment you accept them — from then on the calendar capability owns them. We add an agent where a durable store exists, not one per feature; that keeps every specialist honest about what it can actually know.
 
@@ -60,22 +60,26 @@ Most submissions are reactive chatbots. Family-Hub's scheduler runs a **closed-a
 
 Elsewhere in the loop: the quick path runs a **bounded critic** (invalid actions trigger up to two corrective re-prompts, each adopted only if it strictly reduces verified issues); staged drafts support **human-in-the-loop "Modify"** ("make it vegetarian" recalculates just that draft, still pending); and the outings loop tracks its work as a **goal** with visible steps.
 
-## Added agentic scope (in-window): intent → a real grocery cart
+## Added agentic scope (in-window): from a week's plan to a real cart
 
-Shipped after the video was recorded — inside the submission window, public on the repo — the concierge closed its last loop: **from intent to a real-world state change.** The Kroger Cart API (Fred Meyer/QFC) turns the `add_to_cart` draft into a **real cart write**, on the same safety spine:
+Shipped after the video was recorded — inside the submission window, public on the repo — the concierge gained the two loops that most fully express the thesis, and they chain.
+
+**Plan the week.** *"Plan next week's lunches: rajma chawal, tacos, paneer butter masala…"* → one wide specialist plans the week — honoring the calendar, each member's diet (a lacto-vegetarian family's tacos use black beans, never meat), and days the family flags as covered — then derives **one** consolidated, buy-unit, store-routed shopping list. Full CRUD; the plan lands on a Today strip, not as noisy calendar events.
+
+**Provision it.** The Kroger Cart API (Fred Meyer/QFC) turns that list into a **real cart write**, on the same safety spine:
 
 - **Connections, not per-list stores.** The household connects the Kroger API once; the physical store is a property of the *connection* ("Shop at → Fred Meyer - Issaquah") and lists link to it — one store, many lists, the way families shop.
 - **Pick-or-decline matching.** Kroger's fuzzy search returns *frying pans* for "paneer," so a schema-enforced model call must choose from the listed candidates or return −1; validation deterministically drops out-of-range and out-of-stock picks, and low-confidence declines get one focused second-pass re-judge.
 - **Honest, line-per-item approval.** The parent approves exactly `Ginger (1 piece) → Organic Ginger Root (1 lb, $3.99)`, with per-item reasons for the rest: *no match at this store* ≠ *couldn't confidently match* ≠ *search failed*.
 - **A cart, never a checkout.** Approve → the items appear in the family's actual cart; the public API has **no payment endpoint**, so the no-payment invariant holds by contract.
 
-Verified live end-to-end: dish ask → buy-unit ingredients → routed lists → per-list send → approval → items in the real Fred Meyer cart. The hosted demo runs the submission-freeze build; the loop ships on the repo's default branch with tests and a setup guide (`docs/kroger-setup.md`).
+Verified live end-to-end: a week's plan → deduped, store-routed ingredients → per-list send → one approval → items in the real Fred Meyer cart. The hosted demo runs the submission-freeze build; both loops ship on the repo's default branch with tests and setup docs.
 
 ## Course concepts demonstrated (6 of 6)
 
 | Concept | Evidence |
 | --- | --- |
-| **Multi-agent (ADK)** | `agent/concierge/agent.py` — root + 7 tool-filtered specialists, LLM delegation; structure pinned by offline pytest |
+| **Multi-agent (ADK)** | `agent/concierge/agent.py` — root + 8 tool-filtered specialists, LLM delegation; structure pinned by offline pytest |
 | **MCP server** | `src/mcp/server.ts`, `conciergeTools.ts` — stdio toolbelt; tiers + no-payment + provenance enforced here |
 | **Security** | Everything above + helmet/CSP, SSRF guard with per-hop IP pinning, scrypt step-up PIN, RLS isolation, kid mode |
 | **Deployability** | Cloud Run (two services + Cloud Scheduler) with a reproduce-the-deploy doc; one-command `docker compose up`; a zero-cloud LAN appliance (SQLite) with prebuilt GHCR images |
@@ -87,7 +91,7 @@ Verified live end-to-end: dish ask → buy-unit ingredients → routed lists →
 ## Try it
 
 - **Live demo (no login):** https://family-hub-web-420776046740.us-central1.run.app → *Try the demo* → follow the README's 7-step **Golden Path** (grounded ask → agent write → multi-step trip with goal + verified handoff → **the payment refusal** → morning planner → kid mode).
-- **Repo:** https://github.com/msampath/fam-hub — machine-first README (Concept→Evidence table, Mermaid architecture), 1,191 Vitest tests + offline agent-structure pytest + a live refusal/injection eval, `docker compose up --build` for the full stack.
+- **Repo:** https://github.com/msampath/fam-hub — machine-first README (Concept→Evidence table, Mermaid architecture), 1,200+ Vitest tests + offline agent-structure pytest + a live refusal/injection eval, `docker compose up --build` for the full stack.
 
 ## Honest limitations
 

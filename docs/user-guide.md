@@ -110,8 +110,26 @@ Turn on **Kid mode** in Manage (it's per-device — made for the kitchen wall ta
 - Or skip the recipe entirely — tell the Copilot ***"I want to make paneer butter masala tomorrow"***
   and it derives the ingredients itself, in **buy units** ("Paneer (400 g pack)", "1 small bag"), skips
   the pantry basics, and sorts them into the right store lists.
-- Each store list has its own **Clear** button (checked-off items go, starred staples stay), plus the
+- Each store list has its own **Clear** button (checked-off items go, starred staples stay) and a
+  **master check/uncheck** box (one tap marks the whole list done, or brings it all back), plus the
   global **Clear done**.
+
+### Plan the week's meals — one ask, a whole shopping list
+
+Give the Copilot the week: ***"Plan next week's lunches: rajma chawal, tacos, paneer butter masala,
+tomato rasam"*** (dinners by default; say "lunches"/"breakfasts" for those — they stack per week). It:
+
+- puts the week on a **This week's meals** strip on the Today page (today highlighted; ✨ marks days
+  it proposed itself; each meal row has a **Clear**);
+- derives **one consolidated shopping list** for the whole week — garlic once, not per dish — in buy
+  units, routed to the right store lists;
+- honors your family's **diet** (a lacto-vegetarian family's tacos come out as bean/paneer tacos, and
+  dairy stays — *lacto*), skips days you flag as covered ("we're out", "we'll buy it"), and plans the
+  **next 7 days** (never today, which is usually too late to shop for).
+
+Change it in plain language: ***"swap Thursday to rajma"*** re-plans that day (and adds only what's
+new); ***"delete the planned lunches"*** clears them. Ask ***"what's for dinner Tuesday?"*** any time.
+Then send the list straight to a real cart (below).
 
 ### Kroger cart — send a list to a real cart
 

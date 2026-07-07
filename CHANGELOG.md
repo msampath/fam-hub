@@ -39,16 +39,23 @@ Cloud Run services, their env, and the Supabase config stay frozen until Kaggle 
   Kroger API has **no checkout/payment endpoint**, so the no-payment invariant holds by contract.
   Pure API module (`src/utils/krogerApi.ts`), six server routes, the two-section connect panel,
   the approved-write applier, and a dish-ask auto-offer. Setup guide: `docs/kroger-setup.md`.
-- **Weekly meal planner** — tell the copilot the week's dinners ("Mon paneer butter masala, Tue
+- **Weekly meal planner** — tell the copilot the week's meals ("Mon paneer butter masala, Tue
   tacos…") and one agent turn records the week AND derives ONE consolidated, buy-unit,
-  store-routed shopping list. A new `meal_planner_agent` specialist (wide slice, no destructive or
-  payment tools) writes via the auto-tier `set_meal_plan` tool (validated + clamped; replaces by
-  week, so "swap Thursday to rajma" is a clean re-issue that adds only the new dish's missing
-  items). Surfaces: a **This week's dinners** strip on Today (today highlighted, ✨ marks
-  agent-proposed days), "🍽 Dinner tonight / Tomorrow" lines in the briefing card and the emailed
-  digest, and a MEALS facts block so "what's for dinner?" answers locally from the family's own
-  plan. Generative mode ("plan next week, mostly veggie") ships as a scaffold: it reads the
-  calendar first and marks its proposals.
+  store-routed shopping list. A new `meal_planner_agent` specialist (8th specialist, wide slice, no
+  destructive or payment tools) writes via the auto-tier `set_meal_plan` tool (validated + clamped;
+  replaces per week+meal, so "swap Thursday to rajma" re-issues that meal's week and adds only the
+  new dish's missing items). It plans **any meal** (dinners by default; "plan next week's lunches"
+  works — lunches and dinners for the same week coexist); resolves **"next week" as the next 7 days
+  starting tomorrow** (never a day already past); is **diet-aware** (a lacto-vegetarian family's
+  tacos use beans/paneer, never meat — and *lacto*-vegetarian keeps dairy; only vegan drops it); and
+  turns days the family flags as covered ("we have everything", "eating out") into notes with no
+  shopping items. Full CRUD: **`delete_meal_plan`** removes a plan by meal/week or clears all.
+  Surfaces: a **This week's meals** strip on Today (today highlighted, ✨ marks agent-proposed days,
+  per-meal Clear), "🍽 Dinner tonight / Tomorrow" lines in the briefing card and the emailed digest,
+  and a MEALS facts block so "what's for dinner?" answers locally from the family's own plan.
+  Generative mode ("plan next week, mostly veggie") reads the calendar first and marks its proposals.
+- **Shopping list polish** — a **master check/uncheck** checkbox per list (aligned with the item
+  checkboxes; ✓ all done, – some, empty none), plus the always-present per-list Clear.
 - **Quick-add critic** (`src/utils/quickAddCritic.ts`) — the natural-language quick-add path gets
   the same verify-before-apply treatment the copilot already had.
 - **Model fallback chains** — `GEMINI_FALLBACKS` (Express quick path, may end in `local`) and
