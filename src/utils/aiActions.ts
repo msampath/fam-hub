@@ -290,6 +290,19 @@ export function buildMealPlanFromPayload(p: any, todayStr: string): MealPlan | n
   return { id: 'meal-' + uuid(), weekStart: toLocalDateStr(first), meal, days, status: 'active' };
 }
 
+export interface GoalDelete { id?: string; all?: boolean }
+// Validate a delete_goal payload — completes CRUD on goals (the agent could create/update via set_goal,
+// incl. status→abandoned, but not hard-delete). Remove by `id` (from the injected CURRENT GOALS block)
+// or `{all:true}` to clear every goal. At least ONE selector required so an empty payload can NEVER mean
+// "delete everything". Pure; client-applied like set_goal (auto-tier). Null if empty.
+export function buildGoalDelete(p: any): GoalDelete | null {
+  if (!p || typeof p !== 'object') return null;
+  const out: GoalDelete = {};
+  if (p.all === true) out.all = true;
+  if (p.id && String(p.id).trim()) out.id = String(p.id).slice(0, 64);
+  return (out.all || out.id) ? out : null;
+}
+
 export interface MealPlanDelete { meal?: 'breakfast' | 'lunch' | 'dinner'; weekStart?: string; all?: boolean }
 // Validate a delete_meal_plan payload — completes CRUD on the planner (the agent could create/update
 // but not delete: "I cannot delete the entire meal plan"). Remove by meal and/or weekStart, or

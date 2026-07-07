@@ -97,6 +97,14 @@ def test_outings_puts_itinerary_and_links_on_events():
     assert "REAL link you found" in prompts.OUTINGS
 
 
+def test_goal_crud_complete():
+    # delete_goal completes goal CRUD (the agent could create/update but not hard-delete). outings_agent
+    # owns set_goal, so it also owns delete_goal; ROOT + OUTINGS instruct removing a goal, not just abandoning.
+    assert "delete_goal" in agent.SPECIALIST_TOOLS["outings_agent"]
+    assert "delete_goal" in prompts.ROOT
+    assert "delete_goal" in prompts.OUTINGS
+
+
 def test_content_reading_specialists_treat_read_content_as_untrusted():
     # Same injection class for the agents that read STORED external content: bills (email-scanned records)
     # and files (document text from newsletters/uploads/ingested web pages — and files_agent can move/delete).

@@ -229,6 +229,19 @@ const REGISTRY_TOOL_DEFS: Omit<McpToolDef, 'run'>[] = [
     },
   },
   {
+    name: 'delete_goal',
+    description: 'DELETE a tracked goal (use this to remove one — do NOT say you can only mark it '
+      + 'abandoned). Auto-applied. Pass `id` (from the CURRENT GOALS block) to remove that goal, or '
+      + '`all:true` to clear every goal. One of id / all is required.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'The goal id to delete (from the CURRENT GOALS block).' },
+        all: { type: 'boolean', description: 'true = delete every tracked goal.' },
+      },
+    },
+  },
+  {
     name: 'set_meal_plan',
     description: 'Record the week\'s MEAL PLAN — dinners by default, or lunches/breakfasts when the '
       + 'family says so (set `meal`; NEVER refuse a meal type). One entry per day given (or proposed). '

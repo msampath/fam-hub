@@ -19,7 +19,7 @@ describe('toolRegistry allowlist parity', () => {
   });
   it('registers exactly the known tools (home_control deferred to C2 — not registered yet)', () => {
     expect([...ALLOWED_COPILOT_ACTIONS].sort()).toEqual(
-      ['add_chore', 'add_shopping_item', 'add_to_cart', 'clear_chores', 'create_event', 'delete_chore', 'delete_document', 'delete_event', 'delete_meal_plan', 'delete_shopping_item', 'move_document', 'reserve', 'set_goal', 'set_meal_plan', 'update_chore', 'update_event'],
+      ['add_chore', 'add_shopping_item', 'add_to_cart', 'clear_chores', 'create_event', 'delete_chore', 'delete_document', 'delete_event', 'delete_goal', 'delete_meal_plan', 'delete_shopping_item', 'move_document', 'reserve', 'set_goal', 'set_meal_plan', 'update_chore', 'update_event'],
     );
   });
   it('doc tools: move = auto (reversible), delete = confirm (destructive)', () => {
@@ -81,6 +81,20 @@ describe('set_goal tool (A6 — goals as tracked objects, auto tier, client-owne
   it('carries the gathered `context` (so Continue resumes without re-asking)', () => {
     const goal = TOOL_REGISTRY.set_goal.validate({ id: 'goal-x', text: 'Rainier trip', context: 'Date: Jul 6; venue: Paradise; party 4' }, ctx) as any;
     expect(goal.context).toBe('Date: Jul 6; venue: Paradise; party 4');
+  });
+});
+
+describe('delete_goal tool (CRUD delete — auto tier, client-owned)', () => {
+  it('is auto-tier and validates a selector (id / all)', () => {
+    expect(TOOL_REGISTRY.delete_goal.riskTier).toBe('auto');
+    expect(TOOL_REGISTRY.delete_goal.validate({ id: 'goal-x' }, ctx)).toEqual({ id: 'goal-x' });
+    expect(TOOL_REGISTRY.delete_goal.validate({ all: true }, ctx)).toEqual({ all: true });
+  });
+  it('rejects an empty/garbage payload — never lets "nothing" mean delete-everything', () => {
+    expect(TOOL_REGISTRY.delete_goal.validate({}, ctx)).toBeNull();
+    expect(TOOL_REGISTRY.delete_goal.validate({ id: '' }, ctx)).toBeNull();
+    expect(TOOL_REGISTRY.delete_goal.validate({ all: false }, ctx)).toBeNull();
+    expect(TOOL_REGISTRY.delete_goal.validate(null, ctx)).toBeNull();
   });
 });
 

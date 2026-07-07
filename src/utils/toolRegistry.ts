@@ -18,6 +18,7 @@ import {
   buildShoppingItemRef,
   buildChoreUpdate,
   buildGoalFromPayload,
+  buildGoalDelete,
   buildMealPlanFromPayload,
   buildMealPlanDelete,
   normalizeShoppingItems,
@@ -92,6 +93,13 @@ export const TOOL_REGISTRY: Record<string, ConciergeTool> = {
     riskTier: 'auto',
     applyMode: 'auto',
     validate: (p) => buildGoalFromPayload(p),
+  },
+  // Delete a goal (completes CRUD) — auto tier, client-owned like set_goal. Client removes the match.
+  delete_goal: {
+    name: 'delete_goal',
+    riskTier: 'auto',
+    applyMode: 'auto',
+    validate: (p) => buildGoalDelete(p),
   },
   // The weekly dinner plan — auto tier (reversible, internal), client-owned like set_goal (NOT in
   // TOOL_COLLECTION): the client upserts it by weekStart into the mealplan collection on ingest.

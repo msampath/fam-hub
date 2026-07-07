@@ -47,7 +47,7 @@ def test_specialist_allowlists_are_scoped_as_expected():
     assert agent.SPECIALIST_TOOLS["shopping_agent"] == ["add_shopping_item", "add_to_cart", "delete_shopping_item"]
     assert agent.SPECIALIST_TOOLS["chores_agent"] == ["add_chore", "delete_chore", "clear_chores", "update_chore"]
     assert agent.SPECIALIST_TOOLS["outings_agent"] == ["find_places", "search_local_knowledge", "web_search", "fetch_page", "prepare_handoff",
-                                                       "set_goal", "suggest_event", "get_events", "create_event", "delete_event", "update_event"]
+                                                       "set_goal", "delete_goal", "suggest_event", "get_events", "create_event", "delete_event", "update_event"]
     assert "add_to_cart" not in agent.SPECIALIST_TOOLS["calendar_agent"]
 
 

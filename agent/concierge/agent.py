@@ -124,7 +124,7 @@ SPECIALIST_TOOLS: dict[str, list[str]] = {
     # event), and delete_event/update_event (CONFIRM-tier — offer to CLEAR or RESCHEDULE a conflicting event,
     # staged for approval). update_event is needed because the OUTINGS conflict block offers "move it" as well.
     "outings_agent": ["find_places", "search_local_knowledge", "web_search", "fetch_page", "prepare_handoff",
-                      "set_goal", "suggest_event", "get_events", "create_event", "delete_event", "update_event"],
+                      "set_goal", "delete_goal", "suggest_event", "get_events", "create_event", "delete_event", "update_event"],
     # READ-only — gathers the day's data + local-knowledge nudges (e.g. a newsletter's "VegFest is Saturday").
     "briefing_agent": ["get_events", "get_chores", "get_upcoming", "search_local_knowledge"],
     "bills_agent": ["get_bills"],                                    # READ-only — reports bills (never pays)

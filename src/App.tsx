@@ -69,7 +69,7 @@ import { mergeDeduplicateEvents, detectRecurringGroups, filterHiddenEvents, appl
 import { buildDailyReminder, shouldFireDailyReminder, dueEventReminders, type ReminderContent } from './utils/reminders';
 import { filterConflictWindow, detectConflicts } from './utils/conflicts';
 import type { RecurringGroup } from './utils/events';
-import { buildEventFromPayload, buildEventUpdateFromPayload, buildChoreFromPayload, buildChoresFromPayload, choreDedupeKey, suggestionKey, buildReservationDraft, buildCartDraft, resolveEventDeletion, type MealPlanDelete } from './utils/aiActions';
+import { buildEventFromPayload, buildEventUpdateFromPayload, buildChoreFromPayload, buildChoresFromPayload, choreDedupeKey, suggestionKey, buildReservationDraft, buildCartDraft, resolveEventDeletion, type MealPlanDelete, type GoalDelete } from './utils/aiActions';
 import type { GeneratedChore } from './utils/chorePlan';
 import { aiErrorMessage } from './utils/aiErrors';
 import { mergeBills, type ParsedBillLike } from './utils/billsStore';
@@ -2945,6 +2945,10 @@ export default function App() {
     const goals = (Array.isArray(actions) ? actions : [])
       .filter(a => a?.tool === 'set_goal' && a.artifact)
       .map(a => a.artifact as Goal);
+    // delete_goal (CRUD): auto-tier, client-applied — remove the matching goal(s) by id, or clear all.
+    const goalDeletes = (Array.isArray(actions) ? actions : [])
+      .filter(a => a?.tool === 'delete_goal' && a.artifact)
+      .map(a => a.artifact as GoalDelete);
     // Meal plans ride the same client-owned channel as goals: set_meal_plan is auto-tier, the
     // validated MealPlan comes back as the artifact, and the client upserts it (replace-by-week).
     const plans = (Array.isArray(actions) ? actions : [])
@@ -2969,6 +2973,7 @@ export default function App() {
     // So: await the refresh FIRST (pulls the server-applied write), THEN layer the goal + ledger on top.
     if (appliedCount) await refreshHouseholdData(); // auto-tier writes already persisted server-side → resync local
     for (const g of goals) upsertGoal(g);
+    for (const d of goalDeletes) { if (d.all) setGoalsList([]); else if (d.id) deleteGoal(d.id); }
     for (const p of plans) upsertMealPlan(p);
     for (const d of planDeletes) deleteMealPlan(d);
     if (staged.length) setActionLedger(prev => [...prev, ...staged].slice(-LEDGER_CAP));
@@ -2977,7 +2982,7 @@ export default function App() {
     // auto-push effect + README "Auto-push to Google".)
     // Each goal-step approval marks the goal's next pending step "waiting on you" (zips in order).
     if (goalId) staged.forEach(e => { if (GOAL_STEP_TOOLS.has(e.tool)) blockGoalStep(goalId, e.id); });
-    const goalNote = goals.length ? `🎯 Tracking goal: ${goals[goals.length - 1].text}` : '';
+    const goalNote = goals.length ? `🎯 Tracking goal: ${goals[goals.length - 1].text}` : goalDeletes.length ? '🎯 Goal removed.' : '';
     const mealNote = plans.length ? `🍽 Dinner plan set — ${plans[plans.length - 1].days.length} day${plans[plans.length - 1].days.length === 1 ? '' : 's'} on the Today strip.` : planDeletes.length ? '🍽 Meal plan updated on the Today strip.' : '';
     // suggest_event is auto-tier + client-owned (like set_goal): the agent's outings picks ride back as
     // tap-to-add chips on this turn's assistant message (rendered by CopilotBar), NOT Approve-queue rows.
