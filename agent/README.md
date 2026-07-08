@@ -107,7 +107,7 @@ separately (Firebase Hosting / Cloud Run static) with `VITE_AGENT_BASE_URL` poin
 ## Offline structure test (no key, no Node child)
 
 ```bash
-cd agent && pytest        # asserts the root + 7 specialists are wired and carry tools
+cd agent && pytest        # asserts the root + 8 specialists are wired and carry tools
 ```
 
 ## Golden path (try these)

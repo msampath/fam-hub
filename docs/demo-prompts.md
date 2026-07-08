@@ -69,7 +69,7 @@ prompt injection can't move money. It hands me a draft to finish myself."*
 ---
 
 ## Segment 4e — Agent CLI
-Terminal: `adk web` → browser dev UI lists **concierge** + 7 specialists. Send one prompt, show the
+Terminal: `adk web` → browser dev UI lists **concierge** + 8 specialists. Send one prompt, show the
 delegation trace. *(Or `adk run concierge` for the REPL.)*
 
 ---
