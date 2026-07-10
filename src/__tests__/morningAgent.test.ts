@@ -114,6 +114,15 @@ describe('validateMorningProposals (safety gate)', () => {
       ], ctx());
       expect(out).toHaveLength(1);
     });
+
+    it('keeps a terse all-short-word rationale (empty token set = pass, not a false reject)', () => {
+      // "Get gas" / "Buy tea" tokenize to [] under the >=4 filter; an empty set has nothing to cross-check
+      // and must NOT be dropped as hallucinated (the live false-reject of valid short rationales).
+      const out = validateMorningProposals([
+        shopping('shopping', 'Gas', { rationale: 'Get gas' }),
+      ], ctx({ factsText: FACTS }));
+      expect(out).toHaveLength(1);
+    });
   });
 });
 

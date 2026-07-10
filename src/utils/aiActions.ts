@@ -13,7 +13,11 @@ const VALID_CATEGORIES: Category[] = ['School', 'Camp', 'Sports', 'Arts', 'Holid
 // board only renders Kid columns), else first Kid, else first member, else 'Family'.
 export function resolveAssignee(name: any, familyMembers: FamilyMember[]): string {
   const n = (name ?? '').toString();
-  if (familyMembers.some(m => m.role === 'Kid' && m.name === n)) return n;
+  // Case-INSENSITIVE kid match, returning the roster's canonical name (mirrors resolveAssignees' exactKid):
+  // a model that emits "leo" for a roster "Leo" must resolve to Leo, not silently fall through to the first
+  // kid. Bites the chore-plan generator + update_chore reassign, which mis-assigned to the wrong child.
+  const kid = familyMembers.find(m => m.role === 'Kid' && m.name.toLowerCase() === n.toLowerCase());
+  if (kid) return kid.name;
   return familyMembers.find(m => m.role === 'Kid')?.name || familyMembers[0]?.name || 'Family';
 }
 

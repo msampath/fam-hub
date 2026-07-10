@@ -120,12 +120,20 @@ async function handleDocTool(name: string, args: Record<string, unknown>): Promi
   // Folder-clear: stage EVERY doc in the named folder as one confirm row (no per-doc loop → the action cap
   // can't truncate a 25-file folder). The client removes them all on approval.
   if (name === 'delete_document' && args.folder && !args.name && !args.id) {
-    const fold = normalizeFolder(args.folder as string);
+    // A whitespace-only folder must NOT silently normalize to "Uncategorized" and sweep every un-filed
+    // document — require a real folder name.
+    const rawFolder = String(args.folder).trim();
+    if (!rawFolder) {
+      return { ok: false, tool: name, tier: 'auto', status: 'rejected', message: 'Name the folder to clear.' };
+    }
+    const fold = normalizeFolder(rawFolder);
     const inFolder = (docs as any[]).filter(d => normalizeFolder(d.folder) === fold);
     if (!inFolder.length) {
       return { ok: false, tool: name, tier: 'auto', status: 'rejected', message: `No documents are in the "${fold}" folder.` };
     }
-    return { ok: true, tool: 'delete_document', tier: 'confirm', status: 'requires_confirmation', artifact: { ids: inFolder.map(d => d.id), folder: fold, count: inFolder.length }, message: `Delete all ${inFolder.length} documents in "${fold}"? Confirm in Approvals.` };
+    // The Uncategorized bucket IS every un-filed doc — say so, so the parent understands the real scope.
+    const label = fold === 'Uncategorized' ? 'Uncategorized (all un-filed documents)' : `"${fold}"`;
+    return { ok: true, tool: 'delete_document', tier: 'confirm', status: 'requires_confirmation', artifact: { ids: inFolder.map(d => d.id), folder: fold, count: inFolder.length }, message: `Delete all ${inFolder.length} documents in ${label}? Confirm in Approvals.` };
   }
   // Destructive delete resolves strictly (exact id/name); reversible move allows the substring convenience.
   const target = resolveDoc(docs as any, { id: args.id as string, name: args.name as string }, name === 'move_document');

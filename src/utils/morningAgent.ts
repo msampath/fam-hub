@@ -162,8 +162,11 @@ export function validateMorningProposals(
     const rationale = String(prop.rationale || '').trim().slice(0, MAX_RATIONALE);
     if (!rationale) continue; // ungrounded proposals don't stage
     // Cross-check: the rationale must share at least one meaningful token with the FACTS it claims
-    // to serve (only enforced when the caller provides the facts text).
-    if (factsSet && !xcheckTokens(rationale).some(t => factsSet.has(t))) continue;
+    // to serve (only enforced when the caller provides the facts text). A rationale of ONLY short words
+    // ("Get gas", "Buy tea", "gym") tokenizes to [] — treat an empty set as PASS, not a false reject
+    // (nothing to cross-check ≠ hallucinated); only reject when tokens exist and none match the facts.
+    const rTokens = xcheckTokens(rationale);
+    if (factsSet && rTokens.length && !rTokens.some(t => factsSet.has(t))) continue;
     const goalId = typeof prop.goalId === 'string' && openGoalIds.has(prop.goalId) ? prop.goalId : undefined;
 
     if (prop.kind === 'shopping') {

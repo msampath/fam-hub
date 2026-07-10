@@ -32,6 +32,10 @@ describe('resolveAssignee', () => {
   it('returns the name when it is a real Kid', () => {
     expect(resolveAssignee('Leo', FAM)).toBe('Leo');
   });
+  it('matches a Kid case-insensitively, returning the canonical roster name (not the wrong-case input)', () => {
+    expect(resolveAssignee('leo', FAM)).toBe('Leo');
+    expect(resolveAssignee('MIA', FAM)).toBe('Mia');
+  });
   it('falls back to the first Kid for a Parent/unknown name', () => {
     expect(resolveAssignee('Dad', FAM)).toBe('Leo'); // Parent → first Kid
     expect(resolveAssignee('Nobody', FAM)).toBe('Leo');
