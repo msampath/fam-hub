@@ -43,6 +43,7 @@
 !/scripts/eval-quickpath.ts
 !/scripts/voice-bridge-poc.mjs
 !/scripts/genActionContract.ts
+!/scripts/list-models.mjs
 
 # .claude/: ship ONLY the repo's dev-workflow skills (add-a-specialist / verify-suite /
 # add-copilot-action); local runner config (launch.json, settings.local.json) stays untracked.
