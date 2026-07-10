@@ -112,7 +112,7 @@ const supaConnect = supaUrl ? [supaUrl, supaUrl.replace(/^http/, 'ws')] : []; //
 const APP_CONFIG_SCRIPT = `window.__APP_CONFIG__=${JSON.stringify({
   supabaseUrl: process.env.VITE_SUPABASE_URL || '',
   supabaseAnonKey: process.env.VITE_SUPABASE_ANON_KEY || '',
-})}`;
+}).replace(/</g, '\\u003c')}`;
 const APP_CONFIG_SCRIPT_SHA256 = `'sha256-${createHash('sha256').update(APP_CONFIG_SCRIPT).digest('base64')}'`;
 app.use(helmet({
   contentSecurityPolicy: IS_PRODUCTION ? {

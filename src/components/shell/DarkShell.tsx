@@ -54,8 +54,9 @@ export default function DarkShell({ screensaverOn, onWakeFromScreensaver, isRefr
   // Keyboard ← → (desktop / wall-tablet)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      const el = document.activeElement as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return;
+      if (el?.closest('[role=dialog]')) return;
       if (e.key === 'ArrowRight') setActivePage(p => Math.min(LAST, p + 1));
       if (e.key === 'ArrowLeft') setActivePage(p => Math.max(0, p - 1));
     };

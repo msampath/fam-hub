@@ -439,6 +439,10 @@ export default function App() {
 
   const handlePdfUpload = async (file: File) => {
     if (!file) return;
+    if (file.size > 7 * 1024 * 1024) {
+      setErrorStatus('That file is too large (max ~7 MB). Try a shorter document or paste the text instead.');
+      return;
+    }
     setIsParsing(true);
     setErrorStatus(null);
     setParserStep(`Reading PDF file: ${file.name}...`);
