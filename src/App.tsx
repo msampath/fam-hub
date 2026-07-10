@@ -197,12 +197,6 @@ export default function App() {
     return [];
   });
 
-  const [newMemberRole, setNewMemberRole] = useState<'Parent' | 'Kid'>('Kid');
-  const [newMemberColor, setNewMemberColor] = useState('indigo');
-  // Optional preferences captured at add-time so chore/activity suggestions are tailored from the start.
-  const [newMemberDietary, setNewMemberDietary] = useState('');
-  const [newMemberInterests, setNewMemberInterests] = useState('');
-  const [newMemberAge, setNewMemberAge] = useState('');
   const [syncAssignee, setSyncAssignee] = useState<string>('Family');
 
   // Current View Calendar Settings
@@ -664,9 +658,6 @@ export default function App() {
   // Highlighted Event Detail Panel
   const [selectedEventDetail, setSelectedEventDetail] = useState<CalendarEvent | null>(null);
 
-  // New family member naming
-  const [newMemberName, setNewMemberName] = useState('');
-  const [showAddMember, setShowAddMember] = useState(false);
 
   // (Reward-catalog form state now lives in useChores, destructured above.)
 
@@ -3165,58 +3156,6 @@ export default function App() {
     }
   };
 
-  // Add custom family member
-  const handleAddMember = (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmed = newMemberName.trim();
-    if (!trimmed) return;
-    
-    // Check if member already exists
-    if (familyMembers.some(m => m.name.toLowerCase() === trimmed.toLowerCase())) {
-      alert(`A family member named "${trimmed}" is already registered!`);
-      return;
-    }
-    
-    // Verify unique color - if selected color is taken, pick first untaken color
-    let selectedColor = newMemberColor;
-    const takenColors = new Set(familyMembers.map(m => m.color));
-    if (takenColors.has(selectedColor)) {
-      const remainingColor = MEMBER_COLORS_LIST.find(c => !takenColors.has(c.id));
-      if (remainingColor) {
-        selectedColor = remainingColor.id;
-      } else {
-        // Fallback if all colors taken
-        selectedColor = MEMBER_COLORS_LIST[familyMembers.length % MEMBER_COLORS_LIST.length].id;
-      }
-    }
-    
-    const parsedAge = parseInt(newMemberAge, 10);
-    const newMember: FamilyMember = {
-      name: trimmed,
-      role: newMemberRole,
-      color: selectedColor,
-      dietary: newMemberDietary.trim() || undefined,
-      interests: newMemberInterests.trim() || undefined,
-      age: Number.isFinite(parsedAge) && parsedAge > 0 && parsedAge < 120 ? parsedAge : undefined,
-    };
-
-    setFamilyMembers(prev => [...prev, newMember]);
-    setNewMemberName('');
-    setNewMemberRole('Kid');
-    setNewMemberDietary('');
-    setNewMemberInterests('');
-    setNewMemberAge('');
-    
-    // Find next untaken color for the next addition
-    const updatedTakenColors = new Set([...familyMembers, newMember].map(m => m.color));
-    const nextFreeColor = MEMBER_COLORS_LIST.find(c => !updatedTakenColors.has(c.id));
-    if (nextFreeColor) {
-      setNewMemberColor(nextFreeColor.id);
-    }
-    
-    setShowAddMember(false);
-  };
-
   // Delete family member — cascade removal so no name-keyed data orphans (mirror of
   // handleRenameMember, with removal semantics). Without this, a deleted kid's chores,
   // redemptions, event tags, and calendar connections would linger invisibly.
@@ -3296,14 +3235,6 @@ export default function App() {
     handleAddReward, handleDeleteReward, handleRedeemReward,
     setFamilyMembers,
     handleRenameMember, handleDeleteMember,
-    showAddMember, setShowAddMember,
-    handleAddMember,
-    newMemberName, setNewMemberName,
-    newMemberRole, setNewMemberRole,
-    newMemberColor, setNewMemberColor,
-    newMemberDietary, setNewMemberDietary,
-    newMemberInterests, setNewMemberInterests,
-    newMemberAge, setNewMemberAge,
     handleSubmitName, handleReclaimProfile, nameInput, setNameInput,
     onboardingName, handleSaveOnboardingPrefs, dismissOnboarding,
     inviteCodeInput, setInviteCodeInput, isJoiningHousehold, handleJoinHousehold,

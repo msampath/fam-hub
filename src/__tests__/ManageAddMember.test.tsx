@@ -16,19 +16,18 @@ const account: AccountSettings = {
 };
 
 describe('Manage — add-member captures dietary/interests at creation (A4)', () => {
-  it('renders dietary + interests inputs in the add-member form and wires them to their setters', () => {
-    const setNewMemberDietary = vi.fn();
-    const setNewMemberInterests = vi.fn();
+  it('renders dietary + interests inputs in the add-member form and accepts input', () => {
     const { getByPlaceholderText } = renderWithBoth(
       <Manage account={account} onClose={vi.fn()} />,
-      { setNewMemberDietary, setNewMemberInterests },
-      // Manage embeds GoogleSyncPanel, which derefs googleUser — provide a minimal stub.
+      {},
       { googleUser: { user_metadata: {} } as never },
     );
-    fireEvent.change(getByPlaceholderText(/Dietary \(optional/), { target: { value: 'vegetarian' } });
-    fireEvent.change(getByPlaceholderText(/Interests \(optional/), { target: { value: 'soccer' } });
-    expect(setNewMemberDietary).toHaveBeenCalledWith('vegetarian');
-    expect(setNewMemberInterests).toHaveBeenCalledWith('soccer');
+    const dietary = getByPlaceholderText(/Dietary \(optional/) as HTMLInputElement;
+    const interests = getByPlaceholderText(/Interests \(optional/) as HTMLInputElement;
+    fireEvent.change(dietary, { target: { value: 'vegetarian' } });
+    fireEvent.change(interests, { target: { value: 'soccer' } });
+    expect(dietary.value).toBe('vegetarian');
+    expect(interests.value).toBe('soccer');
   });
 });
 

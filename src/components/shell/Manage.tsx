@@ -75,14 +75,50 @@ const Select = ({ value, onChange, options }: { value: number; onChange: (v: num
 export default function Manage({ account, onClose }: ManageProps) {
   const {
     familyMembers, setFamilyMembers,
-    handleDeleteMember, handleRenameMember, handleAddMember, newMemberName, setNewMemberName,
-    newMemberRole, setNewMemberRole, newMemberColor, setNewMemberColor,
-    newMemberDietary, setNewMemberDietary, newMemberInterests, setNewMemberInterests,
-    newMemberAge, setNewMemberAge,
+    handleDeleteMember, handleRenameMember,
     inviteCodeInput, setInviteCodeInput, isJoiningHousehold, handleJoinHousehold,
     hasStepUpPin, setStepUpPin, verifyStepUpPin, digestPrefs, setDigestPrefs,
     kidMode, setKidMode, copilotName, setCopilotName, clearCopilotHistory,
   } = useApp();
+
+  // Add-member form state (local — only this component renders the form)
+  const [newMemberName, setNewMemberName] = useState('');
+  const [newMemberRole, setNewMemberRole] = useState<'Parent' | 'Kid'>('Kid');
+  const [newMemberColor, setNewMemberColor] = useState('indigo');
+  const [newMemberDietary, setNewMemberDietary] = useState('');
+  const [newMemberInterests, setNewMemberInterests] = useState('');
+  const [newMemberAge, setNewMemberAge] = useState('');
+
+  const handleAddMember = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = newMemberName.trim();
+    if (!trimmed) return;
+    if (familyMembers.some(m => m.name.toLowerCase() === trimmed.toLowerCase())) {
+      alert(`A family member named "${trimmed}" is already registered!`);
+      return;
+    }
+    let selectedColor = newMemberColor;
+    const takenColors = new Set(familyMembers.map(m => m.color));
+    if (takenColors.has(selectedColor)) {
+      const remainingColor = MEMBER_COLORS_LIST.find(c => !takenColors.has(c.id));
+      selectedColor = remainingColor ? remainingColor.id : MEMBER_COLORS_LIST[familyMembers.length % MEMBER_COLORS_LIST.length].id;
+    }
+    const parsedAge = parseInt(newMemberAge, 10);
+    setFamilyMembers(prev => [...prev, {
+      name: trimmed, role: newMemberRole, color: selectedColor,
+      dietary: newMemberDietary.trim() || undefined,
+      interests: newMemberInterests.trim() || undefined,
+      age: Number.isFinite(parsedAge) && parsedAge > 0 && parsedAge < 120 ? parsedAge : undefined,
+    }]);
+    setNewMemberName('');
+    setNewMemberRole('Kid');
+    setNewMemberDietary('');
+    setNewMemberInterests('');
+    setNewMemberAge('');
+    const updatedTakenColors = new Set([...familyMembers.map(m => m.color), selectedColor]);
+    const nextFreeColor = MEMBER_COLORS_LIST.find(c => !updatedTakenColors.has(c.id));
+    if (nextFreeColor) setNewMemberColor(nextFreeColor.id);
+  };
   // Two-step confirm for the history wipe (it deletes household data on every device).
   const [confirmClearHistory, setConfirmClearHistory] = useState(false);
   const [historyClearedMsg, setHistoryClearedMsg] = useState(false);

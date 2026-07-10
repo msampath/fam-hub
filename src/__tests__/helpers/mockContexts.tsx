@@ -92,25 +92,10 @@ export function makeAppCtx(overrides: Partial<AppCtx> = {}): AppCtx {
     handleDeleteReward: vi.fn(),
     handleRedeemReward: vi.fn(),
 
-    // Family members bar
+    // Family members (add-member form localized into Manage)
     setFamilyMembers: vi.fn(),
     handleRenameMember: vi.fn(),
     handleDeleteMember: vi.fn(),
-    showAddMember: false,
-    setShowAddMember: vi.fn(),
-    handleAddMember: vi.fn(),
-    newMemberName: '',
-    setNewMemberName: vi.fn(),
-    newMemberRole: 'Kid',
-    setNewMemberRole: vi.fn(),
-    newMemberColor: '',
-    setNewMemberColor: vi.fn(),
-    newMemberDietary: '',
-    setNewMemberDietary: vi.fn(),
-    newMemberInterests: '',
-    setNewMemberInterests: vi.fn(),
-    newMemberAge: '',
-    setNewMemberAge: vi.fn(),
 
     // Name prompt modal
     handleSubmitName: vi.fn(),

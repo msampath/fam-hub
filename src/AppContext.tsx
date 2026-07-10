@@ -113,25 +113,10 @@ export interface AppCtx {
   handleDeleteReward: (id: string) => void;
   handleRedeemReward: (reward: Reward, memberName: string) => void;
 
-  // Family members bar
+  // Family members (add-member form state localized into Manage)
   setFamilyMembers: React.Dispatch<React.SetStateAction<FamilyMember[]>>;
   handleRenameMember: (oldName: string, rawNewName: string) => void;
   handleDeleteMember: (name: string) => void;
-  showAddMember: boolean;
-  setShowAddMember: React.Dispatch<React.SetStateAction<boolean>>;
-  handleAddMember: (e: React.FormEvent) => void;
-  newMemberName: string;
-  setNewMemberName: React.Dispatch<React.SetStateAction<string>>;
-  newMemberRole: 'Parent' | 'Kid';
-  setNewMemberRole: React.Dispatch<React.SetStateAction<'Parent' | 'Kid'>>;
-  newMemberColor: string;
-  setNewMemberColor: React.Dispatch<React.SetStateAction<string>>;
-  newMemberDietary: string;
-  setNewMemberDietary: React.Dispatch<React.SetStateAction<string>>;
-  newMemberInterests: string;
-  setNewMemberInterests: React.Dispatch<React.SetStateAction<string>>;
-  newMemberAge: string;
-  setNewMemberAge: React.Dispatch<React.SetStateAction<string>>;
 
   // Name prompt modal
   handleSubmitName: (e: React.FormEvent) => void;
