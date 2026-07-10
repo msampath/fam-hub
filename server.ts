@@ -3,7 +3,7 @@ import type { Request, Response, NextFunction } from 'express';
 import compression from 'compression';
 import helmet from 'helmet';
 import path from 'path';
-import { readFileSync, promises as fsp } from 'node:fs';
+import { readFileSync, existsSync, promises as fsp } from 'node:fs';
 import dotenv from 'dotenv';
 import { randomUUID, scryptSync, randomBytes, timingSafeEqual, createHash } from 'crypto';
 import { GoogleGenAI, Type } from '@google/genai';
@@ -97,6 +97,8 @@ const LOCAL_MODE = STORAGE_MODE === 'sqlite';
 // over the LAN — the "160 kB gzip" only happens if the server actually gzips. Big win for the
 // always-on tablet / phones over Wi-Fi.
 app.use(compression());
+
+if (!LOCAL_MODE) app.set('trust proxy', 1);
 
 // Security headers (CSO F-05). helmet adds X-Content-Type-Options, Referrer-Policy, HSTS (https only),
 // frame protection, etc. The CSP (prod only) caps XSS blast radius: scripts/styles/connections are
@@ -3246,6 +3248,10 @@ async function startServer() {
   } else {
     console.log('Running in PRODUCTION mode. Serving static assets.');
     const distPath = path.join(process.cwd(), 'dist');
+    const indexHtmlPath = path.join(distPath, 'index.html');
+    if (!existsSync(indexHtmlPath)) {
+      throw new Error(`Production mode but ${indexHtmlPath} is missing — run "npm run build" first.`);
+    }
     // Vite content-hashes asset filenames, so they're safe to cache for a year (immutable).
     // index.html itself must NOT be long-cached (it points at the hashed assets) — express.static
     // serves it with the default no-long-cache, and the SPA fallback below re-sends it fresh.

@@ -72,7 +72,12 @@ export async function safeFetch(
   let url = initialUrl;
   for (let hop = 0; hop <= maxHops; hop++) {
     const pinnedIp = await assertSafeUrl(url);
-    const res = await undiciFetch(url, { ...init, redirect: 'manual', dispatcher: pinnedDispatcher(pinnedIp) });
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 15_000);
+    let res: Awaited<ReturnType<typeof undiciFetch>>;
+    try {
+      res = await undiciFetch(url, { ...init, redirect: 'manual', dispatcher: pinnedDispatcher(pinnedIp), signal: ac.signal as any });
+    } finally { clearTimeout(timer); }
     if (res.status >= 300 && res.status < 400) {
       const location = res.headers.get('location');
       if (!location) return res;

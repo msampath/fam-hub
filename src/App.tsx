@@ -1557,10 +1557,10 @@ export default function App() {
         setHouseholdId(null);
       }
       setGoogleCalendarsList([]);
-      // Wipe the persisted copilot transcript + agent session on sign-out (incl. idle auto-sign-out) so the
-      // family chat (kids' names, schedules, plans) doesn't survive in cleartext for the next user on a shared
-      // device — the server-side data is RLS-scoped, this keeps the local cache consistent with that.
-      try { localStorage.removeItem('famplan_copilot_messages'); localStorage.removeItem('famplan_agent_session'); } catch { /* non-fatal */ }
+      try {
+        const keys = Object.keys(localStorage).filter(k => k.startsWith('famplan_'));
+        keys.forEach(k => localStorage.removeItem(k));
+      } catch { /* non-fatal */ }
       setCopilotMessages([{ role: 'assistant', text: "👋 **Hi! I'm your Family's Copilot.** Tell me what you'd like to start with." }]);
       setAgentSessionId('');
       setCalendarSyncLogs(prev => [...prev, 'Signed out of Google account.']);

@@ -40,8 +40,12 @@ export function buildHandoffDraft(args: { title?: string; url?: string; fields?:
 // match regardless of cosmetic differences. Pure → unit-tested (the real safety control the dead MCP_TOOLS
 // copy used to bypass).
 export function normHandoffUrl(u: string): string | null {
-  try { const x = new URL(u); return (`${x.hostname.replace(/^www\./, '')}${x.pathname.replace(/\/+$/, '')}`).toLowerCase() || null; }
-  catch { return null; }
+  try {
+    const x = new URL(u);
+    const base = `${x.hostname.replace(/^www\./, '')}${x.pathname.replace(/\/+$/, '')}`.toLowerCase();
+    const q = x.search ? x.search.toLowerCase() : '';
+    return (base + q) || null;
+  } catch { return null; }
 }
 
 // True when the handoff link was actually observed (published) among the URLs the agent read this run.
