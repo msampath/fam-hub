@@ -12,10 +12,11 @@ const cardStyle = { background: C.card, border: `2px solid ${C.elevated}`, boxSh
 // account menu's "link my profile" action) — never for the first-run gate, which must be resolved.
 export default function NamePromptModal({ dismissable, onDismiss }: { dismissable?: boolean; onDismiss?: () => void } = {}) {
   const {
-    handleSubmitName, handleReclaimProfile, nameInput, setNameInput, familyMembers,
+    handleSubmitName, handleReclaimProfile, familyMembers,
     inviteCodeInput, setInviteCodeInput, isJoiningHousehold, handleJoinHousehold,
     onboardingName, handleSaveOnboardingPrefs, dismissOnboarding,
   } = useApp();
+  const [nameInput, setNameInput] = useState('');
   const [dietary, setDietary] = useState('');
   const [interests, setInterests] = useState('');
 
@@ -159,7 +160,7 @@ export default function NamePromptModal({ dismissable, onDismiss }: { dismissabl
           <span className="h-px flex-1" style={{ background: C.elevated }} />
         </div>
 
-        <form onSubmit={handleSubmitName} className="space-y-3">
+        <form onSubmit={e => { e.preventDefault(); handleSubmitName(nameInput); }} className="space-y-3">
           <input
             id="name-prompt-input"
             type="text"

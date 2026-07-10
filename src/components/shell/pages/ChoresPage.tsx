@@ -1,4 +1,4 @@
-import { useState, type CSSProperties, type FormEvent } from 'react';
+import { useState, useEffect, type CSSProperties, type FormEvent } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { useApp } from '../../../AppContext';
 import { choreEmoji, earnedXp, lifetimeEarnedXp } from '../../../utils/chores';
@@ -27,19 +27,27 @@ export default function ChoresPage() {
   const {
     choresList, setChoresList, familyMembers, authorStamp,
     xpBankList, kidMode,
-    newChoreTitle, setNewChoreTitle, newChoreAssigned, setNewChoreAssigned,
-    newChorePoints, setNewChorePoints, newChoreTimesPerDay, setNewChoreTimesPerDay,
-    newChoreRepeatType, setNewChoreRepeatType, newChoreScheduleTime, setNewChoreScheduleTime,
     setIsGeneratingChoresOpen,
   } = useApp();
 
   const kids = familyMembers.filter(m => m.role === 'Kid');
   const [activeKid, setActiveKid] = useState(0);
+  const [newChoreTitle, setNewChoreTitle] = useState('');
+  const [newChoreAssigned, setNewChoreAssigned] = useState(kids[0]?.name ?? '');
+  const [newChorePoints, setNewChorePoints] = useState(10);
+  const [newChoreTimesPerDay, setNewChoreTimesPerDay] = useState(1);
+  const [newChoreRepeatType, setNewChoreRepeatType] = useState<'daily' | 'weekly'>('daily');
+  const [newChoreScheduleTime, setNewChoreScheduleTime] = useState('Morning');
   const [justChecked, setJustChecked] = useState<string | null>(null);
   // Chore id whose LAST slot was just checked — drives the confetti celebration burst on that card.
   const [justCompleted, setJustCompleted] = useState<string | null>(null);
   const [showAddChore, setShowAddChore] = useState(false);
   const [addMsg, setAddMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    const kidNames = kids.map(m => m.name);
+    if (kidNames.length > 0 && !kidNames.includes(newChoreAssigned)) setNewChoreAssigned(kidNames[0]);
+  }, [familyMembers, newChoreAssigned]);
 
   const openAddChore = (kidName: string) => { setNewChoreAssigned(kidName); setShowAddChore(true); setAddMsg(null); };
   const handleAddChore = (e: FormEvent) => {

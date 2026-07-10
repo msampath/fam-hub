@@ -4,9 +4,6 @@ import type { PantryDiff } from './utils/visionPantry';
 import type { RoutineCandidate } from './utils/routineMiner';
 import type { GeneratedChore } from './utils/chorePlan';
 
-// Household-defined since Phase-5 (settings.storeList) — any store name the household configured.
-export type ShopStore = string;
-
 // Shared state/handlers exposed to extracted feature components. Grown as more of the
 // UI is pulled out of App.tsx — each field is consumed by at least one component.
 export interface AppCtx {
@@ -37,22 +34,12 @@ export interface AppCtx {
   setRoutines: (r: Routine[]) => void;
   homeLat: number | null;
   homeLng: number | null;
-  newShopText: string;
-  setNewShopText: React.Dispatch<React.SetStateAction<string>>;
-  newShopStore: ShopStore;
-  setNewShopStore: React.Dispatch<React.SetStateAction<ShopStore>>;
-  newShopQty: string;
-  setNewShopQty: React.Dispatch<React.SetStateAction<string>>;
 
   // Pantry + AI shopping (recipe→list, pantry→restock)
   pantryList: PantryItem[];
-  newPantryText: string;
-  setNewPantryText: React.Dispatch<React.SetStateAction<string>>;
-  handleAddPantryItem: () => void;
+  handleAddPantryItem: (text: string) => void;
   handleDeletePantryItem: (id: string) => void;
-  recipeInput: string;
-  setRecipeInput: React.Dispatch<React.SetStateAction<string>>;
-  handleParseRecipe: () => void;
+  handleParseRecipe: (text: string) => Promise<boolean>;
   isParsingRecipe: boolean;
   handleSuggestRestock: () => void;
   isSuggestingRestock: boolean;
@@ -83,18 +70,6 @@ export interface AppCtx {
   // Per-record authorship stamp (who/when) — spread into a record created in a component.
   authorStamp: () => Authored;
   familyMembers: FamilyMember[];
-  newChoreTitle: string;
-  setNewChoreTitle: React.Dispatch<React.SetStateAction<string>>;
-  newChoreAssigned: string;
-  setNewChoreAssigned: React.Dispatch<React.SetStateAction<string>>;
-  newChorePoints: number;
-  setNewChorePoints: React.Dispatch<React.SetStateAction<number>>;
-  newChoreTimesPerDay: number;
-  setNewChoreTimesPerDay: React.Dispatch<React.SetStateAction<number>>;
-  newChoreRepeatType: 'daily' | 'weekly';
-  setNewChoreRepeatType: React.Dispatch<React.SetStateAction<'daily' | 'weekly'>>;
-  newChoreScheduleTime: string;
-  setNewChoreScheduleTime: React.Dispatch<React.SetStateAction<string>>;
   // AI starter chore plan (docs/ai-chore-plan-generator.md): empty-state modal → per-kid ages →
   // model plan → parent-reviewed preview → bulk add (deduped). Generation errors are surfaced, never
   // a fabricated plan.
@@ -119,10 +94,8 @@ export interface AppCtx {
   handleDeleteMember: (name: string) => void;
 
   // Name prompt modal
-  handleSubmitName: (e: React.FormEvent) => void;
+  handleSubmitName: (name: string) => void;
   handleReclaimProfile: (name: string) => void;
-  nameInput: string;
-  setNameInput: React.Dispatch<React.SetStateAction<string>>;
   // First-login onboarding (optional, skippable): after a brand-new profile is created, capture
   // the adult's dietary/interests so the copilot can personalize from day one. Set to the new
   // member's name while the prefs step is showing; null otherwise.

@@ -27,10 +27,8 @@ describe('useShopping — Kroger dish-ask auto-offer', () => {
       { text: 'basmati rice 10lb', store: 'Costco' },  // unbound — NOT offered
     ] }));
     const { result } = setup();
-    act(() => result.current.setRecipeInput('paneer butter masala'));
-    await act(async () => { await result.current.handleParseRecipe(); });
+    await act(async () => { await result.current.handleParseRecipe('paneer butter masala'); });
     expect(result.current.krogerOffer).toEqual({ store: 'Grocery Store', texts: ['butter', 'tomatoes'] });
-    expect(result.current.recipeInput).toBe(''); // the ask itself still completes normally
     act(() => result.current.dismissKrogerOffer());
     expect(result.current.krogerOffer).toBeNull();
   });
@@ -38,16 +36,14 @@ describe('useShopping — Kroger dish-ask auto-offer', () => {
   it('NO offer at all when no list is bound', async () => {
     apiFetch.mockImplementation(() => json({ items: [{ text: 'butter', store: 'Grocery Store' }] }));
     const { result } = setup([]);
-    act(() => result.current.setRecipeInput('toast'));
-    await act(async () => { await result.current.handleParseRecipe(); });
+    await act(async () => { await result.current.handleParseRecipe('toast'); });
     expect(result.current.krogerOffer).toBeNull();
   });
 
   it('no offer when the parse fails or adds nothing', async () => {
     apiFetch.mockImplementation(() => json({ error: 'nope' }, false));
     const { result } = setup();
-    act(() => result.current.setRecipeInput('mystery dish'));
-    await act(async () => { await result.current.handleParseRecipe(); });
+    await act(async () => { await result.current.handleParseRecipe('mystery dish'); });
     expect(result.current.krogerOffer).toBeNull();
     expect(result.current.shoppingAiError).toBeTruthy();
   });

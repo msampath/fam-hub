@@ -23,12 +23,7 @@ export interface UseShoppingDeps {
 
 export interface UseShopping {
   shoppingList: ShoppingItem[]; setShoppingList: Dispatch<SetStateAction<ShoppingItem[]>>;
-  newShopText: string; setNewShopText: Dispatch<SetStateAction<string>>;
-  newShopStore: ShopStore; setNewShopStore: Dispatch<SetStateAction<ShopStore>>;
-  newShopQty: string; setNewShopQty: Dispatch<SetStateAction<string>>;
   pantryList: PantryItem[]; setPantryList: Dispatch<SetStateAction<PantryItem[]>>;
-  newPantryText: string; setNewPantryText: Dispatch<SetStateAction<string>>;
-  recipeInput: string; setRecipeInput: Dispatch<SetStateAction<string>>;
   isParsingRecipe: boolean; setIsParsingRecipe: Dispatch<SetStateAction<boolean>>;
   isSuggestingRestock: boolean; setIsSuggestingRestock: Dispatch<SetStateAction<boolean>>;
   isPlanningMeals: boolean; setIsPlanningMeals: Dispatch<SetStateAction<boolean>>;
@@ -44,9 +39,9 @@ export interface UseShopping {
   krogerOffer: { texts: string[]; store: string } | null;
   dismissKrogerOffer: () => void;
   appendShoppingItems: (items: { text?: string; store?: string }[]) => number;
-  handleAddPantryItem: () => void;
+  handleAddPantryItem: (text: string) => void;
   handleDeletePantryItem: (id: string) => void;
-  handleParseRecipe: () => Promise<void>;
+  handleParseRecipe: (text: string) => Promise<boolean>;
   handleSuggestRestock: () => Promise<void>;
   handlePlanMeals: () => Promise<void>;
 }
@@ -62,16 +57,10 @@ export function useShopping({ authorStamp, storeList, boundLists }: UseShoppingD
     const saved = localStorage.getItem('famplan_shopping');
     return safeParseArray(saved);
   });
-  const [newShopText, setNewShopText] = useState('');
-  const [newShopStore, setNewShopStore] = useState<ShopStore>('Costco');
-  const [newShopQty, setNewShopQty] = useState('');
-
   const [pantryList, setPantryList] = useState<PantryItem[]>(() => {
     const saved = localStorage.getItem('famplan_pantry');
     return safeParseArray(saved);
   });
-  const [newPantryText, setNewPantryText] = useState('');
-  const [recipeInput, setRecipeInput] = useState('');
   const [isParsingRecipe, setIsParsingRecipe] = useState(false);
   const [isSuggestingRestock, setIsSuggestingRestock] = useState(false);
   const [isPlanningMeals, setIsPlanningMeals] = useState(false);
@@ -108,11 +97,10 @@ export function useShopping({ authorStamp, storeList, boundLists }: UseShoppingD
     return added + reactivated;
   };
 
-  const handleAddPantryItem = () => {
-    const t = newPantryText.trim();
+  const handleAddPantryItem = (text: string) => {
+    const t = text.trim();
     if (!t) return;
     setPantryList(prev => [{ id: 'pantry-' + uuid(), text: t }, ...prev]);
-    setNewPantryText('');
   };
 
   const handleDeletePantryItem = (id: string) => {
@@ -120,12 +108,12 @@ export function useShopping({ authorStamp, storeList, boundLists }: UseShoppingD
   };
 
   // Recipe / dish name → ingredients → shopping list (Gemini via server).
-  const handleParseRecipe = async () => {
-    if (!recipeInput.trim()) return;
+  const handleParseRecipe = async (text: string): Promise<boolean> => {
+    if (!text.trim()) return false;
     setIsParsingRecipe(true);
     setShoppingAiError(null);
     try {
-      const res = await apiFetch('/api/parse-recipe', { method: 'POST', body: JSON.stringify({ text: recipeInput.trim(), stores: VALID_STORES }) });
+      const res = await apiFetch('/api/parse-recipe', { method: 'POST', body: JSON.stringify({ text: text.trim(), stores: VALID_STORES }) });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(aiErrorMessage(res.status, body, 'Could not extract ingredients from that recipe.', 'Add the items to your list manually for now.'));
@@ -133,11 +121,12 @@ export function useShopping({ authorStamp, storeList, boundLists }: UseShoppingD
       const data = await res.json();
       const added = appendShoppingItems(data.items || []);
       if (added === 0) throw new Error('No ingredients found — try a more detailed recipe or a clearer dish name.');
-      setRecipeInput('');
       const offer = offerFor(data.items || []);
       if (offer) setKrogerOffer(offer);
+      return true;
     } catch (err: any) {
       setShoppingAiError(err.message || 'Recipe parsing failed.');
+      return false;
     } finally {
       setIsParsingRecipe(false);
     }
@@ -232,12 +221,7 @@ export function useShopping({ authorStamp, storeList, boundLists }: UseShoppingD
 
   return {
     shoppingList, setShoppingList,
-    newShopText, setNewShopText,
-    newShopStore, setNewShopStore,
-    newShopQty, setNewShopQty,
     pantryList, setPantryList,
-    newPantryText, setNewPantryText,
-    recipeInput, setRecipeInput,
     isParsingRecipe, setIsParsingRecipe,
     isSuggestingRestock, setIsSuggestingRestock,
     isPlanningMeals, setIsPlanningMeals,

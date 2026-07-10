@@ -33,12 +33,14 @@ describe('ShoppingPage', () => {
 
   it('Recipes button reveals the recipe panel and calls handleParseRecipe', async () => {
     const user = userEvent.setup();
-    const { ctx } = renderWithApp(<ShoppingPage />, { recipeInput: 'chicken biryani' });
+    const { ctx } = renderWithApp(<ShoppingPage />);
     await user.click(screen.getByText('Recipes'));
+    const textarea = screen.getByPlaceholderText(/Paste a recipe/);
+    await user.type(textarea, 'chicken biryani');
     const addBtn = screen.getByText('Add ingredients');
     expect(addBtn).toBeInTheDocument();
     await user.click(addBtn);
-    expect(ctx.handleParseRecipe).toHaveBeenCalledTimes(1);
+    expect(ctx.handleParseRecipe).toHaveBeenCalledWith('chicken biryani');
   });
 
   it('reveals the "Scan pantry photo" capture input in the Recipes panel (#2 vision)', async () => {
@@ -130,7 +132,9 @@ describe('ShoppingPage', () => {
   it('re-typing a checked-off item RE-ACTIVATES it instead of duplicating', async () => {
     const user = userEvent.setup();
     const list = [item({ id: 'g1', text: 'Milk', store: 'Grocery Store', completed: true })];
-    const { ctx } = renderWithApp(<ShoppingPage />, { shoppingList: list, newShopText: 'milk', newShopStore: 'Grocery Store' });
+    const { ctx } = renderWithApp(<ShoppingPage />, { shoppingList: list });
+    await user.type(screen.getByLabelText('Add shopping item'), 'milk');
+    await user.selectOptions(screen.getByLabelText('Store'), 'Grocery Store');
     await user.click(screen.getByText('Add'));
     const next = (ctx.setShoppingList as any).mock.calls.at(-1)[0]; // addItem passes the NEW list directly
     expect(next).toHaveLength(1);            // NOT duplicated
@@ -141,7 +145,8 @@ describe('ShoppingPage', () => {
   it('surfaces a checked-off match as a tappable suggestion while typing, and re-activates it on tap', async () => {
     const user = userEvent.setup();
     const list = [item({ id: 'g1', text: 'Milk', store: 'Grocery Store', completed: true })];
-    const { ctx } = renderWithApp(<ShoppingPage />, { shoppingList: list, newShopText: 'mil' });
+    const { ctx } = renderWithApp(<ShoppingPage />, { shoppingList: list });
+    await user.type(screen.getByLabelText('Add shopping item'), 'mil');
     // /\(done\)/ keeps this off the item-row checkbox ("Mark Milk not done").
     const chip = screen.getByRole('button', { name: /Milk.*\(done\)/i });
     expect(chip).toBeInTheDocument();
@@ -196,8 +201,8 @@ describe('ShoppingPage', () => {
 
   it('manually adds an item via the inline form', async () => {
     const user = userEvent.setup();
-    // newShopText is context-controlled; seed it so the add guard passes.
-    const { ctx } = renderWithApp(<ShoppingPage />, { newShopText: 'Eggs', newShopStore: 'Costco' });
+    const { ctx } = renderWithApp(<ShoppingPage />);
+    await user.type(screen.getByLabelText('Add shopping item'), 'Eggs');
     await user.click(screen.getByText('Add'));
     expect(ctx.setShoppingList).toHaveBeenCalled();
   });

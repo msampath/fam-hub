@@ -10,12 +10,6 @@ export interface UseChores {
   redemptionsList: Redemption[]; setRedemptionsList: Dispatch<SetStateAction<Redemption[]>>;
   xpBankList: XpBankEntry[]; setXpBankList: Dispatch<SetStateAction<XpBankEntry[]>>;
   choreWeekList: { week: string; day?: string }[]; setChoreWeekList: Dispatch<SetStateAction<{ week: string; day?: string }[]>>;
-  newChoreTitle: string; setNewChoreTitle: Dispatch<SetStateAction<string>>;
-  newChoreAssigned: string; setNewChoreAssigned: Dispatch<SetStateAction<string>>;
-  newChorePoints: number; setNewChorePoints: Dispatch<SetStateAction<number>>;
-  newChoreTimesPerDay: number; setNewChoreTimesPerDay: Dispatch<SetStateAction<number>>;
-  newChoreRepeatType: 'daily' | 'weekly'; setNewChoreRepeatType: Dispatch<SetStateAction<'daily' | 'weekly'>>;
-  newChoreScheduleTime: string; setNewChoreScheduleTime: Dispatch<SetStateAction<string>>;
   handleAddReward: (e: FormEvent) => void;
   handleDeleteReward: (id: string) => void;
   handleRedeemReward: (reward: Reward, memberName: string) => void;
@@ -47,14 +41,6 @@ export function useChores(): UseChores {
     const saved = localStorage.getItem('famplan_choreweek');
     return safeParseArray(saved);
   });
-
-  // Add-chore form
-  const [newChoreTitle, setNewChoreTitle] = useState('');
-  const [newChoreAssigned, setNewChoreAssigned] = useState('Leo');
-  const [newChorePoints, setNewChorePoints] = useState<number>(10);
-  const [newChoreTimesPerDay, setNewChoreTimesPerDay] = useState<number>(1);
-  const [newChoreRepeatType, setNewChoreRepeatType] = useState<'daily' | 'weekly'>('daily');
-  const [newChoreScheduleTime, setNewChoreScheduleTime] = useState('Morning');
 
   const [newRewardTitle, setNewRewardTitle] = useState('');
   const [newRewardCost, setNewRewardCost] = useState(50);
@@ -93,12 +79,6 @@ export function useChores(): UseChores {
     redemptionsList, setRedemptionsList,
     xpBankList, setXpBankList,
     choreWeekList, setChoreWeekList,
-    newChoreTitle, setNewChoreTitle,
-    newChoreAssigned, setNewChoreAssigned,
-    newChorePoints, setNewChorePoints,
-    newChoreTimesPerDay, setNewChoreTimesPerDay,
-    newChoreRepeatType, setNewChoreRepeatType,
-    newChoreScheduleTime, setNewChoreScheduleTime,
     handleAddReward, handleDeleteReward, handleRedeemReward,
   };
 }

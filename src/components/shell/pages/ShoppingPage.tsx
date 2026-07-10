@@ -14,10 +14,9 @@ const STORE_ICON: Record<string, string> = { 'Costco': '🛒', 'Grocery Store': 
 export default function ShoppingPage() {
   const {
     shoppingList, setShoppingList,
-    newShopText, setNewShopText, newShopStore, setNewShopStore, newShopQty, setNewShopQty,
     authorStamp,
-    pantryList, newPantryText, setNewPantryText, handleAddPantryItem, handleDeletePantryItem,
-    recipeInput, setRecipeInput, handleParseRecipe, isParsingRecipe,
+    pantryList, handleAddPantryItem, handleDeletePantryItem,
+    handleParseRecipe, isParsingRecipe,
     handleSuggestRestock, isSuggestingRestock, shoppingAiError, familyMembers,
     handlePlanMeals, isPlanningMeals, mealPlan,
     handleScanPantryPhoto, isScanningPantry, pantryScan, confirmPantryScan, dismissPantryScan,
@@ -27,6 +26,11 @@ export default function ShoppingPage() {
     storeList,
     kidMode,
   } = useApp();
+  const [newShopText, setNewShopText] = useState('');
+  const [newShopStore, setNewShopStore] = useState(storeList[0] ?? 'Grocery Store');
+  const [newShopQty, setNewShopQty] = useState('');
+  const [newPantryText, setNewPantryText] = useState('');
+  const [recipeInput, setRecipeInput] = useState('');
   const [showRecipes, setShowRecipes] = useState(false);
   // Household store lists + any ORPHAN stores still on items (a list was removed in Manage while
   // items remained) — orphans render after the configured lists so nothing silently disappears.
@@ -173,7 +177,7 @@ export default function ShoppingPage() {
             <div className="mt-2 flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={handleParseRecipe}
+                onClick={async () => { if (await handleParseRecipe(recipeInput)) setRecipeInput(''); }}
                 disabled={isParsingRecipe || !recipeInput.trim()}
                 className="rounded-[10px] px-4 py-2 text-sm font-extrabold"
                 style={{ border: `2px solid ${C.indigo}`, background: `${C.indigo}14`, color: C.indigo, opacity: isParsingRecipe || !recipeInput.trim() ? 0.5 : 1 }}
@@ -248,7 +252,7 @@ export default function ShoppingPage() {
             {/* Pantry inventory — what you keep stocked; feeds the restock suggester */}
             <div className="mt-3 pt-3" style={{ borderTop: `2px solid ${C.elevated}` }}>
               <div className="mb-2 text-[11px] font-extrabold uppercase tracking-[0.12em]" style={{ color: C.muted }}>Pantry</div>
-              <form onSubmit={e => { e.preventDefault(); handleAddPantryItem(); }} className="mb-2 flex gap-2">
+              <form onSubmit={e => { e.preventDefault(); handleAddPantryItem(newPantryText); setNewPantryText(''); }} className="mb-2 flex gap-2">
                 <input value={newPantryText} onChange={e => setNewPantryText(e.target.value)} placeholder="Add a pantry staple…" aria-label="Add pantry item" className="min-w-0 flex-1 rounded-[10px] px-3 py-2 text-sm outline-none" style={{ background: C.card, border: `2px solid ${C.elevated}`, color: C.primary }} />
                 <button type="submit" className="rounded-[10px] px-3 py-2 text-sm font-extrabold" style={{ border: `2px solid ${C.indigo}`, background: `${C.indigo}14`, color: C.indigo }}>Add</button>
               </form>

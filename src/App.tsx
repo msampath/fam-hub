@@ -166,9 +166,6 @@ export default function App() {
   const {
     choresList, setChoresList, rewardsList, setRewardsList, redemptionsList, setRedemptionsList,
     xpBankList, setXpBankList, choreWeekList, setChoreWeekList,
-    newChoreTitle, setNewChoreTitle, newChoreAssigned, setNewChoreAssigned,
-    newChorePoints, setNewChorePoints, newChoreTimesPerDay, setNewChoreTimesPerDay,
-    newChoreRepeatType, setNewChoreRepeatType, newChoreScheduleTime, setNewChoreScheduleTime,
     handleAddReward, handleDeleteReward, handleRedeemReward,
   } = chores;
 
@@ -246,12 +243,11 @@ export default function App() {
   // True only when the name prompt is opened ON DEMAND (account menu "link my profile"), so it can be
   // dismissed. The first-run/bootstrap/join gate leaves this false — that prompt must be resolved.
   const [namePromptDismissable, setNamePromptDismissable] = useState(false);
-  const [nameInput, setNameInput] = useState('');
   // Name of a just-created profile awaiting the optional onboarding-prefs step (null = not onboarding).
   const [onboardingName, setOnboardingName] = useState<string | null>(null);
   // Open the name/claim prompt on demand so a signed-in user with no linked profile can create or
   // reconnect theirs (e.g. they only ever added kids, or their auth id drifted). Dismissable.
-  const openNamePrompt = () => { setNameInput(''); setNamePromptDismissable(true); setNeedsNamePrompt(true); };
+  const openNamePrompt = () => { setNamePromptDismissable(true); setNeedsNamePrompt(true); };
 
   // Per-device prefs (idle screensaver, auto-sign-out, local daily reminder) extracted to
   // useDevicePrefs (localStorage-only persistence + the user-initiated reminder toggle). The reminder
@@ -393,10 +389,9 @@ export default function App() {
   // Shopping + pantry domain (state + recipe/restock AI + shared appendShoppingItems) → useShopping.
   const shopping = useShopping({ authorStamp, storeList, boundLists: Object.keys(storeBindings) });
   const {
-    shoppingList, setShoppingList, newShopText, setNewShopText, newShopStore, setNewShopStore,
-    newShopQty, setNewShopQty,
-    pantryList, setPantryList, newPantryText, setNewPantryText,
-    recipeInput, setRecipeInput, isParsingRecipe, setIsParsingRecipe,
+    shoppingList, setShoppingList,
+    pantryList, setPantryList,
+    isParsingRecipe, setIsParsingRecipe,
     isSuggestingRestock, setIsSuggestingRestock, shoppingAiError, setShoppingAiError,
     isPlanningMeals, mealPlan, handlePlanMeals,
     isScanningPantry, pantryScan, handleScanPantryPhoto, confirmPantryScan, dismissPantryScan,
@@ -1046,14 +1041,6 @@ export default function App() {
     handleGoogleLogoutClick();
   }, signOutMs);
 
-  // Keep the "new chore" assignee pointing at a real kid as the family list changes.
-  useEffect(() => {
-    const kidNames = familyMembers.filter(m => m.role === 'Kid').map(m => m.name);
-    if (kidNames.length > 0 && !kidNames.includes(newChoreAssigned)) {
-      setNewChoreAssigned(kidNames[0]);
-    }
-  }, [familyMembers, newChoreAssigned]);
-
   // Always-on display: reset daily chores at local midnight (and weekly at week rollover) even with
   // no manual refresh. Checks each minute against the stored week/day markers. Latest state is read
   // via refs so the interval is created ONCE per household (no teardown/restart on every chore action),
@@ -1163,7 +1150,6 @@ export default function App() {
           COLLECTIONS.forEach(c => { if (seed[c.dataKey]) c.set(seed[c.dataKey]); });
           Object.entries(seed).forEach(([k, v]) => saveHouseholdData(hid, k, v));
         } else {
-          setNameInput('');
           setNeedsNamePrompt(true);
         }
       }
@@ -1582,7 +1568,6 @@ export default function App() {
         // auth userId changed isn't wrongly re-prompted to create a duplicate; mirrors the bootstrap).
         const joinedMembers: FamilyMember[] = cloudData.members?.length ? cloudData.members : [];
         if (matchOwnProfileIndex(joinedMembers, googleUser.id, googleUser.email) < 0) {
-          setNameInput('');
           setNeedsNamePrompt(true);
         }
 
@@ -1601,9 +1586,8 @@ export default function App() {
   };
 
   // Create the signed-in user's own profile (Parent) from the name picker
-  const handleSubmitName = (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmed = nameInput.trim();
+  const handleSubmitName = (name: string) => {
+    const trimmed = name.trim();
     if (!trimmed || !googleUser) return;
 
     // If a member with this name already exists, RE-CLAIM it (link this account to that profile)
@@ -1628,7 +1612,6 @@ export default function App() {
       setFamilyMembers(relinked);
       if (householdId) saveHouseholdData(householdId, 'members', relinked);
       setNeedsNamePrompt(false);
-      setNameInput('');
       return;
     }
 
@@ -1642,7 +1625,6 @@ export default function App() {
     const withNew = [...familyMembers, newMember];
     setFamilyMembers(withNew);
     if (householdId) saveHouseholdData(householdId, 'members', withNew);
-    setNameInput('');
     // Keep the modal open and advance to the optional onboarding-prefs step for this new profile.
     // (Reclaim above closes immediately — an existing user already has their prefs.)
     setOnboardingName(trimmed);
@@ -1677,7 +1659,6 @@ export default function App() {
     setFamilyMembers(relinked);
     if (householdId) saveHouseholdData(householdId, 'members', relinked); // persist explicitly (not via the racy effect)
     setNeedsNamePrompt(false);
-    setNameInput('');
   };
 
   // Rename a family member, cascading the change to event member tags
@@ -1703,7 +1684,6 @@ export default function App() {
     setConnectedCalendars(prev => prev.map(c => (c.assignedTo === oldName ? { ...c, assignedTo: newName } : c)));
     setSyncAssignee(swap);
     setActiveMemberFilter(swap);
-    setNewChoreAssigned(swap);
   };
 
   // Add Google Calendar setup connection (Pull or Push assignees)
@@ -3206,13 +3186,8 @@ export default function App() {
     krogerOffer, dismissKrogerOffer,
     storeList, setStoreList,
     routineCandidates, routines, setRoutines,
-    newShopText, setNewShopText,
-    newShopStore, setNewShopStore,
-    newShopQty, setNewShopQty,
     pantryList,
-    newPantryText, setNewPantryText,
     handleAddPantryItem, handleDeletePantryItem,
-    recipeInput, setRecipeInput,
     handleParseRecipe, isParsingRecipe,
     handleSuggestRestock, isSuggestingRestock,
     handlePlanMeals, isPlanningMeals, mealPlan,
@@ -3223,19 +3198,13 @@ export default function App() {
     choresList, setChoresList,
     authorStamp,
     familyMembers,
-    newChoreTitle, setNewChoreTitle,
-    newChoreAssigned, setNewChoreAssigned,
-    newChorePoints, setNewChorePoints,
-    newChoreTimesPerDay, setNewChoreTimesPerDay,
-    newChoreRepeatType, setNewChoreRepeatType,
-    newChoreScheduleTime, setNewChoreScheduleTime,
     isGeneratingChoresOpen, setIsGeneratingChoresOpen, isGeneratingChores, choreGenError,
     handleGenerateChores, addGeneratedChores,
     rewardsList, redemptionsList, xpBankList,
     handleAddReward, handleDeleteReward, handleRedeemReward,
     setFamilyMembers,
     handleRenameMember, handleDeleteMember,
-    handleSubmitName, handleReclaimProfile, nameInput, setNameInput,
+    handleSubmitName, handleReclaimProfile,
     onboardingName, handleSaveOnboardingPrefs, dismissOnboarding,
     inviteCodeInput, setInviteCodeInput, isJoiningHousehold, handleJoinHousehold,
     selectedDayToAdd, setSelectedDayToAdd, setIsAddingEvent,

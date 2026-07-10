@@ -82,11 +82,9 @@ describe('ChoresPage', () => {
 
   it('adds a chore via the inline add-chore form', async () => {
     const user = userEvent.setup();
-    // title + assignee are context-controlled; seed them so the add guard passes.
-    const { ctx } = renderWithApp(<ChoresPage />, {
-      familyMembers: members, newChoreTitle: 'Sweep', newChoreAssigned: 'Ava',
-    });
+    const { ctx } = renderWithApp(<ChoresPage />, { familyMembers: members });
     await user.click(screen.getByText(/Add chore for/i));   // open the form
+    await user.type(screen.getByPlaceholderText(/Chore title/), 'Sweep');
     await user.click(screen.getByText('Add chore'));        // submit
     expect(ctx.setChoresList).toHaveBeenCalled();
   });
