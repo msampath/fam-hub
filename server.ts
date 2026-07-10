@@ -1611,7 +1611,12 @@ const photoPathFor = (name: string): string | null => {
   return path.join(PHOTOS_DIR, base);
 };
 
+// Disk-photos are a LAN-APPLIANCE feature only. In cloud the PHOTOS_DIR is one flat directory keyed by
+// filename with no household segment — a multi-tenant deploy would leak/clobber photos across households
+// (and Cloud Run's disk is ephemeral anyway). Gate all three routes to LOCAL_MODE (matching the data API);
+// the cloud screensaver falls back to the plain clock or the live Google Photos path.
 app.get('/api/photos/list', requireAuth, async (_req, res) => {
+  if (!LOCAL_MODE) return res.json({ photos: [] });
   try {
     const entries = await fsp.readdir(PHOTOS_DIR).catch(() => [] as string[]);
     const photos: { name: string; createTime: string }[] = [];
@@ -1636,6 +1641,7 @@ app.get('/api/photos/list', requireAuth, async (_req, res) => {
 });
 
 app.get('/api/photos/file/:name', requireAuth, (req, res) => {
+  if (!LOCAL_MODE) return res.status(400).json({ error: 'Photos are a local-appliance feature.' });
   const p = photoPathFor(req.params.name);
   if (!p) return res.status(400).json({ error: 'Invalid photo name.' });
   return res.sendFile(p, err => { if (err && !res.headersSent) res.status(404).json({ error: 'Photo not found.' }); });
@@ -1645,6 +1651,7 @@ app.get('/api/photos/file/:name', requireAuth, (req, res) => {
 // 60-minute baseUrl window and uploads it here with its REAL createTime; also usable by any authed
 // uploader). Size-capped; name is traversal-proofed by photoPathFor.
 app.post('/api/photos/upload', requireAuth, async (req, res) => {
+  if (!LOCAL_MODE) return res.status(400).json({ error: 'Photos are a local-appliance feature.' });
   try {
     const { name, imageBase64, createTime } = req.body || {};
     const p = photoPathFor(String(name || ''));

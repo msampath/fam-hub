@@ -44,7 +44,8 @@ os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "FALSE")
 if os.environ.get("GOOGLE_GENAI_USE_VERTEXAI", "FALSE").upper() != "TRUE" and not os.environ.get("GOOGLE_API_KEY"):
     raise SystemExit("[concierge] FATAL: no GOOGLE_API_KEY / GEMINI_API_KEY set — the agent cannot call Gemini. Set one in agent/.env or the environment before starting.")
 
-from fastapi import FastAPI, Header, HTTPException  # noqa: E402
+import time  # noqa: E402
+from fastapi import FastAPI, Header, HTTPException, Request  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 from google.adk.runners import Runner  # noqa: E402
@@ -53,6 +54,7 @@ from google.genai import types  # noqa: E402
 
 from .concierge.agent import build_root_agent, FALLBACK_MODELS, MODEL  # noqa: E402
 from .concierge.bridge import collect_actions  # noqa: E402
+from .concierge.ratelimit import rate_ok  # noqa: E402
 
 APP_NAME = "concierge"
 
@@ -123,6 +125,12 @@ def _visitor_id(jwt: str | None) -> str:
         return "anon"
 
 
+def _client_ip(request: Request) -> str:
+    """Real client IP: Cloud Run puts it first in X-Forwarded-For; fall back to the socket peer."""
+    xff = request.headers.get("x-forwarded-for", "")
+    return (xff.split(",")[0].strip() if xff else "") or (request.client.host if request.client else "anon")
+
+
 async def _close_agent(agent) -> None:
     """Best-effort shutdown of the per-request MCP stdio children (one per specialist) so we don't leak
     subprocesses. ADK toolsets expose an async close(); anything without one is ignored."""
@@ -145,7 +153,9 @@ async def healthz():
 
 
 @app.post("/chat")
-async def chat(body: ChatIn, authorization: str | None = Header(default=None)):
+async def chat(body: ChatIn, request: Request, authorization: str | None = Header(default=None)):
+    if not rate_ok(_client_ip(request), time.monotonic()):
+        raise HTTPException(status_code=429, detail="Too many requests — please slow down.")
     message = (body.message or "").strip()
     if not message:
         raise HTTPException(status_code=400, detail="A message is required.")
