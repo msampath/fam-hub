@@ -121,7 +121,15 @@ const updateChore: LedgerApplier = ({ entry, approve, choresList, setChoresList,
   const changes = (entry.changes || {}) as Partial<Chore>;
   const wantTitle = String(ref.matchTitle || '').trim().toLowerCase();
   const target = choresList.find(c => (ref.id ? c.id === ref.id : (!!wantTitle && String(c.title).trim().toLowerCase() === wantTitle)));
-  if (approve && target) setChoresList(prev => prev.map(c => (c.id === target.id ? { ...c, ...changes } : c)));
+  const hasChanges = Object.keys(changes).length > 0;
+  if (approve && target && hasChanges) {
+    setChoresList(prev => prev.map(c => {
+      if (c.id !== target.id) return c;
+      const merged = { ...c, ...changes };
+      for (const k in changes) if ((merged as any)[k] === null) delete (merged as any)[k];
+      return merged;
+    }));
+  }
   markLedger(entry.id, approve);
   say(approve
     ? (target ? `✏️ Updated the chore "${target.title}".` : `⚠️ Couldn't find that chore to update.`)

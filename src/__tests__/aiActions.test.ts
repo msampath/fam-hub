@@ -195,6 +195,16 @@ describe('buildEventUpdateFromPayload', () => {
     expect(buildEventUpdateFromPayload({ id: 'e1', freeBusy: 'BUSY' }, EVENTS, FAM)!.changes).toEqual({ freeBusy: 'busy' });
     expect(buildEventUpdateFromPayload({ id: 'e1', freeBusy: 'maybe' }, EVENTS, FAM)).toBeNull(); // invalid → no change → null
   });
+
+  it('uses null (not undefined) for cleared fields so they survive JSON.stringify over MCP stdio', () => {
+    // e3 has startTime:'09:00' — clearing it produces null (a real change); end/endTime are already
+    // absent on e3 so clearing them is a no-op and gets filtered by the same-value check.
+    const u = buildEventUpdateFromPayload({ id: 'e3', startTime: '' }, EVENTS, FAM)!;
+    expect(u.changes.startTime).toBeNull();
+    const rt = JSON.parse(JSON.stringify(u.changes));
+    expect('startTime' in rt).toBe(true);
+    expect(rt.startTime).toBeNull();
+  });
 });
 
 describe('buildSuggestionFromPayload', () => {

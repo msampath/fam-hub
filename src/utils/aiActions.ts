@@ -129,9 +129,9 @@ export function buildEventUpdateFromPayload(
   const changes: Partial<CalendarEvent> = {};
   if (typeof p.title === 'string' && p.title.trim()) changes.title = String(p.title).slice(0, 200);
   if (typeof p.start === 'string' && p.start.trim()) changes.start = String(p.start).slice(0, 10);
-  if ('end' in p) changes.end = p.end ? String(p.end).slice(0, 10) : undefined;
-  if ('startTime' in p) changes.startTime = cleanTime(p.startTime);
-  if ('endTime' in p) changes.endTime = cleanTime(p.endTime);
+  if ('end' in p) changes.end = p.end ? String(p.end).slice(0, 10) : (null as any);
+  if ('startTime' in p) changes.startTime = cleanTime(p.startTime) ?? (null as any);
+  if ('endTime' in p) changes.endTime = cleanTime(p.endTime) ?? (null as any);
   if (typeof p.description === 'string') changes.description = String(p.description).slice(0, 2000);
   if (p.category !== undefined) changes.category = VALID_CATEGORIES.includes(p.category) ? p.category : target.category;
   if (p.members !== undefined) changes.members = resolveMembers(p.members, familyMembers);
@@ -469,7 +469,7 @@ export function buildChoreUpdate(p: any, familyMembers: FamilyMember[]): {
   if (p.points !== undefined) changes.points = clampInt(p.points, 10, 1, 1000);
   if (p.timesPerDay !== undefined) changes.timesPerDay = clampInt(p.timesPerDay, 1, 1, 20);
   if (p.repeatType !== undefined) changes.repeatType = p.repeatType === 'weekly' ? 'weekly' : 'daily';
-  if (p.scheduleTimeOfDay !== undefined) changes.scheduleTimeOfDay = p.scheduleTimeOfDay ? String(p.scheduleTimeOfDay) : undefined;
+  if (p.scheduleTimeOfDay !== undefined) changes.scheduleTimeOfDay = p.scheduleTimeOfDay ? String(p.scheduleTimeOfDay) : (null as any);
   if (typeof p.assignedTo === 'string' && p.assignedTo.trim()) changes.assignedTo = resolveAssignee(p.assignedTo, familyMembers);
   if (Object.keys(changes).length === 0) return null;
   return { ref: { ...(id ? { id } : {}), ...(matchTitle ? { matchTitle } : {}) }, changes };

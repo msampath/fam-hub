@@ -30,10 +30,24 @@ describe('resolveLedgerEntry (confirm-tier lifecycle, durable — no pendingEven
     expect(res.applied).toBe(false);
   });
 
-  it('approve with no changes on the entry → failed', () => {
+  it('approve with no changes on the entry → approved but not applied (silent no-op)', () => {
     const res = resolveLedgerEntry(pendingUpdate('e1', undefined), events, true);
-    expect(res.status).toBe('failed');
+    expect(res.status).toBe('approved');
     expect(res.applied).toBe(false);
+  });
+
+  it('approve with empty changes after JSON round-trip → approved but not applied', () => {
+    const res = resolveLedgerEntry(pendingUpdate('e1', {}), events, true);
+    expect(res.status).toBe('approved');
+    expect(res.applied).toBe(false);
+  });
+
+  it('null-clears in changes survive JSON and are applied', () => {
+    const changes = JSON.parse(JSON.stringify({ end: null, startTime: null }));
+    const res = resolveLedgerEntry(pendingUpdate('e1', changes), events, true);
+    expect(res.status).toBe('approved');
+    expect(res.applied).toBe(true);
+    expect(res.changes).toEqual({ end: null, startTime: null });
   });
 
   it('approve a pure DRAFT entry (reservation/cart — no refId/changes) → approved, nothing merged', () => {

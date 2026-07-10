@@ -80,14 +80,14 @@ describe('buildGoogleEventBody', () => {
   it('all-day event uses date start/end (end defaults to start)', () => {
     const body: any = buildGoogleEventBody(ev({ id: 'a', title: 'Picnic', start: '2026-07-04' }));
     expect(body.start).toEqual({ date: '2026-07-04' });
-    expect(body.end).toEqual({ date: '2026-07-04' });
+    expect(body.end).toEqual({ date: '2026-07-05' });
     expect(body.summary).toBe('Picnic');
   });
 
-  it('multi-day all-day event keeps its end date', () => {
+  it('multi-day all-day event uses exclusive end (day after the last day)', () => {
     const body: any = buildGoogleEventBody(ev({ id: 'a2', start: '2026-07-04', end: '2026-07-06' }));
     expect(body.start).toEqual({ date: '2026-07-04' });
-    expect(body.end).toEqual({ date: '2026-07-06' });
+    expect(body.end).toEqual({ date: '2026-07-07' });
   });
 
   it('timed event uses dateTime with a device tz', () => {

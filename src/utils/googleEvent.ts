@@ -30,7 +30,7 @@ export function buildGoogleEventBody(ev: CalendarEvent) {
       end: { dateTime: `${endDate}T${endHm}:00`, timeZone: tz },
     };
   } else {
-    timing = { start: { date: ev.start }, end: { date: ev.end || ev.start } };
+    timing = { start: { date: ev.start }, end: { date: addOneDayUTC(ev.end || ev.start) } };
   }
   return {
     summary: ev.title,

@@ -201,7 +201,8 @@ export const getOrCreateHousehold = async (userId: string): Promise<string> => {
 
   if (error || !household) throw new Error('Failed to create household: ' + error?.message);
 
-  await supabase.from('household_members').insert({ user_id: userId, household_id: household.id });
+  const { error: memberErr } = await supabase.from('household_members').insert({ user_id: userId, household_id: household.id });
+  if (memberErr) throw new Error('Failed to add user to household: ' + memberErr.message);
 
   return household.id;
 };

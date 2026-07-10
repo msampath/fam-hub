@@ -2619,7 +2619,12 @@ export default function App() {
     const res = resolveLedgerEntry(entry, events, approve);
     if (res.applied && res.refId) {
       const changes = res.changes as Partial<CalendarEvent>;
-      setEvents(prev => prev.map(e => (e.id === res.refId ? { ...e, ...changes } : e)));
+      setEvents(prev => prev.map(e => {
+        if (e.id !== res.refId) return e;
+        const merged = { ...e, ...changes };
+        for (const k in changes) if ((merged as any)[k] === null) delete (merged as any)[k];
+        return merged;
+      }));
     }
     const s = authorStamp();
     setActionLedger(prev => prev.map(le => (le.id === id
