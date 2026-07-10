@@ -1,3 +1,4 @@
+import { toLocalDateStr } from './dates';
 // Client for the Concierge ADK agent service (the capstone demo's agent backend).
 //
 // The browser calls a SAME-ORIGIN Express route (/api/agent/chat), NOT the Python agent directly. Why:
@@ -64,6 +65,7 @@ function normAgentAction(a: any): AgentAction | null {
 function buildTurnBody(sessionId: string, message: string, ctx?: AgentTurnContext): Record<string, unknown> {
   return {
     message,
+    clientDate: toLocalDateStr(new Date()),
     ...(sessionId ? { sessionId } : {}),
     ...(ctx?.history?.length ? { history: ctx.history } : {}),
     ...(ctx?.family ? { family: ctx.family } : {}),

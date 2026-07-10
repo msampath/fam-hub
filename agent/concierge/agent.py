@@ -61,7 +61,7 @@ ROUTER_MODEL = os.environ.get("CONCIERGE_ROUTER_MODEL", "").strip()
 MCP_STARTUP_TIMEOUT = float(os.environ.get("MCP_STARTUP_TIMEOUT", "30"))
 
 
-def _mcp(tool_names: list[str], access_token: str | None = None) -> MCPToolset:
+def _mcp(tool_names: list[str], access_token: str | None = None, client_today: str | None = None) -> MCPToolset:
     """An MCP toolset (stdio) exposing ONLY `tool_names` to the calling specialist.
 
     The full os.environ is forwarded to the MCP child so (a) `npx` resolves via PATH and (b) the Supabase
@@ -75,6 +75,8 @@ def _mcp(tool_names: list[str], access_token: str | None = None) -> MCPToolset:
     env = dict(os.environ)
     if access_token:
         env["SUPABASE_ACCESS_TOKEN"] = access_token
+    if client_today:
+        env["CLIENT_TODAY"] = client_today
     # Spawn command: the container sets MCP_SERVER_CJS to a prebuilt esbuild bundle (run via `node`), so the
     # image needs neither `tsx` nor devDeps AND avoids the ~5s tsx transpile-on-cold-spawn that caused the ADK
     # MCP session timeout. For local `adk run`/`adk web` dev (no bundle), fall back to `npx tsx src/mcp/server.ts`.
@@ -114,7 +116,7 @@ SPECIALIST_TOOLS: dict[str, list[str]] = {name: list(s.tools) for name, s in SKI
 
 
 def build_root_agent(access_token: str | None = None, model: object | None = None,
-                     router_model: str | None = None) -> Agent:
+                     router_model: str | None = None, client_today: str | None = None) -> Agent:
     """Build the concierge agent graph. Call WITHOUT a token for `adk run`/`adk web` (the MCP child uses
     the process env); the FastAPI service passes a per-request `access_token` so each visitor's writes are
     RLS-scoped to their own household (the per-visitor isolation invariant from the security review).
@@ -131,7 +133,7 @@ def build_root_agent(access_token: str | None = None, model: object | None = Non
             name=skill.name, model=m,
             description=skill.description,
             instruction=skill.instruction,
-            tools=[_mcp(list(skill.tools), access_token)],
+            tools=[_mcp(list(skill.tools), access_token, client_today)],
         )
         for skill in SKILLS.values()
     ]

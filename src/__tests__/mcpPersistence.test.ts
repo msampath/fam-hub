@@ -92,6 +92,7 @@ describe('SupabasePersistence concurrent appends', () => {
         select: () => ({ eq: () => ({ eq: (_k: string, dataKey: string) => ({
           maybeSingle: async () => { await tick(); return { data: { data: store[dataKey] ?? [] }, error: null }; },
         }) }) }),
+        insert: async (row: { data_key: string; data: any[] }) => { await tick(); store[row.data_key] = row.data; return { error: null }; },
         upsert: async (row: { data_key: string; data: any[] }) => { await tick(); store[row.data_key] = row.data; return { error: null }; },
       };
     };
@@ -130,6 +131,10 @@ describe('SupabasePersistence concurrent appends', () => {
           select: () => ({ eq: () => ({ eq: (_k: string, dataKey: string) => ({
             maybeSingle: async () => ({ data: { data: store[dataKey] ?? [] }, error: null }),
           }) }) }),
+          insert: async (row: { data_key: string; data: any[] }) => {
+            if (failNextUpsert) { failNextUpsert = false; return { error: { message: 'transient' } }; }
+            store[row.data_key] = row.data; return { error: null };
+          },
           upsert: async (row: { data_key: string; data: any[] }) => {
             if (failNextUpsert) { failNextUpsert = false; return { error: { message: 'transient' } }; }
             store[row.data_key] = row.data; return { error: null };
@@ -163,6 +168,10 @@ describe('SupabasePersistence cross-process CAS (W8 — conditional update on up
           select: () => ({ eq: () => ({ eq: (_k: string, dataKey: string) => ({
             maybeSingle: async () => ({ data: rows[dataKey] ? { data: rows[dataKey].data, updated_at: rows[dataKey].updated_at } : null, error: null }),
           }) }) }),
+          insert: async (row: { data_key: string; data: any[] }) => {
+            if (rows[row.data_key]) return { error: { code: '23505', message: 'duplicate' } };
+            rows[row.data_key] = { data: row.data, updated_at: nextStamp() }; return { error: null };
+          },
           upsert: async (row: { data_key: string; data: any[] }) => { rows[row.data_key] = { data: row.data, updated_at: nextStamp() }; return { error: null }; },
           update: (patch: { data: any[] }) => ({ eq: () => ({ eq: (_k: string, dataKey: string) => ({ eq: (_c: string, expected: string) => ({
             select: async () => {

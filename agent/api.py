@@ -107,6 +107,7 @@ class ChatIn(BaseModel):
     copilotName: str | None = None      # what the family calls the copilot (kid-pickable) — answer to it
     stores: list[str] | None = None     # household store lists (Phase-5) — route add_shopping_item to THESE
     mealplan: list[dict] | None = None  # the CURRENT week's dinners [{date,dish,note?}] — adjustment turns need it
+    clientDate: str | None = None       # client's civil YYYY-MM-DD — avoids UTC drift on a UTC container
 
 
 def _visitor_id(jwt: str | None) -> str:
@@ -179,7 +180,15 @@ async def chat(body: ChatIn, request: Request, authorization: str | None = Heade
     # is left — the meal planner must not plan a meal for a day that's already mostly over (it planned
     # lunch for TODAY at 7:45 PM). %-I isn't portable (fails on Windows), so build the hour by hand.
     now = datetime.datetime.now()
-    today = now.date()
+    client_today: str | None = None
+    if body.clientDate:
+        try:
+            today = datetime.date.fromisoformat(body.clientDate)
+            client_today = body.clientDate
+        except ValueError:
+            today = now.date()
+    else:
+        today = now.date()
     _h12 = now.hour % 12 or 12
     time_label = f"{_h12}:{now.minute:02d} {'AM' if now.hour < 12 else 'PM'}"
     context = f"(Context: now is {now.strftime('%A')}, {today.isoformat()}, {time_label} local time. " \
@@ -274,7 +283,7 @@ async def chat(body: ChatIn, request: Request, authorization: str | None = Heade
             model_arg: object | None = LiteLlm(model=LOCAL_MODEL)
         else:
             model_arg = model_name
-        agent = build_root_agent(access_token=jwt, model=model_arg)
+        agent = build_root_agent(access_token=jwt, model=model_arg, client_today=client_today)
         runner = Runner(app_name=APP_NAME, agent=agent, session_service=_sessions)
         reply = ""
         actions: list[dict] = []

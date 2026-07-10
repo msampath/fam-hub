@@ -96,6 +96,11 @@ const FIND_PLACES_TOOL = {
   },
 };
 
+// The client's civil date, threaded from agentClient→api.py→env so MCP tool validators use the
+// family's local date (not the container's UTC clock, which drifts a day at evening local time).
+const _envToday = process.env.CLIENT_TODAY;
+const clientToday = (_envToday && /^\d{4}-\d{2}-\d{2}$/.test(_envToday)) ? _envToday : '';
+
 const server = new Server(
   { name: 'family-hub-concierge', version: '0.1.0' },
   { capabilities: { tools: {} } },
@@ -158,7 +163,7 @@ async function handleReadTool(name: string, args: Record<string, unknown>): Prom
     return { ok: false, tool: name, tier: 'auto', status: 'rejected',
       message: 'No household is connected, so there is nothing to read yet.' };
   }
-  const today = new Date().toISOString().slice(0, 10);
+  const today = clientToday || new Date().toISOString().slice(0, 10);
   if (name === 'get_chores') {
     const chores = await persistence.loadCollection('chores').catch(() => []);
     const items = shapeChores(chores as any, args.all === true);
@@ -314,7 +319,7 @@ async function dispatchIO(name: string, run: () => Promise<McpToolResult>): Prom
 server.setRequestHandler(CallToolRequestSchema, async (req) => {
   const name = req.params.name;
   const args = (req.params.arguments ?? {}) as Record<string, unknown>;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = clientToday || new Date().toISOString().slice(0, 10);
   // The async (HTTP / Supabase) tools are handled here, not via the pure registry dispatch below — each
   // through dispatchIO for one uniform error shape: find_places (discovery), web-research (SSRF-guarded),
   // READ tools (visitor-JWT reads), and Library doc move/delete.

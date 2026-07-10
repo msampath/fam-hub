@@ -28,7 +28,7 @@ describe('agentClient', () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('/api/agent/chat'); // same-origin, proxied by Express (CSP-safe)
     expect((init.headers as any).Authorization).toBe('Bearer the-jwt');
-    expect(JSON.parse(init.body as string)).toEqual({ message: 'add a zoo day', sessionId: 's0' });
+    expect(JSON.parse(init.body as string)).toEqual({ message: 'add a zoo day', sessionId: 's0', clientDate: expect.any(String) });
   });
 
   it('omits sessionId on a fresh conversation and Authorization when no JWT', async () => {
@@ -39,7 +39,7 @@ describe('agentClient', () => {
     await askConciergeAgent(null, '', 'hello');
     const init = (fetchMock.mock.calls[0] as any)[1] as RequestInit;
     expect('Authorization' in (init.headers as any)).toBe(false);
-    expect(JSON.parse(init.body as string)).toEqual({ message: 'hello' });
+    expect(JSON.parse(init.body as string)).toEqual({ message: 'hello', clientDate: expect.any(String) });
   });
 
   it('throws a friendly error on a non-2xx response', async () => {

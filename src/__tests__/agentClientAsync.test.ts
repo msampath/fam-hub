@@ -51,7 +51,7 @@ describe('askConciergeAgentAsync', () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('/api/agent/chat-async');
     expect((init.headers as any).Authorization).toBe('Bearer the-jwt');
-    expect(JSON.parse(init.body as string)).toEqual({ message: 'plan a zoo day', sessionId: 's0', family: 'Ava (7)' });
+    expect(JSON.parse(init.body as string)).toEqual({ message: 'plan a zoo day', sessionId: 's0', family: 'Ava (7)', clientDate: expect.any(String) });
     // Polls hit the job route WITH the JWT (requireAuth guards it server-side).
     const [pollUrl, pollInit] = fetchMock.mock.calls[1] as [string, RequestInit];
     expect(pollUrl).toBe('/api/agent/job/J1');

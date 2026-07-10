@@ -134,11 +134,15 @@ export class SupabasePersistence implements Persistence {
       const { data: cur, version } = await this.loadWithVersion(dataKey);
       const next = build(cur);
       if (version == null) {
-        // First write of this collection: nothing to compare against → plain upsert (browser parity).
-        const { error } = await this.client.from('family_data').upsert(
-          familyDataRow(hid, dataKey, next), { onConflict: FAMILY_DATA_CONFLICT },
+        // First write: INSERT (not upsert) so a concurrent first-write raises a unique-violation
+        // instead of silently clobbering — the loser falls into the normal CAS retry.
+        const { error } = await this.client.from('family_data').insert(
+          familyDataRow(hid, dataKey, next),
         );
-        if (error) throw new Error(`write "${dataKey}" failed: ` + error.message);
+        if (error) {
+          if (error.code === '23505') continue;
+          throw new Error(`write "${dataKey}" failed: ` + error.message);
+        }
         return next;
       }
       const { data: rows, error } = await this.client.from('family_data')
@@ -222,7 +226,15 @@ export class SupabasePersistence implements Persistence {
 // clobbered. This is the fix for the former "agent writes are last-write-wins" gap on the active box path.
 export class SqlitePersistence implements Persistence {
   private hid: string | null = null;
+  private locks = new Map<string, Promise<unknown>>();
   constructor(private adapter: SqliteAdapter) {}
+
+  private locked<T>(dataKey: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.locks.get(dataKey) ?? Promise.resolve();
+    const run = prev.then(fn, fn);
+    this.locks.set(dataKey, run.catch(() => {}));
+    return run;
+  }
 
   private householdId(): string {
     if (!this.hid) this.hid = getOrCreateHouseholdId(this.adapter);
@@ -252,15 +264,12 @@ export class SqlitePersistence implements Persistence {
     return next;
   }
 
-  // `current` (the preloaded blob) is intentionally ignored — CAS needs a fresh versioned load each attempt.
   async append(dataKey: string, items: any[], _current?: any[]): Promise<number> {
-    return (await this.casWrite(dataKey, appendBuild(dataKey, items))).length;
+    return this.locked(dataKey, async () => (await this.casWrite(dataKey, appendBuild(dataKey, items))).length);
   }
 
-  // CAS read-modify-write (move_document / folder-clear): reads the current collection, applies `transform`,
-  // and saves under CAS — a concurrent edit between load and save is retried, not clobbered.
   async mutate(dataKey: string, transform: (cur: any[]) => any[]): Promise<void> {
-    await this.casWrite(dataKey, transform);
+    await this.locked(dataKey, () => this.casWrite(dataKey, transform));
   }
 
   // Forced wholesale overwrite (kept for compatibility + tests; prod read-modify-writes go through mutate()).
