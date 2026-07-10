@@ -2,7 +2,6 @@ import { useState, type Dispatch, type SetStateAction, type FormEvent } from 're
 import { uuid } from '../utils/uuid';
 import { safeParseArray } from './usePersistedCollection';
 import { availableXp } from '../utils/chores';
-import { getCurrentTimeOfDay } from '../utils/dates';
 import type { Chore, Reward, Redemption, XpBankEntry } from '../types';
 
 export interface UseChores {
@@ -17,10 +16,6 @@ export interface UseChores {
   newChoreTimesPerDay: number; setNewChoreTimesPerDay: Dispatch<SetStateAction<number>>;
   newChoreRepeatType: 'daily' | 'weekly'; setNewChoreRepeatType: Dispatch<SetStateAction<'daily' | 'weekly'>>;
   newChoreScheduleTime: string; setNewChoreScheduleTime: Dispatch<SetStateAction<string>>;
-  newChoreNotes: string; setNewChoreNotes: Dispatch<SetStateAction<string>>;
-  choreTimeFilter: string; setChoreTimeFilter: Dispatch<SetStateAction<string>>;
-  newRewardTitle: string; setNewRewardTitle: Dispatch<SetStateAction<string>>;
-  newRewardCost: number; setNewRewardCost: Dispatch<SetStateAction<number>>;
   handleAddReward: (e: FormEvent) => void;
   handleDeleteReward: (id: string) => void;
   handleRedeemReward: (reward: Reward, memberName: string) => void;
@@ -60,11 +55,7 @@ export function useChores(): UseChores {
   const [newChoreTimesPerDay, setNewChoreTimesPerDay] = useState<number>(1);
   const [newChoreRepeatType, setNewChoreRepeatType] = useState<'daily' | 'weekly'>('daily');
   const [newChoreScheduleTime, setNewChoreScheduleTime] = useState('Morning');
-  const [newChoreNotes, setNewChoreNotes] = useState('');
-  // Chore board filter — defaults to the current time-of-day slot so kids see "now" first.
-  const [choreTimeFilter, setChoreTimeFilter] = useState<string>(() => getCurrentTimeOfDay());
 
-  // Reward catalog form
   const [newRewardTitle, setNewRewardTitle] = useState('');
   const [newRewardCost, setNewRewardCost] = useState(50);
 
@@ -108,10 +99,6 @@ export function useChores(): UseChores {
     newChoreTimesPerDay, setNewChoreTimesPerDay,
     newChoreRepeatType, setNewChoreRepeatType,
     newChoreScheduleTime, setNewChoreScheduleTime,
-    newChoreNotes, setNewChoreNotes,
-    choreTimeFilter, setChoreTimeFilter,
-    newRewardTitle, setNewRewardTitle,
-    newRewardCost, setNewRewardCost,
     handleAddReward, handleDeleteReward, handleRedeemReward,
   };
 }

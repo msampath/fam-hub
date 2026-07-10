@@ -1,11 +1,20 @@
+import { type Dispatch, type SetStateAction } from 'react';
 import { X } from 'lucide-react';
 import { useApp } from '../AppContext';
-import type { Category } from '../types';
+import { useAddEventForm } from '../hooks/useAddEventForm';
+import type { Category, CalendarEvent } from '../types';
 
-export default function AddEventModal() {
+interface Props {
+  setEvents: Dispatch<SetStateAction<CalendarEvent[]>>;
+}
+
+export default function AddEventModal({ setEvents }: Props) {
   const {
     selectedDayToAdd, setSelectedDayToAdd, setIsAddingEvent,
-    handleAddCustomEvent,
+    familyMembers, authorStamp,
+  } = useApp();
+
+  const {
     customEventTitle, setCustomEventTitle,
     customEventCategory, setCustomEventCategory,
     customEventLocation, setCustomEventLocation,
@@ -16,8 +25,8 @@ export default function AddEventModal() {
     customEventRepeat, setCustomEventRepeat,
     customEventDescription, setCustomEventDescription,
     customEventMembers, toggleEventMember,
-    familyMembers,
-  } = useApp();
+    handleAddCustomEvent,
+  } = useAddEventForm({ selectedDayToAdd, setSelectedDayToAdd, setIsAddingEvent, setEvents, authorStamp });
 
   return (
     <div className="fixed inset-0 bg-indigo-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in" id="add-event-modal">
@@ -142,7 +151,7 @@ export default function AddEventModal() {
                 );
               })}
             </div>
-            <p className="text-[9px] text-slate-400 mt-1">“Free” (holidays, OOO, no-school, time off) leaves the day open for planning; “Busy” occupies it. Auto guesses from the title/category.</p>
+            <p className="text-[9px] text-slate-400 mt-1">"Free" (holidays, OOO, no-school, time off) leaves the day open for planning; "Busy" occupies it. Auto guesses from the title/category.</p>
           </div>
 
           <div>
@@ -169,8 +178,6 @@ export default function AddEventModal() {
                 );
               })}
             </div>
-            {/* RRULE-lite: repeating adds concrete instances (like a Google pull), so each one can be
-                edited/deleted individually — and the whole series bulk-deleted from the recurring notice. */}
             {customEventRepeat && <p className="text-[9px] text-slate-400 mt-1">Adds {customEventRepeat === 'daily' ? '30 daily' : '12 weekly'} entries you can edit or bulk-delete as a series.</p>}
           </div>
 

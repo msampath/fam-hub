@@ -36,8 +36,6 @@ export function makeAppCtx(overrides: Partial<AppCtx> = {}): AppCtx {
     setNewShopStore: vi.fn(),
     newShopQty: '',
     setNewShopQty: vi.fn(),
-    newShopNotes: '',
-    setNewShopNotes: vi.fn(),
 
     // Pantry + AI shopping
     pantryList: [],
@@ -73,8 +71,6 @@ export function makeAppCtx(overrides: Partial<AppCtx> = {}): AppCtx {
     setChoresList: vi.fn(),
     authorStamp: () => ({}),
     familyMembers: [],
-    choreTimeFilter: 'All',
-    setChoreTimeFilter: vi.fn(),
     newChoreTitle: '',
     setNewChoreTitle: vi.fn(),
     newChoreAssigned: '',
@@ -87,27 +83,17 @@ export function makeAppCtx(overrides: Partial<AppCtx> = {}): AppCtx {
     setNewChoreRepeatType: vi.fn(),
     newChoreScheduleTime: '',
     setNewChoreScheduleTime: vi.fn(),
-    newChoreNotes: '',
-    setNewChoreNotes: vi.fn(),
 
     // Chore rewards
     rewardsList: [],
     redemptionsList: [],
     xpBankList: [],
-    newRewardTitle: '',
-    setNewRewardTitle: vi.fn(),
-    newRewardCost: 50,
-    setNewRewardCost: vi.fn(),
     handleAddReward: vi.fn(),
     handleDeleteReward: vi.fn(),
     handleRedeemReward: vi.fn(),
 
     // Family members bar
     setFamilyMembers: vi.fn(),
-    editingMember: null,
-    setEditingMember: vi.fn(),
-    editNameInput: '',
-    setEditNameInput: vi.fn(),
     handleRenameMember: vi.fn(),
     handleDeleteMember: vi.fn(),
     showAddMember: false,
@@ -139,31 +125,10 @@ export function makeAppCtx(overrides: Partial<AppCtx> = {}): AppCtx {
     isJoiningHousehold: false,
     handleJoinHousehold: vi.fn(),
 
-    // Add-event modal
+    // Add-event modal (form state localized into AddEventModal)
     selectedDayToAdd: null,
     setSelectedDayToAdd: vi.fn(),
     setIsAddingEvent: vi.fn(),
-    handleAddCustomEvent: vi.fn(),
-    customEventTitle: '',
-    setCustomEventTitle: vi.fn(),
-    customEventCategory: 'Other',
-    setCustomEventCategory: vi.fn(),
-    customEventLocation: '',
-    setCustomEventLocation: vi.fn(),
-    customEventEnd: '',
-    setCustomEventEnd: vi.fn(),
-    customEventStartTime: '',
-    setCustomEventStartTime: vi.fn(),
-    customEventEndTime: '',
-    setCustomEventEndTime: vi.fn(),
-    customEventFreeBusy: '',
-    setCustomEventFreeBusy: vi.fn(),
-    customEventRepeat: '',
-    setCustomEventRepeat: vi.fn(),
-    customEventDescription: '',
-    setCustomEventDescription: vi.fn(),
-    customEventMembers: [],
-    toggleEventMember: vi.fn(),
 
     // Concierge action ledger + approval handlers
     actionLedger: [],

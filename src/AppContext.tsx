@@ -1,5 +1,5 @@
 import React, { createContext, useContext } from 'react';
-import type { ShoppingItem, PantryItem, Chore, Reward, Redemption, XpBankEntry, FamilyMember, Category, Authored, LedgerEntry, CopilotSuggestion, DigestPrefs, Goal, MealPlan, Routine } from './types';
+import type { ShoppingItem, PantryItem, Chore, Reward, Redemption, XpBankEntry, FamilyMember, Authored, LedgerEntry, CopilotSuggestion, DigestPrefs, Goal, MealPlan, Routine } from './types';
 import type { PantryDiff } from './utils/visionPantry';
 import type { RoutineCandidate } from './utils/routineMiner';
 import type { GeneratedChore } from './utils/chorePlan';
@@ -43,8 +43,6 @@ export interface AppCtx {
   setNewShopStore: React.Dispatch<React.SetStateAction<ShopStore>>;
   newShopQty: string;
   setNewShopQty: React.Dispatch<React.SetStateAction<string>>;
-  newShopNotes: string;
-  setNewShopNotes: React.Dispatch<React.SetStateAction<string>>;
 
   // Pantry + AI shopping (recipe→list, pantry→restock)
   pantryList: PantryItem[];
@@ -85,8 +83,6 @@ export interface AppCtx {
   // Per-record authorship stamp (who/when) — spread into a record created in a component.
   authorStamp: () => Authored;
   familyMembers: FamilyMember[];
-  choreTimeFilter: string;
-  setChoreTimeFilter: React.Dispatch<React.SetStateAction<string>>;
   newChoreTitle: string;
   setNewChoreTitle: React.Dispatch<React.SetStateAction<string>>;
   newChoreAssigned: string;
@@ -99,8 +95,6 @@ export interface AppCtx {
   setNewChoreRepeatType: React.Dispatch<React.SetStateAction<'daily' | 'weekly'>>;
   newChoreScheduleTime: string;
   setNewChoreScheduleTime: React.Dispatch<React.SetStateAction<string>>;
-  newChoreNotes: string;
-  setNewChoreNotes: React.Dispatch<React.SetStateAction<string>>;
   // AI starter chore plan (docs/ai-chore-plan-generator.md): empty-state modal → per-kid ages →
   // model plan → parent-reviewed preview → bulk add (deduped). Generation errors are surfaced, never
   // a fabricated plan.
@@ -115,20 +109,12 @@ export interface AppCtx {
   rewardsList: Reward[];
   redemptionsList: Redemption[];
   xpBankList: XpBankEntry[];
-  newRewardTitle: string;
-  setNewRewardTitle: React.Dispatch<React.SetStateAction<string>>;
-  newRewardCost: number;
-  setNewRewardCost: React.Dispatch<React.SetStateAction<number>>;
   handleAddReward: (e: React.FormEvent) => void;
   handleDeleteReward: (id: string) => void;
   handleRedeemReward: (reward: Reward, memberName: string) => void;
 
   // Family members bar
   setFamilyMembers: React.Dispatch<React.SetStateAction<FamilyMember[]>>;
-  editingMember: string | null;
-  setEditingMember: React.Dispatch<React.SetStateAction<string | null>>;
-  editNameInput: string;
-  setEditNameInput: React.Dispatch<React.SetStateAction<string>>;
   handleRenameMember: (oldName: string, rawNewName: string) => void;
   handleDeleteMember: (name: string) => void;
   showAddMember: boolean;
@@ -165,32 +151,10 @@ export interface AppCtx {
   isJoiningHousehold: boolean;
   handleJoinHousehold: (e: React.FormEvent) => void;
 
-  // Add-event modal
+  // Add-event modal (form state localized into AddEventModal; only open/day stay shared)
   selectedDayToAdd: string | null;
   setSelectedDayToAdd: React.Dispatch<React.SetStateAction<string | null>>;
   setIsAddingEvent: React.Dispatch<React.SetStateAction<boolean>>;
-  handleAddCustomEvent: (e: React.FormEvent) => void;
-  customEventTitle: string;
-  setCustomEventTitle: React.Dispatch<React.SetStateAction<string>>;
-  customEventCategory: Category;
-  setCustomEventCategory: React.Dispatch<React.SetStateAction<Category>>;
-  customEventLocation: string;
-  setCustomEventLocation: React.Dispatch<React.SetStateAction<string>>;
-  customEventEnd: string;
-  setCustomEventEnd: React.Dispatch<React.SetStateAction<string>>;
-  customEventStartTime: string;
-  setCustomEventStartTime: React.Dispatch<React.SetStateAction<string>>;
-  customEventEndTime: string;
-  setCustomEventEndTime: React.Dispatch<React.SetStateAction<string>>;
-  customEventFreeBusy: '' | 'busy' | 'free';
-  setCustomEventFreeBusy: React.Dispatch<React.SetStateAction<'' | 'busy' | 'free'>>;
-  // RRULE-lite repeat choice ('' = one-off); expansion happens at creation (useAddEventForm).
-  customEventRepeat: '' | 'daily' | 'weekly';
-  setCustomEventRepeat: React.Dispatch<React.SetStateAction<'' | 'daily' | 'weekly'>>;
-  customEventDescription: string;
-  setCustomEventDescription: React.Dispatch<React.SetStateAction<string>>;
-  customEventMembers: string[];
-  toggleEventMember: (m: string) => void;
 
   // Concierge action ledger + approval handlers (foundation A2)
   actionLedger: LedgerEntry[];

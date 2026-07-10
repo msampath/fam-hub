@@ -26,7 +26,6 @@ export interface UseShopping {
   newShopText: string; setNewShopText: Dispatch<SetStateAction<string>>;
   newShopStore: ShopStore; setNewShopStore: Dispatch<SetStateAction<ShopStore>>;
   newShopQty: string; setNewShopQty: Dispatch<SetStateAction<string>>;
-  newShopNotes: string; setNewShopNotes: Dispatch<SetStateAction<string>>;
   pantryList: PantryItem[]; setPantryList: Dispatch<SetStateAction<PantryItem[]>>;
   newPantryText: string; setNewPantryText: Dispatch<SetStateAction<string>>;
   recipeInput: string; setRecipeInput: Dispatch<SetStateAction<string>>;
@@ -66,7 +65,6 @@ export function useShopping({ authorStamp, storeList, boundLists }: UseShoppingD
   const [newShopText, setNewShopText] = useState('');
   const [newShopStore, setNewShopStore] = useState<ShopStore>('Costco');
   const [newShopQty, setNewShopQty] = useState('');
-  const [newShopNotes, setNewShopNotes] = useState('');
 
   const [pantryList, setPantryList] = useState<PantryItem[]>(() => {
     const saved = localStorage.getItem('famplan_pantry');
@@ -237,7 +235,6 @@ export function useShopping({ authorStamp, storeList, boundLists }: UseShoppingD
     newShopText, setNewShopText,
     newShopStore, setNewShopStore,
     newShopQty, setNewShopQty,
-    newShopNotes, setNewShopNotes,
     pantryList, setPantryList,
     newPantryText, setNewPantryText,
     recipeInput, setRecipeInput,

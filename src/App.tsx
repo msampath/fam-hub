@@ -23,7 +23,6 @@ import type { User } from '@supabase/supabase-js';
 import { usePersistedCollection, safeParseArray } from './hooks/usePersistedCollection';
 import { useEchoWriteGuard, useEchoWriteRelease } from './hooks/useEchoWriteGuard';
 import { useDevicePrefs } from './hooks/useDevicePrefs';
-import { useAddEventForm } from './hooks/useAddEventForm';
 import { useShopping } from './hooks/useShopping';
 import { useChores } from './hooks/useChores';
 
@@ -170,8 +169,6 @@ export default function App() {
     newChoreTitle, setNewChoreTitle, newChoreAssigned, setNewChoreAssigned,
     newChorePoints, setNewChorePoints, newChoreTimesPerDay, setNewChoreTimesPerDay,
     newChoreRepeatType, setNewChoreRepeatType, newChoreScheduleTime, setNewChoreScheduleTime,
-    newChoreNotes, setNewChoreNotes, choreTimeFilter, setChoreTimeFilter,
-    newRewardTitle, setNewRewardTitle, newRewardCost, setNewRewardCost,
     handleAddReward, handleDeleteReward, handleRedeemReward,
   } = chores;
 
@@ -403,7 +400,7 @@ export default function App() {
   const shopping = useShopping({ authorStamp, storeList, boundLists: Object.keys(storeBindings) });
   const {
     shoppingList, setShoppingList, newShopText, setNewShopText, newShopStore, setNewShopStore,
-    newShopQty, setNewShopQty, newShopNotes, setNewShopNotes,
+    newShopQty, setNewShopQty,
     pantryList, setPantryList, newPantryText, setNewPantryText,
     recipeInput, setRecipeInput, isParsingRecipe, setIsParsingRecipe,
     isSuggestingRestock, setIsSuggestingRestock, shoppingAiError, setShoppingAiError,
@@ -619,17 +616,6 @@ export default function App() {
   // Custom Event state
   const [isAddingEvent, setIsAddingEvent] = useState(false);
   const [selectedDayToAdd, setSelectedDayToAdd] = useState<string | null>(null);
-  // Manual add-event form (state + submit/reset) extracted to useAddEventForm; the modal-open state
-  // (selectedDayToAdd/isAddingEvent above) stays here since several surfaces set it.
-  const addEventForm = useAddEventForm({ selectedDayToAdd, setSelectedDayToAdd, setIsAddingEvent, setEvents, authorStamp });
-  const {
-    customEventTitle, setCustomEventTitle, customEventCategory, setCustomEventCategory,
-    customEventMembers, setCustomEventMembers, customEventDescription, setCustomEventDescription,
-    customEventEnd, setCustomEventEnd, customEventLocation, setCustomEventLocation,
-    customEventStartTime, setCustomEventStartTime, customEventEndTime, setCustomEventEndTime,
-    customEventFreeBusy, setCustomEventFreeBusy, customEventRepeat, setCustomEventRepeat,
-    toggleEventMember, handleAddCustomEvent,
-  } = addEventForm;
 
   // Filtering states
   const [searchQuery, setSearchQuery] = useState('');
@@ -681,9 +667,6 @@ export default function App() {
   // New family member naming
   const [newMemberName, setNewMemberName] = useState('');
   const [showAddMember, setShowAddMember] = useState(false);
-  // Inline member rename
-  const [editingMember, setEditingMember] = useState<string | null>(null);
-  const [editNameInput, setEditNameInput] = useState('');
 
   // (Reward-catalog form state now lives in useChores, destructured above.)
 
@@ -1730,7 +1713,6 @@ export default function App() {
     setSyncAssignee(swap);
     setActiveMemberFilter(swap);
     setNewChoreAssigned(swap);
-    setCustomEventMembers(prev => rename(prev) ?? []);
   };
 
   // Add Google Calendar setup connection (Pull or Push assignees)
@@ -3253,7 +3235,6 @@ export default function App() {
     setConnectedCalendars(prev => prev.map(c => (c.assignedTo === name ? { ...c, assignedTo: 'Family' } : c)));
     setActiveMemberFilter(unset);
     setSyncAssignee(v => (v === name ? 'Family' : v));
-    setCustomEventMembers(prev => strip(prev) ?? []);
   };
 
   // ── Chore rewards: catalog + redemption (debits a kid's earned XP) ───────────
@@ -3289,7 +3270,6 @@ export default function App() {
     newShopText, setNewShopText,
     newShopStore, setNewShopStore,
     newShopQty, setNewShopQty,
-    newShopNotes, setNewShopNotes,
     pantryList,
     newPantryText, setNewPantryText,
     handleAddPantryItem, handleDeletePantryItem,
@@ -3304,23 +3284,17 @@ export default function App() {
     choresList, setChoresList,
     authorStamp,
     familyMembers,
-    choreTimeFilter, setChoreTimeFilter,
     newChoreTitle, setNewChoreTitle,
     newChoreAssigned, setNewChoreAssigned,
     newChorePoints, setNewChorePoints,
     newChoreTimesPerDay, setNewChoreTimesPerDay,
     newChoreRepeatType, setNewChoreRepeatType,
     newChoreScheduleTime, setNewChoreScheduleTime,
-    newChoreNotes, setNewChoreNotes,
     isGeneratingChoresOpen, setIsGeneratingChoresOpen, isGeneratingChores, choreGenError,
     handleGenerateChores, addGeneratedChores,
     rewardsList, redemptionsList, xpBankList,
-    newRewardTitle, setNewRewardTitle,
-    newRewardCost, setNewRewardCost,
     handleAddReward, handleDeleteReward, handleRedeemReward,
     setFamilyMembers,
-    editingMember, setEditingMember,
-    editNameInput, setEditNameInput,
     handleRenameMember, handleDeleteMember,
     showAddMember, setShowAddMember,
     handleAddMember,
@@ -3334,17 +3308,6 @@ export default function App() {
     onboardingName, handleSaveOnboardingPrefs, dismissOnboarding,
     inviteCodeInput, setInviteCodeInput, isJoiningHousehold, handleJoinHousehold,
     selectedDayToAdd, setSelectedDayToAdd, setIsAddingEvent,
-    handleAddCustomEvent,
-    customEventTitle, setCustomEventTitle,
-    customEventCategory, setCustomEventCategory,
-    customEventLocation, setCustomEventLocation,
-    customEventEnd, setCustomEventEnd,
-    customEventStartTime, setCustomEventStartTime,
-    customEventEndTime, setCustomEventEndTime,
-    customEventFreeBusy, setCustomEventFreeBusy,
-    customEventRepeat, setCustomEventRepeat,
-    customEventDescription, setCustomEventDescription,
-    customEventMembers, toggleEventMember,
     // Concierge action ledger + approval handlers (foundation A2)
     actionLedger, approveLedgerEntry, rejectLedgerEntry, reviseLedgerEntry, stageLedgerEntries,
     // Step-up PIN gate (A3)
@@ -3462,7 +3425,7 @@ export default function App() {
 
       {/* DYNAMIC SPANNING MODAL: QUICK POPUP TO MANUALLY ADD EVENTS FOR A SPECIFIC DATE (lazy) */}
       <Suspense fallback={null}>
-        {isAddingEvent && selectedDayToAdd && <AddEventModal />}
+        {isAddingEvent && selectedDayToAdd && <AddEventModal setEvents={setEvents} />}
       </Suspense>
 
       {/* AI starter chore plan (Chores empty state → age form → parent-reviewed preview; lazy) */}
