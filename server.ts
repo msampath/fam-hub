@@ -5,7 +5,7 @@ import helmet from 'helmet';
 import path from 'path';
 import { readFileSync, existsSync, promises as fsp } from 'node:fs';
 import dotenv from 'dotenv';
-import { randomUUID, scryptSync, randomBytes, timingSafeEqual, createHash } from 'crypto';
+import { randomUUID, randomBytes, timingSafeEqual, createHash } from 'crypto';
 import { GoogleGenAI, Type } from '@google/genai';
 import { createClient, type User } from '@supabase/supabase-js';
 // NOTE: `vite` is imported DYNAMICALLY in the dev branch below (not here) so it can be a devDependency and
@@ -21,7 +21,6 @@ import {
   buildCartAddBody, KROGER_MATCH_SCHEMA, krogerSearchTerm, krogerFallbackTerm, type ProductCandidate,
 } from './src/utils/krogerApi';
 import { buildRevisePrompt } from './src/utils/reviseDraft';
-import { COPILOT_ACTIONS, selectorSatisfied } from './src/mcp/actionContract';
 import { validateExtractedEvents } from './src/utils/extractedEvents';
 import { filterUnrequestedHolidayDeletes } from './src/utils/holidayGuard';
 import { buildBriefing, type Briefing } from './src/utils/briefing';
@@ -71,6 +70,17 @@ import { verifySession, signSession, newSession, isValidPassphrase } from './src
 import { getOrCreateHouseholdId, getSessionSecret, isHouseholdConfigured, setHouseholdPassphrase, checkHouseholdPassphrase, changeHouseholdPassphrase } from './src/storage/boxConfig';
 // Async agent jobs (roadmap): the queued-turn rows behind /api/agent/chat-async + /api/agent/job/:id.
 import { SqliteAgentJobStore, SupabaseAgentJobStore, lookupHouseholdId, type AgentJobStore } from './src/storage/agentJobs';
+// Pure helpers extracted to src/server/ — imported for internal use, re-exported for test consumers.
+import { checkRateWindow, pruneExpired } from './src/server/rateLimit';
+import { parseGeminiJSON, repairTruncatedJson, isTextOnlyContents, contentsToText, isTransientError, isRecoverableError, orderFallbackModels, isLikelyTextModel, resolveFallbackChain, isLocalToken, buildAttemptChain } from './src/server/llmHelpers';
+import { shiftIsoDate, filterUpcomingEvents, dedupeActions, ALLOWED_COPILOT_ACTIONS, sanitizeCopilotActions, sanitizeSuggestions, parseICS } from './src/server/copilotHelpers';
+import type { GroundingFact } from './src/server/copilotHelpers';
+import { hashStepUpPin, verifyStepUpPin, isValidPin, nextPinLockEntry } from './src/server/stepUpPin';
+export { checkRateWindow, pruneExpired } from './src/server/rateLimit';
+export { parseGeminiJSON, repairTruncatedJson, isTextOnlyContents, contentsToText, isTransientError, isRecoverableError, orderFallbackModels, isLikelyTextModel, resolveFallbackChain, isLocalToken, buildAttemptChain } from './src/server/llmHelpers';
+export { shiftIsoDate, filterUpcomingEvents, dedupeActions, ALLOWED_COPILOT_ACTIONS, sanitizeCopilotActions, sanitizeSuggestions, parseICS } from './src/server/copilotHelpers';
+export type { GroundingFact } from './src/server/copilotHelpers';
+export { hashStepUpPin, verifyStepUpPin, isValidPin, nextPinLockEntry } from './src/server/stepUpPin';
 
 dotenv.config();
 
@@ -185,24 +195,7 @@ const AI_RATE_LIMIT_PER_MIN = Number(process.env.AI_RATE_LIMIT_PER_MIN) || 20;
 const AI_RATE_WINDOW_MS = 60_000;
 const aiRateHits = new Map<string, { count: number; resetAt: number }>();
 
-// Pure window check — exported so the limiter logic is unit-testable without timers. Returns the
-// next entry to store and whether the call is allowed. (Same shape the data-fetch quota uses.)
-export function checkRateWindow(
-  entry: { count: number; resetAt: number } | undefined,
-  now: number, max: number, windowMs: number,
-): { allowed: boolean; entry: { count: number; resetAt: number } } {
-  if (!entry || now >= entry.resetAt) return { allowed: true, entry: { count: 1, resetAt: now + windowMs } };
-  if (entry.count >= max) return { allowed: false, entry };
-  return { allowed: true, entry: { count: entry.count + 1, resetAt: entry.resetAt } };
-}
-
-// Lazily evict expired entries so the in-memory rate/quota Maps don't grow unbounded — otherwise one
-// entry per unique user/IP accumulates forever and a long-running / many-IP server eventually OOMs.
-// No-op until a Map grows past a small floor, so the personal-app path pays nothing.
-export function pruneExpired(map: Map<string, { count: number; resetAt: number }>, now: number): void {
-  if (map.size < 256) return;
-  for (const [k, v] of map) if (now >= v.resetAt) map.delete(k);
-}
+// Rate-limit pure helpers (checkRateWindow, pruneExpired) → src/server/rateLimit.ts
 
 // Same idea for the best-effort grounding caches (weather/air/pollen/places), which key on lat/lng or a
 // query string: drop entries older than their TTL so a MULTI-household server can't accumulate one forever.
@@ -354,82 +347,6 @@ function cleanHTML(html: string): string {
   return clean.trim();
 }
 
-/**
- * Robustly parses a JSON string returned by Gemini, striping markdown code fences.
- */
-export function parseGeminiJSON(text: string): any {
-  let cleaned = (text || '').trim();
-  if (cleaned.startsWith('```')) {
-    cleaned = cleaned.replace(/^```(json)?\s*/i, '').replace(/\s*```$/, '').trim();
-  }
-  try {
-    return JSON.parse(cleaned);
-  } catch {
-    // Fallback: a chatty model may wrap the JSON in prose ("Sure! Here's the plan: {...}") with no
-    // fence, so the direct parse fails. Extract the outermost {...} or [...] and retry before
-    // giving up — saves a wasted retry/fallback cycle on otherwise-valid output.
-    const objStart = cleaned.indexOf('{'), objEnd = cleaned.lastIndexOf('}');
-    const arrStart = cleaned.indexOf('['), arrEnd = cleaned.lastIndexOf(']');
-    // Prefer whichever bracket type appears first (an object response vs an array response).
-    const useArr = arrStart !== -1 && (objStart === -1 || arrStart < objStart);
-    const start = useArr ? arrStart : objStart;
-    const end = useArr ? arrEnd : objEnd;
-    if (start !== -1 && end > start) {
-      try { return JSON.parse(cleaned.slice(start, end + 1)); } catch { /* fall through to malformed */ }
-    }
-    console.error('Failed to parse Gemini JSON:', cleaned);
-    // Tag as a malformed-RESPONSE error (distinct from a fatal request error). A model that
-    // returns unparseable/truncated JSON — e.g. a repetition loop that blew the output-token
-    // ceiling and got cut off mid-string — is worth a retry/fallback, NOT an instant hard-fail.
-    // See isRecoverableError (this used to throw a plain Error, which callGeminiJSON treated as
-    // fatal → skipped the fallback chain → surfaced as a bogus "all models unavailable").
-    const e: any = new Error('The AI response structure was unexpectedly formatted. Please try again.');
-    e.malformedResponse = true;
-    throw e;
-  }
-}
-
-// Salvage a malformed/truncated JSON response so ONE runaway field can't discard an otherwise-good answer.
-// The classic failure is a later field (e.g. a looping suggestion `type`) blowing the output-token cap
-// mid-string, while the user-facing `reply` — which comes FIRST — is already complete. Strategy:
-//   (1) Close a string truncated mid-value + any unclosed braces/brackets, then parse. A now-garbage field
-//       value is fine: downstream validation (sanitizeCopilotActions / suggestion resolve) drops it, and the
-//       complete `reply` + any complete earlier suggestions survive.
-//   (2) Failing that, extract just the complete `reply` string so at least the prose answer isn't lost.
-// Returns null if nothing parses (caller then advances the model chain). Pure → unit-tested.
-export function repairTruncatedJson(raw: string): any | null {
-  if (typeof raw !== 'string') return null;
-  // Anchor at whichever bracket appears FIRST (mirrors parseGeminiJSON's useArr logic) so a truncated ARRAY
-  // response (event/PDF extraction callers use '[]') keeps its leading '[' and can balance-parse — anchoring
-  // only on '{' would drop the '[' and turn a salvageable array into an unparseable object,object stream.
-  const objStart = raw.indexOf('{');
-  const arrStart = raw.indexOf('[');
-  const start = arrStart !== -1 && (objStart === -1 || arrStart < objStart) ? arrStart : objStart;
-  if (start < 0) return null;
-  let s = raw.slice(start);
-  let inStr = false, esc = false;
-  const closers: string[] = [];
-  for (let i = 0; i < s.length; i++) {
-    const c = s[i];
-    if (inStr) {
-      if (esc) esc = false;
-      else if (c === '\\') esc = true;
-      else if (c === '"') inStr = false;
-    } else if (c === '"') inStr = true;
-    else if (c === '{') closers.push('}');
-    else if (c === '[') closers.push(']');
-    else if (c === '}' || c === ']') closers.pop();
-  }
-  if (inStr) s += '"';                 // close a string truncated mid-value
-  s = s.replace(/[,\s]*$/, '');         // drop a dangling comma/whitespace (truncated between elements)
-  while (closers.length) s += closers.pop();
-  try { return JSON.parse(s); } catch { /* fall through to reply-only salvage */ }
-  // Last resort: pull out the complete `reply` string so the user still gets the good prose answer.
-  const m = raw.match(/"reply"\s*:\s*("(?:[^"\\]|\\.)*")/);
-  if (m) { try { return { reply: JSON.parse(m[1]), suggestions: [], actions: [] }; } catch { /* unparseable */ } }
-  return null;
-}
-
 // Single source for the PRIMARY model id. ONE knob `COPILOT_MODEL` powers BOTH engine tiers (this Express
 // quick-path + the ADK agent); `GEMINI_MODEL` is kept only as a legacy per-tier override. Default is the
 // settled serving model (off the 503-prone gemini-3.5-flash).
@@ -470,22 +387,6 @@ const LOCAL_LLM_KEEP_ALIVE = process.env.LOCAL_LLM_KEEP_ALIVE || '';
 // header), but lets the same code talk to an authenticated/hosted Ollama (e.g. ollama.com) by
 // setting LOCAL_LLM_API_KEY or reusing an existing OLLAMA_API_KEY.
 const LOCAL_LLM_API_KEY = process.env.LOCAL_LLM_API_KEY || process.env.OLLAMA_API_KEY || '';
-
-// Only text prompts can go to the (text-only) local models; anything carrying image/file parts
-// (inlineData/fileData — the PDF path) must stay on Gemini. Unknown shapes → stay on Gemini.
-export function isTextOnlyContents(contents: any): boolean {
-  if (typeof contents === 'string') return true;
-  const parts = Array.isArray(contents?.parts) ? contents.parts : Array.isArray(contents) ? contents : null;
-  if (!parts) return false;
-  return parts.every((p: any) => typeof p === 'string' || (p && typeof p.text === 'string' && !p.inlineData && !p.fileData));
-}
-
-// Flatten a Gemini `contents` (string or text parts) to a single user string for Ollama's chat API.
-export function contentsToText(contents: any): string {
-  if (typeof contents === 'string') return contents;
-  const parts = Array.isArray(contents?.parts) ? contents.parts : Array.isArray(contents) ? contents : [];
-  return parts.map((p: any) => (typeof p === 'string' ? p : p?.text || '')).filter(Boolean).join('\n');
-}
 
 // Call the local Ollama model via its /api/chat endpoint with constrained JSON output. The
 // canonical @google/genai response schema is converted to plain JSON Schema for Ollama's `format`.
@@ -546,83 +447,7 @@ async function callOllamaJSON(
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-// A TRANSIENT error is worth retrying / falling back from (capacity, overload, network);
-// a FATAL one (bad request, auth, unknown model, schema) fails identically every time, so
-// we must not waste retries or the fallback chain on it.
-export function isTransientError(err: any): boolean {
-  const code = err?.status ?? err?.code;
-  if (typeof code === 'number' && [429, 500, 503].includes(code)) return true;
-  const msg = String(err?.message || err || '').toUpperCase();
-  // ABORT covers AbortController cancellations ("AbortError", "the operation was aborted") — our
-  // fetch timeouts cancel this way, and a timeout is transient, not a schema-shaped fatal.
-  return /\b(429|500|503)\b|UNAVAILABLE|RESOURCE_EXHAUSTED|INTERNAL|OVERLOADED|ECONNRESET|ETIMEDOUT|FETCH FAILED|ABORT/.test(msg);
-}
-
-// A failure is RECOVERABLE if it's transient (overload/network) OR the model returned
-// unparseable/truncated JSON (a repetition-loop that blew the token ceiling). Both deserve a
-// retry of the primary and then a fallback to another model — unlike a truly fatal error
-// (bad request / auth / unknown model / bad schema), which fails identically every time and
-// must short-circuit. Garbage output used to be misclassified as fatal, so a single bad
-// response from the primary aborted the whole request instead of falling back.
-export function isRecoverableError(err: any): boolean {
-  return isTransientError(err) || !!err?.malformedResponse;
-}
-
-// Order discovered models so the most fallback-worthy come first: lighter "flash-lite"/"lite",
-// then "flash", then others, with heavy "pro" last (more likely to also be capacity-limited).
-export function orderFallbackModels(names: string[]): string[] {
-  const rank = (n: string) => {
-    const s = n.toLowerCase();
-    if (s.includes('flash-lite') || s.includes('lite')) return 0;
-    if (s.includes('flash')) return 1;
-    if (s.includes('pro')) return 3;
-    return 2;
-  };
-  return [...names].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
-}
-
-// Non-text Gemini families that can advertise `generateContent` but mustn't answer JSON copilot
-// prompts (image/audio/TTS/music/embedding/video). Filtered out of the auto-discovered chain so
-// a fallback never lands on e.g. imagen or a TTS model. (The pinned GEMINI_FALLBACKS bypasses this.)
-const NON_TEXT_MODEL_RE = /imag|tts|audio|music|embedding|veo|learnlm|vision|aqa/i;
-
-// True when a model id looks like a text/chat model (not an image/TTS/embedding/video family).
-// Exported so the auto-discovery name filter is unit-testable without hitting the API.
-export function isLikelyTextModel(name: string): boolean {
-  return !!name && !NON_TEXT_MODEL_RE.test(name);
-}
-
-// Pick the fallback chain: a PINNED list (GEMINI_FALLBACKS) wins verbatim; otherwise the
-// auto-discovered list. The primary is always removed (it already had its retries). Pure +
-// exported so the selection logic is unit-testable without hitting the API.
-export function resolveFallbackChain(manual: string[], discovered: string[], primary: string): string[] {
-  const chain = manual.length ? manual : discovered;
-  return chain.filter(m => m && m !== primary);
-}
-
-// A `local` / `ollama` entry in an explicit GEMINI_FALLBACKS chain means "run the local Ollama
-// model at THIS position" (rather than always-first). Lets the owner interleave local anywhere.
-const LOCAL_TOKEN_RE = /^(local|ollama)$/i;
-export function isLocalToken(s: string): boolean {
-  return LOCAL_TOKEN_RE.test(String(s || '').trim());
-}
-
-// Build the explicit, fully-deterministic attempt chain: [primary, ...fallbacks], de-duplicated
-// case-insensitively while PRESERVING order (and any `local`/`ollama` token positions). Pure +
-// exported so the ordering is unit-testable without hitting the API.
-export function buildAttemptChain(primary: string, fallbacks: string[]): string[] {
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const m of [primary, ...(Array.isArray(fallbacks) ? fallbacks : [])]) {
-    const id = String(m || '').trim();
-    if (!id) continue;
-    const key = id.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(id);
-  }
-  return out;
-}
+// LLM pure helpers (parseGeminiJSON, error classification, fallback chain) → src/server/llmHelpers.ts
 
 // Discover generateContent-capable models from the API (cached) — used ONLY as a fallback
 // when the primary is transiently unavailable, so we never hardcode/guess fallback model ids.
@@ -820,251 +645,7 @@ function aiErrorResponse(res: Response, err: any, fallbackMsg: string) {
   return res.status(500).json({ error: fallbackMsg });
 }
 
-/**
- * Robust line-by-line parser for iCalendar (.ics) files.
- */
-// Shift a 'YYYY-MM-DD' by n days (UTC). Used to convert an exclusive all-day ICS DTEND
-// (the day after the last day) into an inclusive end date.
-export function shiftIsoDate(dateStr: string, n: number): string {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().split('T')[0];
-}
-
-// Keep only events that are today-or-later (drop fully-past ones) so the planner can never list
-// or propose a past day — a weak fallback model won't reliably filter dates itself. Compares on
-// the event's END date (falling back to START), date-only; ISO 'YYYY-MM-DD' strings sort
-// chronologically, so a lexical >= is a correct date comparison. Null/undated events are dropped.
-export function filterUpcomingEvents(events: any[], today: string): any[] {
-  if (!Array.isArray(events)) return [];
-  return events.filter(e => {
-    const when = String(e?.end || e?.start || '').slice(0, 10);
-    return when !== '' && when >= today;
-  });
-}
-
-// Collapse duplicate copilot actions (same type + key payload fields), so a model that emits the
-// same create_event several times can't spray duplicate entries onto the calendar ("multiple
-// entries all for June 17"). Order-preserving; first occurrence of each key wins.
-export function dedupeActions(actions: any[]): any[] {
-  if (!Array.isArray(actions)) return [];
-  const seen = new Set<string>();
-  const out: any[] = [];
-  for (const a of actions) {
-    const p = a?.payload || {};
-    const key = [a?.type, p.title, p.start, p.text, p.assignedTo]
-      .map(x => String(x ?? '').trim().toLowerCase()).join('|');
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(a);
-  }
-  return out;
-}
-
-// Server-side allowlist + shape check for copilot actions (the client builders remain the hard
-// trust boundary, but this stops anything off-contract from ever reaching the client). Drops
-// actions whose type isn't allowed; for update_event requires a target selector (id or matchTitle)
-// so a malformed "update everything" can't slip through. Pairs with the deferred copilot-action-
-// validation security item. Order-preserving.
-// Derived from the SHARED action contract (src/mcp/actionContract.ts) — the SAME source the client Tool
-// Registry reads — so the allowlist is declared once, not re-typed here. A parity test still asserts the
-// two agree (belt and suspenders).
-export const ALLOWED_COPILOT_ACTIONS = new Set(COPILOT_ACTIONS);
-// Collision key for find-vs-create: date + a normalized title (lowercased, punctuation/whitespace
-// collapsed) so a model paraphrase ("Zoo!" vs "zoo") still matches an existing calendar event.
-function eventCollisionKey(start: any, title: any): string {
-  return `${String(start || '').slice(0, 10)}|${String(title || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()}`;
-}
-export function sanitizeCopilotActions(actions: any[], existingEvents: any[] = []): any[] {
-  if (!Array.isArray(actions)) return [];
-  const existing = new Set((Array.isArray(existingEvents) ? existingEvents : []).map(e => eventCollisionKey(e?.start, e?.title)));
-  return actions.filter(a => {
-    if (!a || !ALLOWED_COPILOT_ACTIONS.has(a.type)) return false;
-    // Required-selector gate, sourced from the SHARED action contract (src/mcp/actionContract.ts) — one
-    // predicate per action, so a targeted/destructive action can't slip through target-less ("delete
-    // everything"). This replaces the per-type if-ladder that only covered SOME actions; the contract now
-    // covers all of them (e.g. delete_goal/delete_meal_plan/set_meal_plan gained the server-side check too).
-    if (!selectorSatisfied(a.type, a.payload)) return false;
-    // Drop a create_event that collides with an event already on the calendar — the find-vs-create
-    // rule lived only in the prompt, so a weak model could still auto-create a duplicate (Bug 3). (Kept
-    // inline, not in the contract: it needs the existingEvents set, not just the payload shape.)
-    if (a.type === 'create_event') {
-      const p = a.payload || {};
-      if (p.start && p.title && existing.has(eventCollisionKey(p.start, p.title))) return false;
-    }
-    return true;
-  });
-}
-
-// A server-verified venue/event the copilot may name. Built from the SAME id-tagged lists the model
-// sees in PLACES FACTS / EVENTS FACTS ([P#]/[E#]), so a suggestion that references an id can be
-// resolved back to a real name + link — and one that references nothing real is dropped.
-export interface GroundingFact {
-  id: string;              // 'P1' / 'E1' — matches the [P#]/[E#] tag in the FACTS block
-  name: string;            // authoritative display name
-  url?: string;            // a REAL link (place website/Maps, or the event page) — never model-written
-  kind: 'place' | 'event';
-  date?: string;           // events: the fixed YYYY-MM-DD (overrides the model's start)
-}
-
-// Server-side shape check + ANTI-HALLUCINATION resolver for the copilot's tap-to-add suggestions.
-// Two suggestion shapes (see COPILOT_HARNESS_SYSTEM): a "place" (a real venue/event the model names by
-// a [P#]/[E#] `ref`) and an "idea" (a generic activity with no specific business name). A "place" is
-// resolved against `facts` (by id, else exact name) and gets its REAL name + url from the fact; a place
-// that resolves to NOTHING is DROPPED (the model invented it — the core fix for fabricated venues).
-// "idea"/legacy suggestions pass through with their (generic) title and no url. Also keeps only entries
-// with a YYYY-MM-DD start, clamps field lengths, drops echoes of an existing calendar event (Bug 3),
-// and dedupes within the batch. Order-preserving; capped.
-export function sanitizeSuggestions(list: any, existingEvents: any[] = [], facts: GroundingFact[] = []): any[] {
-  if (!Array.isArray(list)) return [];
-  const factById = new Map<string, GroundingFact>();
-  const factByName = new Map<string, GroundingFact>();
-  for (const f of Array.isArray(facts) ? facts : []) {
-    if (f?.id) factById.set(String(f.id).toUpperCase(), f);
-    if (f?.name) factByName.set(String(f.name).trim().toLowerCase(), f);
-  }
-  const existing = new Set(
-    (Array.isArray(existingEvents) ? existingEvents : []).map(e => eventCollisionKey(e?.start, e?.title)),
-  );
-  const seenInBatch = new Set<string>(); // also drop near-duplicate paraphrases within one response
-  const out: any[] = [];
-  for (const s of list) {
-    if (!s || typeof s.start !== 'string' || !/^\d{4}-\d{2}-\d{2}/.test(s.start.trim())) continue;
-    // Treat as a place ONLY for type:'place' (or a ref on a non-idea); an explicit type:'idea' is
-    // never a place, even if the model left a stray ref on it (that would wrongly drop a valid idea).
-    const isPlace = s.type === 'place' || (s.type !== 'idea' && typeof s.ref === 'string' && !!s.ref.trim());
-    let resolved: any;
-    if (isPlace) {
-      // A specific venue/event must resolve to a server-provided fact — else it's unverified and we drop
-      // it. Name + link come from the fact, never the model. Resolve by id; fall back to an exact name
-      // match ONLY when NO ref was given — a WRONG ref (e.g. P9 when only P1–P5 exist) means the model
-      // intended a specific id that doesn't exist, so drop it rather than silently rebind by name.
-      const refKey = typeof s.ref === 'string' ? s.ref.replace(/[^A-Za-z0-9]/g, '').toUpperCase() : '';
-      let fact = refKey ? factById.get(refKey) : undefined;
-      if (!fact && !refKey && typeof s.title === 'string') fact = factByName.get(s.title.trim().toLowerCase());
-      if (!fact) continue; // unverified specific place → DROP (anti-hallucination)
-      const start = fact.kind === 'event' && fact.date ? fact.date : String(s.start).slice(0, 10);
-      resolved = {
-        start,
-        title: String(fact.name).slice(0, 120),
-        ...(fact.url ? { url: String(fact.url).slice(0, 400) } : {}),
-        ...(typeof s.category === 'string' ? { category: s.category } : {}),
-        ...(Array.isArray(s.members) ? { members: s.members.map(String).slice(0, 12) } : {}),
-        ...(typeof s.note === 'string' ? { note: s.note.slice(0, 300) } : {}),
-      };
-    } else {
-      // Generic idea (or a legacy suggestion with no type): keep with its own title; no specific
-      // business name is guaranteed, so no url. Requires a non-empty title.
-      if (typeof s.title !== 'string' || !s.title.trim()) continue;
-      resolved = {
-        start: String(s.start).slice(0, 10),
-        title: String(s.title).slice(0, 120),
-        ...(typeof s.category === 'string' ? { category: s.category } : {}),
-        ...(Array.isArray(s.members) ? { members: s.members.map(String).slice(0, 12) } : {}),
-        ...(typeof s.note === 'string' ? { note: s.note.slice(0, 300) } : {}),
-      };
-    }
-    const k = eventCollisionKey(resolved.start, resolved.title);
-    if (existing.has(k) || seenInBatch.has(k)) continue;
-    seenInBatch.add(k);
-    out.push(resolved);
-    if (out.length >= 14) break;
-  }
-  return out;
-}
-
-export function parseICS(text: string, category: string = 'School'): any[] {
-  const events: any[] = [];
-  const lines = text.split(/\r?\n/);
-  let currentEvent: any = null;
-  
-  // Unfold folded lines
-  const unfoldedLines: string[] = [];
-  for (const line of lines) {
-    if (line.startsWith(' ') && unfoldedLines.length > 0) {
-      unfoldedLines[unfoldedLines.length - 1] += line.substring(1);
-    } else if (line) {
-      unfoldedLines.push(line);
-    }
-  }
-
-  for (const line of unfoldedLines) {
-    if (line.startsWith('BEGIN:VEVENT')) {
-      currentEvent = {};
-    } else if (line.startsWith('END:VEVENT')) {
-      if (currentEvent) {
-        if (currentEvent.start) {
-          const startVal = parseICalDate(currentEvent.start);
-          let endVal = currentEvent.end ? parseICalDate(currentEvent.end) : undefined;
-          // All-day VEVENT DTEND is EXCLUSIVE (the day after the last day). When both ends
-          // are date-only (all-day), shift the end back a day so it's inclusive — otherwise
-          // a 1-day holiday spans two days (and the calendar/conflicts treat end inclusively).
-          if (endVal && !startVal.includes('T') && !endVal.includes('T')) {
-            endVal = shiftIsoDate(endVal, -1);
-            if (endVal < startVal) endVal = startVal;
-          }
-          events.push({
-            id: 'ics-' + randomUUID(),
-            title: currentEvent.title || 'Untitled Event',
-            start: startVal,
-            end: endVal,
-            description: currentEvent.description || '',
-            location: currentEvent.location || '',
-            category: category,
-            ageGroup: 'All age'
-          });
-        }
-        currentEvent = null;
-      }
-    } else if (currentEvent) {
-      const colonIdx = line.indexOf(':');
-      if (colonIdx !== -1) {
-        const keyPart = line.substring(0, colonIdx);
-        const val = line.substring(colonIdx + 1);
-        const key = keyPart.split(';')[0];
-        
-        if (key === 'SUMMARY') {
-          currentEvent.title = val;
-        } else if (key === 'DESCRIPTION') {
-          currentEvent.description = val.replace(/\\n/g, '\n').replace(/\\,/g, ',');
-        } else if (key === 'LOCATION') {
-          currentEvent.location = val.replace(/\\,/g, ',');
-        } else if (key === 'DTSTART') {
-          currentEvent.start = val;
-        } else if (key === 'DTEND') {
-          currentEvent.end = val;
-        }
-      }
-    }
-  }
-  return events;
-}
-
-function parseICalDate(icalDate: string): string {
-  const isUtc = /z$/i.test(icalDate.trim()); // trailing Z = UTC timestamp
-  const clean = icalDate.replace(/[^0-9T]/g, '');
-  if (clean.length >= 8) {
-    const year = clean.substring(0, 4);
-    const month = clean.substring(4, 6);
-    const day = clean.substring(6, 8);
-    if (clean.includes('T') && clean.length >= 15) {
-      const hour = clean.substring(9, 11);
-      const min = clean.substring(11, 13);
-      const sec = clean.substring(13, 15);
-      if (isUtc) {
-        // UTC timestamp → convert to the household's LOCAL wall-clock. The app treats event times as
-        // local; without this, "...T010000Z" would render as 01:00 local AND, across the UTC day
-        // boundary, land on the wrong DAY. (TZID-parameter times are still taken naively — a known
-        // limitation that needs a tz library.)
-        const d = new Date(Date.UTC(+year, +month - 1, +day, +hour, +min, +sec));
-        const p = (n: number) => String(n).padStart(2, '0');
-        return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
-      }
-      return `${year}-${month}-${day}T${hour}:${min}:${sec}`;
-    }
-    return `${year}-${month}-${day}`;
-  }
-  return icalDate;
-}
+// Copilot helpers (ICS parser, action sanitization, suggestion resolver) → src/server/copilotHelpers.ts
 
 // Ensure server is live and running
 app.get('/api/health', (req, res) => {
@@ -2707,47 +2288,12 @@ app.post('/api/geocode', requireAuth, async (req, res) => {
 });
 
 
-// ── Step-up PIN (gates high-risk 'stepup'-tier concierge actions: arm/disarm, unlock, purchases) ──
-// We NEVER store the raw PIN. /api/stepup/set hashes it (scrypt + a per-PIN random salt) and returns
-// {hash,salt} for the client to persist in the household settings blob; /api/stepup/verify recomputes
-// and timing-safe-compares. Hashing is server-side because crypto.subtle is unavailable over the
-// plain-http LAN (memory: lan-secure-context-constraint). Pure helpers are exported for unit tests.
-const STEPUP_KEYLEN = 32;
-export function hashStepUpPin(pin: string, salt: string): string {
-  return scryptSync(String(pin), String(salt), STEPUP_KEYLEN).toString('hex');
-}
-export function verifyStepUpPin(pin: string, hash: string, salt: string): boolean {
-  if (!pin || !hash || !salt) return false;
-  const a = Buffer.from(hashStepUpPin(pin, salt), 'hex');
-  const b = Buffer.from(String(hash), 'hex');
-  return a.length === b.length && timingSafeEqual(a, b);
-}
-// A 4–8 digit PIN only (keeps it a memorable household code; bounded brute-force space handled by the
-// per-user verify rate limit below).
-export function isValidPin(pin: unknown): boolean {
-  return typeof pin === 'string' && /^\d{4,8}$/.test(pin);
-}
-// Verify is brute-forceable (4-digit = 10k combos), so cap attempts per user, stricter than the AI limit.
+// ── Step-up PIN — pure helpers in src/server/stepUpPin.ts; stateful limiters below ──────────────
 const STEPUP_VERIFY_PER_MIN = Number(process.env.STEPUP_VERIFY_PER_MIN) || 5;
 const stepUpHits = new Map<string, { count: number; resetAt: number }>();
-// Second layer: the per-minute window alone still allows a patient drip (5 guesses/min ≈ 10k combos in
-// ~33 h), so count consecutive FAILURES per user — 5 wrong PINs locks verify for 10 minutes, and a
-// correct PIN clears the slate. Pure transition function, exported for unit tests; state in-memory
-// (single-instance app, resets on restart — same tradeoff as every limiter above).
 const STEPUP_LOCK_MAX_FAILS = 5;
 const STEPUP_LOCK_MS = 10 * 60_000;
 const stepUpFails = new Map<string, { fails: number; lockUntil: number }>();
-export function nextPinLockEntry(
-  entry: { fails: number; lockUntil: number } | undefined,
-  valid: boolean, now: number,
-  maxFails = STEPUP_LOCK_MAX_FAILS, lockMs = STEPUP_LOCK_MS,
-): { fails: number; lockUntil: number } | null {
-  if (valid) return null; // a correct PIN clears the counter entirely
-  const expiredLock = !!entry && entry.lockUntil !== 0 && entry.lockUntil <= now;
-  const fails = expiredLock ? 1 : (entry?.fails ?? 0) + 1; // a served lockout starts a fresh count
-  return { fails, lockUntil: fails >= maxFails ? now + lockMs : 0 };
-}
-// Also cap PIN *changes* so a compromised session can't repeatedly reset the PIN or harvest {hash,salt}.
 const STEPUP_SET_PER_5MIN = Number(process.env.STEPUP_SET_PER_5MIN) || 3;
 const stepUpSetHits = new Map<string, { count: number; resetAt: number }>();
 
