@@ -35,3 +35,15 @@ def rate_ok(key: str, now: float, max_per_window: int | None = None) -> bool:
 def reset() -> None:
     """Clear all counters (tests)."""
     _hits.clear()
+
+
+def client_key_from_xff(xff: str, peer: str | None) -> str:
+    """Per-IP rate-limit key from the X-Forwarded-For header + socket peer.
+
+    Cloud Run APPENDS the real caller IP to the RIGHT of X-Forwarded-For and does NOT strip client-supplied
+    values, so the RIGHTMOST entry is the trustworthy one — this mirrors the Node service's `trust proxy: 1`
+    (server.ts), which reads the same end. Reading the leftmost value would let a caller forge X-Forwarded-For
+    and mint a fresh bucket on every request, defeating the cap entirely. Falls back to the socket peer, then
+    'anon', when no XFF is present (direct connection / local dev)."""
+    rightmost = xff.split(",")[-1].strip() if xff else ""
+    return rightmost or (peer or "anon")

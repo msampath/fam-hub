@@ -54,7 +54,7 @@ from google.genai import types  # noqa: E402
 
 from .concierge.agent import build_root_agent, FALLBACK_MODELS, MODEL  # noqa: E402
 from .concierge.bridge import collect_actions  # noqa: E402
-from .concierge.ratelimit import rate_ok  # noqa: E402
+from .concierge.ratelimit import rate_ok, client_key_from_xff  # noqa: E402
 
 APP_NAME = "concierge"
 
@@ -127,9 +127,10 @@ def _visitor_id(jwt: str | None) -> str:
 
 
 def _client_ip(request: Request) -> str:
-    """Real client IP: Cloud Run puts it first in X-Forwarded-For; fall back to the socket peer."""
-    xff = request.headers.get("x-forwarded-for", "")
-    return (xff.split(",")[0].strip() if xff else "") or (request.client.host if request.client else "anon")
+    """Real client IP for the rate-limit key. Cloud Run appends it on the RIGHT of X-Forwarded-For (a
+    client-supplied leftmost value is forgeable), so keying logic lives in client_key_from_xff — pure +
+    unit-tested, matching the Node service's `trust proxy: 1`."""
+    return client_key_from_xff(request.headers.get("x-forwarded-for", ""), request.client.host if request.client else None)
 
 
 async def _close_agent(agent) -> None:
