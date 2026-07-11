@@ -46,14 +46,15 @@ import { familyDataRow, FAMILY_DATA_CONFLICT } from './src/utils/familyData';
 import { CHORE_PLAN_STYLE_EXEMPLAR, sanitizeGeneratedChores } from './src/utils/chorePlan';
 import { buildAvailabilityBlock } from './src/utils/availability';
 import { buildLongWeekendBlock } from './src/utils/longWeekend';
-import { buildWeatherFacts, buildBriefingWeather, isPlanningQuery, dailyMaxFromHourly, parseGooglePollen } from './src/utils/weatherFacts';
+import { buildWeatherFacts, buildBriefingWeather, isPlanningQuery } from './src/utils/weatherFacts';
 import { buildHistoryFacts } from './src/utils/historyFacts';
-import { buildPlacesFacts, indexedPlaces, parseGooglePlaces, parseOverpassPlaces, filterKeylessPlacesByName, parseDistanceConstraint, detectPlacesIntent, isPlacesQuery, flagHiddenGems, filterRecentlyVisited, GOOGLE_PLACE_TYPES, OVERPASS_TOURISM, OVERPASS_LEISURE, type Place } from './src/utils/placesFacts';
-import { buildEventsFacts, indexedEvents, parseTicketmasterEvents, type LocalEvent } from './src/utils/eventsFacts';
+import { buildPlacesFacts, indexedPlaces, parseDistanceConstraint, detectPlacesIntent, isPlacesQuery, flagHiddenGems, filterRecentlyVisited } from './src/utils/placesFacts';
+import { buildEventsFacts, indexedEvents } from './src/utils/eventsFacts';
 import { cleanHTML, callGeminiJSON, CALENDAR_EVENT_SCHEMA, aiErrorResponse } from './src/server/gemini';
-import { fetchWithTimeout, pruneByAge } from './src/server/fetchUtils';
+import { fetchWithTimeout } from './src/server/fetchUtils';
 import { LOCAL_MODE, STORAGE_MODE, IS_PRODUCTION, PORT } from './src/server/config';
 import { requireAuth, aiRateLimit } from './src/server/middleware';
+import { withinDataFetchQuota, fetchWeatherDaily, fetchAirQualityDaily, fetchPollenDaily, fetchNearbyPlaces, attachTravelTimes, fetchLocalEvents, parseUsZip } from './src/server/grounding';
 import { normalizeGmail, normalizeGraph, type NormalizedMessage } from './src/utils/email';
 import pdfParse from 'pdf-parse/lib/pdf-parse.js';
 import mammoth from 'mammoth';
@@ -84,6 +85,7 @@ export { parseGeminiJSON, repairTruncatedJson, isTextOnlyContents, contentsToTex
 export { shiftIsoDate, filterUpcomingEvents, dedupeActions, ALLOWED_COPILOT_ACTIONS, sanitizeCopilotActions, sanitizeSuggestions, parseICS } from './src/server/copilotHelpers';
 export type { GroundingFact } from './src/server/copilotHelpers';
 export { hashStepUpPin, verifyStepUpPin, isValidPin, nextPinLockEntry } from './src/server/stepUpPin';
+export { parseUsZip } from './src/server/grounding';
 
 dotenv.config();
 
@@ -1547,278 +1549,7 @@ app.post('/api/kroger/cart-add', requireAuth, async (req, res) => {
 });
 
 
-// ── Open-Meteo data grounding (geocode now; weather in the copilot path) ─────────
-// A modest per-user cap protects the free third-party data APIs from being hammered. (The LLM
-// path's public rate-limit stays a deferred trigger item — this is just for the data fetches.)
-// In-memory, fixed 1-hour window; resets on restart, which is fine for a personal/single-household
-// app. Open-Meteo is keyless and called on FIXED hosts with an encoded query — no SSRF surface.
-const DATA_FETCH_MAX_PER_HOUR = 60;
-const dataFetchHits = new Map<string, { count: number; resetAt: number }>();
-function withinDataFetchQuota(key: string): boolean {
-  const now = Date.now();
-  pruneExpired(dataFetchHits, now);
-  const e = dataFetchHits.get(key);
-  if (!e || now >= e.resetAt) { dataFetchHits.set(key, { count: 1, resetAt: now + 3600_000 }); return true; }
-  if (e.count >= DATA_FETCH_MAX_PER_HOUR) return false;
-  e.count++;
-  return true;
-}
-
-// fetchWithTimeout → src/server/fetchUtils.ts
-
-// Weather forecast cache: keyed by coarse lat,lng with a short TTL (the daily forecast updates only
-// a few times a day), so repeat planning queries don't re-hit Open-Meteo. Best-effort — any failure
-// (timeout/non-200/bad shape) returns null and the copilot proceeds UNGROUNDED, never throwing.
-const weatherCache = new Map<string, { at: number; daily: any }>();
-const WEATHER_TTL_MS = 3 * 3600_000;
-async function fetchWeatherDaily(lat: number, lng: number): Promise<any | null> {
-  const key = `${lat.toFixed(2)},${lng.toFixed(2)}`;
-  const cached = weatherCache.get(key);
-  if (cached && Date.now() - cached.at < WEATHER_TTL_MS) return cached.daily;
-  const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}`
-    + `&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,uv_index_max`
-    + `&temperature_unit=fahrenheit&timezone=auto&forecast_days=16`;
-  try {
-    const r = await fetchWithTimeout(url);
-    if (!r.ok) return null;
-    const data: any = await r.json();
-    const daily = data?.daily || null;
-    if (daily) { pruneByAge(weatherCache, WEATHER_TTL_MS, Date.now()); weatherCache.set(key, { at: Date.now(), daily }); }
-    return daily;
-  } catch (err: any) {
-    console.warn('Weather fetch failed (proceeding ungrounded):', err?.message || err);
-    return null;
-  }
-}
-
-// Air quality (US AQI, per-date max) from Open-Meteo's keyless air-quality API — same free,
-// Pattern-1 shape as the weather fetch. Best-effort + cached; failure → {} (no AQI shown).
-const airCache = new Map<string, { at: number; aqi: Record<string, number> }>();
-async function fetchAirQualityDaily(lat: number, lng: number): Promise<Record<string, number>> {
-  const key = `${lat.toFixed(2)},${lng.toFixed(2)}`;
-  const cached = airCache.get(key);
-  if (cached && Date.now() - cached.at < WEATHER_TTL_MS) return cached.aqi;
-  const url = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lng}`
-    + `&hourly=us_aqi&forecast_days=7&timezone=auto`;
-  try {
-    const r = await fetchWithTimeout(url);
-    if (!r.ok) return {};
-    const data: any = await r.json();
-    const aqi = dailyMaxFromHourly(data?.hourly?.time, data?.hourly?.us_aqi);
-    pruneByAge(airCache, WEATHER_TTL_MS, Date.now());
-    airCache.set(key, { at: Date.now(), aqi });
-    return aqi;
-  } catch (err: any) {
-    console.warn('Air-quality fetch failed (proceeding without):', err?.message || err);
-    return {};
-  }
-}
-
-// Per-date dominant pollen from the Google Pollen API (forecast:lookup) — uses the same
-// GOOGLE_MAPS_API_KEY (enable "Pollen API" on it). Returns {} without a key (no free US pollen
-// source — Open-Meteo's pollen is Europe-only). Best-effort + cached.
-const pollenCache = new Map<string, { at: number; pollen: Record<string, { label: string; category: string }> }>();
-async function fetchPollenDaily(lat: number, lng: number): Promise<Record<string, { label: string; category: string }>> {
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-  if (!apiKey) return {};
-  const key = `${lat.toFixed(2)},${lng.toFixed(2)}`;
-  const cached = pollenCache.get(key);
-  if (cached && Date.now() - cached.at < WEATHER_TTL_MS) return cached.pollen;
-  const url = `https://pollen.googleapis.com/v1/forecast:lookup?key=${apiKey}`
-    + `&location.latitude=${lat}&location.longitude=${lng}&days=5`;
-  try {
-    const r = await fetchWithTimeout(url);
-    if (!r.ok) { console.warn('Google Pollen non-200 (no pollen shown):', r.status); return {}; }
-    const pollen = parseGooglePollen(await r.json());
-    pruneByAge(pollenCache, WEATHER_TTL_MS, Date.now());
-    pollenCache.set(key, { at: Date.now(), pollen });
-    return pollen;
-  } catch (err: any) {
-    console.warn('Pollen fetch failed (proceeding without):', err?.message || err);
-    return {};
-  }
-}
-
-// ── Places + travel-time grounding (Google primary, free OpenStreetMap/OSRM fallback) ────────────
-// Same Pattern-1 shape as the weather fetch: best-effort, cached, and behind the per-user data-fetch
-// quota; any failure returns [] / leaves drive times undefined and the copilot proceeds with what it
-// has. Keys are OPTIONAL — without GOOGLE_MAPS_API_KEY the keyless OSM Overpass / OSRM demo endpoints
-// are used (lower quality, no billing). Fixed hosts + numeric/encoded params → no SSRF surface.
-const PLACES_RADIUS_M = Number(process.env.PLACES_RADIUS_M) || 40000; // ~25 mi
-const placesCache = new Map<string, { at: number; places: Place[] }>();
-const PLACES_TTL_MS = 24 * 3600_000; // venues barely change day-to-day
-
-async function fetchNearbyPlaces(lat: number, lng: number, opts?: { radiusM?: number; rank?: 'POPULARITY' | 'DISTANCE'; textQuery?: string }): Promise<Place[]> {
-  // Default: marquee FAMILY venues (Nearby Search) over a wide radius. A distance-constrained query
-  // tightens the radius + uses DISTANCE rank. A FOOD/cafe intent (textQuery) switches to Text Search
-  // (cafes/restaurants aren't in includedTypes). `userRatingCount` rides the existing Enterprise SKU
-  // (rating already requested) → drives the gem score. Cache per (coords, radius, rank, query).
-  const radiusM = Math.round(opts?.radiusM || PLACES_RADIUS_M);
-  const rank = opts?.rank || 'POPULARITY';
-  const textQuery = opts?.textQuery?.trim() || '';
-  const cacheKey = `${lat.toFixed(2)},${lng.toFixed(2)}|${radiusM}|${rank}|${textQuery}`;
-  const cached = placesCache.get(cacheKey);
-  if (cached && Date.now() - cached.at < PLACES_TTL_MS) return cached.places;
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-  const fieldMask = 'places.displayName,places.types,places.rating,places.userRatingCount,places.location,places.googleMapsUri,places.websiteUri';
-  try {
-    let places: Place[] = [];
-    if (apiKey && textQuery) {
-      // Google Places API (New) — Text Search for a food/cafe/cuisine query, biased to home.
-      const r = await fetchWithTimeout('https://places.googleapis.com/v1/places:searchText', 8000, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': apiKey, 'X-Goog-FieldMask': fieldMask },
-        body: JSON.stringify({
-          textQuery,
-          maxResultCount: 15,
-          locationBias: { circle: { center: { latitude: lat, longitude: lng }, radius: radiusM } },
-        }),
-      });
-      if (r.ok) places = parseGooglePlaces(await r.json());
-      else console.warn('Google Text Search non-200 (falling back to OSM):', r.status);
-    } else if (apiKey) {
-      // Google Places API (New) — searchNearby, ranked by popularity or distance per the query.
-      const r = await fetchWithTimeout('https://places.googleapis.com/v1/places:searchNearby', 8000, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': apiKey, 'X-Goog-FieldMask': fieldMask },
-        body: JSON.stringify({
-          includedTypes: GOOGLE_PLACE_TYPES,
-          maxResultCount: 15,
-          rankPreference: rank,
-          locationRestriction: { circle: { center: { latitude: lat, longitude: lng }, radius: radiusM } },
-        }),
-      });
-      if (r.ok) places = parseGooglePlaces(await r.json());
-      else console.warn('Google Places non-200 (falling back to OSM):', r.status);
-    }
-    if (!places.length && textQuery) {
-      // Keyless OSM fallback for food: named cafes/restaurants near home (no cuisine precision).
-      const q = `[out:json][timeout:20];(`
-        + `node["amenity"~"cafe|restaurant|fast_food"]["name"](around:${radiusM},${lat},${lng});`
-        + `way["amenity"~"cafe|restaurant|fast_food"]["name"](around:${radiusM},${lat},${lng});`
-        + `);out center tags 60;`;
-      const r = await fetchWithTimeout('https://overpass-api.de/api/interpreter', 12000, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'data=' + encodeURIComponent(q),
-      });
-      // Honesty filter (shared with the agent's placesFetch): Overpass is category-only, so a name
-      // ask keeps only name-matching venues — empty beats six arbitrary cafés shown as a "success".
-      if (r.ok) places = filterKeylessPlacesByName(parseOverpassPlaces(await r.json()), textQuery).places;
-    }
-    if (!places.length && !textQuery) {
-      // Free fallback: OpenStreetMap Overpass — named family POIs near home, notable (wikidata) first.
-      const q = `[out:json][timeout:20];(`
-        + `node["tourism"~"${OVERPASS_TOURISM}"](around:${radiusM},${lat},${lng});`
-        + `way["tourism"~"${OVERPASS_TOURISM}"](around:${radiusM},${lat},${lng});`
-        + `node["leisure"~"${OVERPASS_LEISURE}"]["name"](around:${radiusM},${lat},${lng});`
-        + `way["leisure"~"${OVERPASS_LEISURE}"]["name"](around:${radiusM},${lat},${lng});`
-        + `);out center tags 60;`;
-      const r = await fetchWithTimeout('https://overpass-api.de/api/interpreter', 12000, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'data=' + encodeURIComponent(q),
-      });
-      if (r.ok) places = parseOverpassPlaces(await r.json());
-    }
-    if (places.length) { pruneByAge(placesCache, PLACES_TTL_MS, Date.now()); placesCache.set(cacheKey, { at: Date.now(), places }); }
-    return places;
-  } catch (err: any) {
-    console.warn('Places fetch failed (proceeding without):', err?.message || err);
-    return [];
-  }
-}
-
-// Fill driveMinutes/driveMiles on each place from home (Google Distance Matrix primary — PREDICTED,
-// no live traffic — else the keyless OSRM demo table service). Best-effort: mutates in place; on any
-// failure the places simply carry no drive time.
-async function attachTravelTimes(homeLat: number, homeLng: number, places: Place[]): Promise<void> {
-  const targets = places.slice(0, 12); // cap the matrix size
-  if (!targets.length) return;
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-  try {
-    if (apiKey) {
-      const dest = targets.map(p => `${p.lat},${p.lng}`).join('|');
-      const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${homeLat},${homeLng}`
-        + `&destinations=${encodeURIComponent(dest)}&mode=driving&units=imperial&key=${apiKey}`;
-      const r = await fetchWithTimeout(url, 8000);
-      if (r.ok) {
-        const data: any = await r.json();
-        const elements = data?.rows?.[0]?.elements;
-        if (Array.isArray(elements)) {
-          targets.forEach((p, i) => {
-            const el = elements[i];
-            if (el?.status === 'OK') {
-              if (Number.isFinite(el.duration?.value)) p.driveMinutes = Math.round(el.duration.value / 60);
-              if (Number.isFinite(el.distance?.value)) p.driveMiles = Math.round(el.distance.value / 1609.34);
-            }
-          });
-          return;
-        }
-      } else {
-        console.warn('Distance Matrix non-200 (falling back to OSRM):', r.status);
-      }
-    }
-    // Free fallback: OSRM demo table service (driving). Coords are lng,lat; source index 0 = home.
-    const coords = [[homeLng, homeLat], ...targets.map(p => [p.lng, p.lat])].map(c => `${c[0]},${c[1]}`).join(';');
-    const url = `https://router.project-osrm.org/table/v1/driving/${coords}?sources=0&annotations=duration,distance`;
-    const r = await fetchWithTimeout(url, 10000);
-    if (!r.ok) return;
-    const data: any = await r.json();
-    const durations = data?.durations?.[0]; // [home→home, home→t0, home→t1, …]
-    const distances = data?.distances?.[0];
-    if (Array.isArray(durations)) {
-      targets.forEach((p, i) => {
-        const sec = durations[i + 1];
-        if (Number.isFinite(sec)) p.driveMinutes = Math.round(Number(sec) / 60);
-        const m = distances?.[i + 1];
-        if (Number.isFinite(m)) p.driveMiles = Math.round(Number(m) / 1609.34);
-      });
-    }
-  } catch (err: any) {
-    console.warn('Travel-time fetch failed (places without drive times):', err?.message || err);
-  }
-}
-
-// Nearby dated events from the Ticketmaster Discovery API (free key). Returns [] when no
-// TICKETMASTER_API_KEY is set (events have no free keyless source). Cached + best-effort.
-const eventsCache = new Map<string, { at: number; events: LocalEvent[] }>();
-const EVENTS_TTL_MS = 6 * 3600_000;
-async function fetchLocalEvents(lat: number, lng: number, today: string, windowEndExcl: string): Promise<LocalEvent[]> {
-  const apiKey = process.env.TICKETMASTER_API_KEY;
-  if (!apiKey) return [];
-  const cacheKey = `${lat.toFixed(2)},${lng.toFixed(2)}|${today}`;
-  const cached = eventsCache.get(cacheKey);
-  if (cached && Date.now() - cached.at < EVENTS_TTL_MS) return cached.events;
-  try {
-    const url = `https://app.ticketmaster.com/discovery/v2/events.json?latlong=${lat},${lng}`
-      + `&radius=50&unit=miles&size=40&sort=date,asc`
-      + `&startDateTime=${encodeURIComponent(`${today}T00:00:00Z`)}`
-      + `&endDateTime=${encodeURIComponent(`${windowEndExcl}T00:00:00Z`)}&apikey=${apiKey}`;
-    const r = await fetchWithTimeout(url, 8000);
-    if (!r.ok) return [];
-    const events = parseTicketmasterEvents(await r.json(), today, windowEndExcl);
-    pruneByAge(eventsCache, EVENTS_TTL_MS, Date.now()); // match the sibling caches — drop expired before set
-    eventsCache.set(cacheKey, { at: Date.now(), events });
-    return events;
-  } catch (err: any) {
-    console.warn('Events fetch failed (proceeding without):', err?.message || err);
-    return [];
-  }
-}
-
-/**
- * Resolves a typed town/city to { label, lat, lng } via Open-Meteo's keyless geocoding API,
- * used to set the household's home location for copilot weather grounding. requireAuth; fixed
- * host + encoded query (no SSRF); per-user cap; bounded input; generic errors (no upstream echo).
- */
-// Extract a 5-digit US ZIP from input (tolerates surrounding spaces and a ZIP+4 suffix), else null.
-// Pure/exported so the input validation is unit-testable. We use a ZIP (not free-text town names)
-// because Open-Meteo's name geocoder chokes on "City, ST" and a ZIP is unambiguous.
-export function parseUsZip(q: string): string | null {
-  const m = /^\s*(\d{5})(?:-\d{4})?\s*$/.exec(String(q || ''));
-  return m ? m[1] : null;
-}
+// Grounding services (weather, air, pollen, places, events, geocode) → src/server/grounding.ts
 
 app.post('/api/geocode', requireAuth, async (req, res) => {
   try {
