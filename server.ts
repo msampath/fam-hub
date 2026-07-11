@@ -51,7 +51,7 @@ import { requireAuth, aiRateLimit, preAuthThrottle } from './src/server/middlewa
 import { withinDataFetchQuota, fetchWeatherDaily, fetchAirQualityDaily, fetchPollenDaily, fetchNearbyPlaces, attachTravelTimes, fetchLocalEvents, parseUsZip } from './src/server/grounding';
 import { runDailyDigest, startDigestScheduler, briefingToText, composeBriefingViaAgent } from './src/server/digest';
 
-import pdfParse from 'pdf-parse/lib/pdf-parse.js';
+import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
 import { hasUsableText } from './src/utils/pdfText';
@@ -390,7 +390,7 @@ app.post('/api/parse-pdf', requireAuth, aiRateLimit, async (req, res) => {
 
 // Extract the PLAIN TEXT of a PDF (for the Docs Library corpus, so the copilot/agent can read it). Distinct
 // from /api/parse-pdf (which pulls calendar EVENTS) — this returns the document's readable text verbatim.
-// COST DISCIPLINE: most PDFs carry an embedded text layer, so extract that LOCALLY first (pdf-parse — free,
+// COST DISCIPLINE: most PDFs carry an embedded text layer, so extract that LOCALLY first (pdfjs-dist — free,
 // offline, deterministic) and only fall back to the cloud LLM for OCR on scanned/image-only PDFs.
 app.post('/api/extract-pdf-text', requireAuth, aiRateLimit, async (req, res) => {
   try {
@@ -402,8 +402,14 @@ app.post('/api/extract-pdf-text', requireAuth, aiRateLimit, async (req, res) => 
     // 1) Local text-layer extraction (no AI, no quota). Covers the common case (digital PDFs).
     let layerText = '';
     try {
-      const parsed = await pdfParse(buffer);
-      layerText = String(parsed?.text || '').trim();
+      const doc = await getDocument({ data: new Uint8Array(buffer) }).promise;
+      const pages: string[] = [];
+      for (let i = 1; i <= doc.numPages; i++) {
+        const page = await doc.getPage(i);
+        const content = await page.getTextContent();
+        pages.push(content.items.map((it: any) => it.str).join(' '));
+      }
+      layerText = pages.join('\n').trim();
     } catch (e: any) {
       console.warn('pdf text-layer extraction failed (will try OCR):', e?.message || e);
     }

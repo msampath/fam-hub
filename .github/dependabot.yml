@@ -1,0 +1,27 @@
+# Weekly dependency + vuln scanning across the three ecosystems this repo ships:
+# npm (web/server), pip (the Python concierge agent), and the GitHub Actions in CI.
+# Grouped, low-noise PRs; security updates still come through immediately regardless of schedule.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      npm-dev:
+        dependency-type: development
+      npm-prod:
+        dependency-type: production
+
+  - package-ecosystem: pip
+    directory: /agent
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

@@ -11,6 +11,8 @@ on:
   push:
     branches: [initial-push, main, master]   # build on the default branch (and a fork's master)
     tags: ['v*']
+  pull_request:                              # run the test gate on PRs too (no image push — see the build job)
+    branches: [initial-push, main, master]
   workflow_dispatch:
 
 permissions:
@@ -31,8 +33,21 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  # Python concierge agent: the offline (keyless) pytest layer — structure smoke + the no-payment /
+  # prompt-injection safety proofs. The `live` (Gemini-key) prompts are skipped here via -m "not live".
+  test-agent:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r agent/requirements.txt
+      - run: cd agent && python -m pytest -m "not live" -q
+
   build:
-    needs: test
+    needs: [test, test-agent]
+    if: github.event_name != 'pull_request'   # test on PRs, but only publish images on push/tag/dispatch
     runs-on: ubuntu-latest
     strategy:
       matrix:

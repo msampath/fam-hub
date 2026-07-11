@@ -1,6 +1,4 @@
-// pdf-parse ships no types; we import the inner module path to avoid its index.js debug-file side effect.
-declare module 'pdf-parse/lib/pdf-parse.js' {
-  interface PdfParseResult { text: string; numpages?: number; info?: unknown }
-  function pdfParse(data: Buffer | Uint8Array): Promise<PdfParseResult>;
-  export default pdfParse;
+// pdfjs-dist ships types at its root (types/src/pdf.d.ts) but not for the Node-safe legacy sub-path.
+declare module 'pdfjs-dist/legacy/build/pdf.mjs' {
+  export { getDocument } from 'pdfjs-dist';
 }

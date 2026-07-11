@@ -41,7 +41,7 @@ export function resolveAssignees(name: any, familyMembers: FamilyMember[]): stri
   if (kidNames.length && MULTI_KID_RE.test(n)) return kidNames;
 
   // Explicit list of real kids ("Leo and Mia", "Leo, Mia & Ana").
-  const parts = n.split(/\s*(?:,|&|\band\b)\s*/i).map(s => s.trim()).filter(Boolean);
+  const parts = n.split(/\s*(?:,|&|\band\b)\s*/i).map((s: string) => s.trim()).filter(Boolean);
   if (parts.length > 1) {
     const matched: string[] = [];
     for (const part of parts) {

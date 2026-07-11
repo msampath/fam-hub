@@ -115,7 +115,7 @@ export function buildAvailabilityBlock(today: string, events: any[], memberNames
     let people: string[];
     if (!roster.length) people = [familyLabel];
     else if (!tagged.length || tagged.some(isWholeFamilyTag)) people = [familyLabel];
-    else people = tagged.map(m => rosterByLc.get(m.trim().toLowerCase()) || m); // canonicalize known names
+    else people = tagged.map((m: string) => rosterByLc.get(m.trim().toLowerCase()) || m); // canonicalize known names
 
     // Attach a BUSY appointment's clock window only on the event's actual start day — a multi-day
     // timed event must not stamp the same hours on every spanned day (a conference 9–5 Mon–Wed

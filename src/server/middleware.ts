@@ -1,21 +1,17 @@
 import type { Request, Response, NextFunction } from 'express';
-import { createClient } from '@supabase/supabase-js';
+import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { LOCAL_MODE } from './config';
 import { verifySession } from '../storage/localAuth';
 import { getSqliteAdapter } from '../storage';
 import { getSessionSecret } from '../storage/boxConfig';
 import { checkRateWindow, pruneExpired } from './rateLimit';
 
-// ── Auth: verify the caller's Supabase session on protected API routes ─────────
-// LOCAL_MODE (the LAN appliance) has no Supabase — and @supabase/supabase-js now throws on an empty
-// URL — so only construct the cloud auth client when Supabase is actually configured. requireAuth
-// returns on the LOCAL_MODE branch before ever touching it.
-const supabaseAuth = LOCAL_MODE
+// ── Auth: verify the caller's JWT locally (no per-request Supabase round-trip) ──
+// Cloud mode: verify the Supabase-issued JWT signature against the project's JWKS endpoint.
+// createRemoteJWKSet caches keys and auto-refetches on unknown kid (handles rotation).
+const jwks = LOCAL_MODE
   ? null
-  : createClient(
-      process.env.VITE_SUPABASE_URL || '',
-      process.env.VITE_SUPABASE_ANON_KEY || '',
-    );
+  : createRemoteJWKSet(new URL(`${process.env.VITE_SUPABASE_URL}/auth/v1/.well-known/jwks.json`));
 
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   const header = req.headers.authorization || '';
@@ -30,12 +26,13 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     req.householdId = sess.householdId;
     return next();
   }
-  const { data, error } = await supabaseAuth!.auth.getUser(token);
-  if (error || !data?.user) {
+  try {
+    const { payload } = await jwtVerify(token, jwks!);
+    req.user = { id: payload.sub } as any;
+    next();
+  } catch {
     return res.status(401).json({ error: 'Invalid or expired session. Please sign in again.' });
   }
-  req.user = data.user;
-  next();
 }
 
 // ── Pre-auth IP throttle (cloud only): cap requests per IP before the Supabase getUser call ──
