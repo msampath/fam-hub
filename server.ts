@@ -66,7 +66,7 @@ import { parseGeminiJSON, repairTruncatedJson, isTextOnlyContents, contentsToTex
 import { shiftIsoDate, filterUpcomingEvents, dedupeActions, ALLOWED_COPILOT_ACTIONS, sanitizeCopilotActions, sanitizeSuggestions, parseICS } from './src/server/copilotHelpers';
 import type { GroundingFact } from './src/server/copilotHelpers';
 import { hashStepUpPin, verifyStepUpPin, isValidPin, nextPinLockEntry } from './src/server/stepUpPin';
-export { checkRateWindow, pruneExpired } from './src/server/rateLimit';
+export { checkRateWindow, pruneExpired, resetPruneTimer } from './src/server/rateLimit';
 export { parseGeminiJSON, repairTruncatedJson, isTextOnlyContents, contentsToText, isTransientError, isRecoverableError, orderFallbackModels, isLikelyTextModel, resolveFallbackChain, isLocalToken, buildAttemptChain } from './src/server/llmHelpers';
 export { shiftIsoDate, filterUpcomingEvents, dedupeActions, ALLOWED_COPILOT_ACTIONS, sanitizeCopilotActions, sanitizeSuggestions, parseICS } from './src/server/copilotHelpers';
 export type { GroundingFact } from './src/server/copilotHelpers';

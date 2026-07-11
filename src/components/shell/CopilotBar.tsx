@@ -505,7 +505,7 @@ export default function CopilotBar({ onOpenManage }: CopilotBarProps) {
                 {resolvedApprovals.length > 0 && (
                   <button type="button" onClick={() => setHistoryOpen(h => !h)} className="text-[10px] font-bold uppercase" style={{ color: C.ink }}>{historyOpen ? 'Pending' : 'History'}</button>
                 )}
-                <button type="button" onClick={() => setApprovalsOpen(false)} className="rounded-[9px] px-3 py-1.5 text-[12px] font-bold" style={{ border: `2px solid ${C.elevated}`, background: C.app, color: C.primary }}>Close</button>
+                <button type="button" onClick={() => { resetPin(); setApprovalsOpen(false); }} className="rounded-[9px] px-3 py-1.5 text-[12px] font-bold" style={{ border: `2px solid ${C.elevated}`, background: C.app, color: C.primary }}>Close</button>
               </div>
             </div>
             {historyOpen ? (
@@ -536,6 +536,7 @@ export default function CopilotBar({ onOpenManage }: CopilotBarProps) {
                     {pinForId === e.id ? (
                       <form onSubmit={ev => { ev.preventDefault(); submitPin(e.id); }} className="flex flex-col gap-1.5">
                         <input
+                          type="password"
                           value={pin}
                           onChange={ev => setPin(ev.target.value)}
                           inputMode="numeric"

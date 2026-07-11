@@ -451,10 +451,10 @@ export default function Manage({ account, onClose }: ManageProps) {
           <div className="mb-2 text-sm font-semibold" style={{ color: C.primary }}>{hasStepUpPin ? 'A PIN is set.' : 'No PIN set.'}</div>
           {/* Changing an existing PIN requires the current one first. */}
           {hasStepUpPin && (
-            <input value={currentPinInput} onChange={e => setCurrentPinInput(e.target.value)} inputMode="numeric" placeholder="Current PIN" aria-label="Current PIN" className="mb-2 w-full rounded-[10px] px-3 py-2 text-sm font-semibold outline-none" style={{ ...field, textTransform: 'uppercase' }} />
+            <input type="password" value={currentPinInput} onChange={e => setCurrentPinInput(e.target.value)} inputMode="numeric" placeholder="Current PIN" aria-label="Current PIN" className="mb-2 w-full rounded-[10px] px-3 py-2 text-sm font-semibold outline-none" style={{ ...field, textTransform: 'uppercase' }} />
           )}
           <div className="flex flex-wrap gap-2">
-            <input value={pinInput} onChange={e => setPinInput(e.target.value)} inputMode="numeric" placeholder={hasStepUpPin ? 'New 4–8 digit PIN' : '4–8 digit PIN'} aria-label={hasStepUpPin ? 'New PIN' : 'PIN'} className="min-w-0 flex-1 rounded-[10px] px-3 py-2 text-sm font-semibold outline-none" style={{ ...field, textTransform: 'uppercase' }} />
+            <input type="password" value={pinInput} onChange={e => setPinInput(e.target.value)} inputMode="numeric" placeholder={hasStepUpPin ? 'New 4–8 digit PIN' : '4–8 digit PIN'} aria-label={hasStepUpPin ? 'New PIN' : 'PIN'} className="min-w-0 flex-1 rounded-[10px] px-3 py-2 text-sm font-semibold outline-none" style={{ ...field, textTransform: 'uppercase' }} />
             <button type="button" onClick={savePin} className="rounded-[10px] px-4 py-2 text-sm font-extrabold" style={{ border: `2px solid ${C.indigo}`, background: `${C.indigo}14`, color: C.indigo }}>{hasStepUpPin ? 'Change PIN' : 'Set PIN'}</button>
           </div>
           {pinMsg && <div className="mt-2 text-xs font-semibold" style={{ color: C.muted }}>{pinMsg}</div>}

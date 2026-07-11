@@ -12,6 +12,7 @@ import {
   parseUsZip,
   checkRateWindow,
   pruneExpired,
+  resetPruneTimer,
 } from '../../server';
 
 describe('isTransientError', () => {
@@ -143,19 +144,32 @@ describe('checkRateWindow (AI-endpoint per-user limiter)', () => {
 
 describe('pruneExpired (rate/quota Map eviction — prevents unbounded growth)', () => {
   it('is a no-op below the size floor (cheap on the personal-app path)', () => {
+    resetPruneTimer();
     const m = new Map<string, { count: number; resetAt: number }>();
     m.set('a', { count: 1, resetAt: 100 }); // expired vs now=200 but under the floor
     pruneExpired(m, 200);
     expect(m.size).toBe(1);
   });
 
-  it('evicts only expired entries once the Map grows past the floor', () => {
+  it('evicts only expired entries once the Map grows past the floor and 60s elapsed', () => {
+    resetPruneTimer();
     const m = new Map<string, { count: number; resetAt: number }>();
-    for (let i = 0; i < 300; i++) m.set('exp' + i, { count: 1, resetAt: 100 }); // all expired @ now=1000
-    m.set('live', { count: 1, resetAt: 5_000 });                                // still active
-    pruneExpired(m, 1_000);
+    for (let i = 0; i < 300; i++) m.set('exp' + i, { count: 1, resetAt: 100 }); // all expired @ now=100_000
+    m.set('live', { count: 1, resetAt: 200_000 });                              // still active
+    pruneExpired(m, 100_000);
     expect(m.has('live')).toBe(true);
     expect(m.size).toBe(1); // the 300 expired entries are gone
+  });
+
+  it('skips prune when called within the 60s interval', () => {
+    resetPruneTimer();
+    const m = new Map<string, { count: number; resetAt: number }>();
+    for (let i = 0; i < 300; i++) m.set('exp' + i, { count: 1, resetAt: 100 });
+    pruneExpired(m, 100_000); // first prune runs
+    expect(m.size).toBe(0);
+    for (let i = 0; i < 300; i++) m.set('exp' + i, { count: 1, resetAt: 100 });
+    pruneExpired(m, 100_001); // within 60s — skipped
+    expect(m.size).toBe(300);
   });
 });
 
