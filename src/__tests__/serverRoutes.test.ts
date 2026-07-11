@@ -363,3 +363,20 @@ describe('agent job routes (sqlite-backed, no agent traffic)', () => {
     expect(res.body.error).toBe('No such job.');
   });
 });
+
+describe('scoped body limits (B1)', () => {
+  it('rejects >256kb JSON on a normal endpoint (pre-auth, no large body needed)', async () => {
+    const app = await freshApp();
+    const big = JSON.stringify({ data: 'x'.repeat(300 * 1024) });
+    const res = await request(app).post('/api/auth/login').set('Content-Type', 'application/json').send(big);
+    expect(res.status).toBe(413);
+  });
+
+  it('accepts >256kb JSON on an upload endpoint (base64 route)', async () => {
+    const { app, auth } = await authedApp();
+    const big = JSON.stringify({ pdfBase64: 'x'.repeat(300 * 1024) });
+    const res = await auth(request(app).post('/api/parse-pdf').set('Content-Type', 'application/json').send(big));
+    // 400 (bad base64) is fine — proves the body was parsed, not 413'd
+    expect(res.status).not.toBe(413);
+  });
+});

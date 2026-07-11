@@ -137,7 +137,15 @@ app.use(helmet({
   crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' }, // keep an OAuth popup's opener working
 }));
 
-app.use(express.json({ limit: '10mb' }));
+const UPLOAD_ROUTES = new Set([
+  '/api/parse-pdf', '/api/extract-pdf-text', '/api/extract-docx-text',
+  '/api/extract-xlsx-text', '/api/vision-scan-pantry', '/api/photos/upload',
+]);
+const bigBody = express.json({ limit: '10mb' });
+const smallBody = express.json({ limit: '256kb' });
+app.use((req, res, next) => {
+  (UPLOAD_ROUTES.has(req.path) ? bigBody : smallBody)(req, res, next);
+});
 
 // Auth middleware (requireAuth, aiRateLimit) → src/server/middleware.ts
 
@@ -1565,11 +1573,19 @@ async function startServer() {
     if (process.env.EXIT_ON_UNHANDLED === 'true' || process.env.K_SERVICE) process.exit(1);
   });
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server is booted successfully on http://0.0.0.0:${PORT}`);
   });
 
   startDigestScheduler();
+
+  process.on('SIGTERM', () => {
+    console.log('SIGTERM received — draining connections...');
+    server.close(() => {
+      console.log('All connections drained — exiting.');
+      process.exit(0);
+    });
+  });
 }
 
 // Daily-digest scheduler + runner → src/server/digest.ts

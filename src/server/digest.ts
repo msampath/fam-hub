@@ -154,11 +154,12 @@ export function startDigestScheduler(): void {
   }
   if (process.env.DIGEST_SCHEDULER_ENABLED !== 'true') return;
   console.log('[digest] in-process scheduler enabled (every 5 min). For multi-instance, set DIGEST_TRIGGER_SECRET + Cloud Scheduler.');
-  setInterval(() => {
+  const timer = setInterval(() => {
     if (_digestRunning) return;
     _digestRunning = true;
     void runDailyDigest()
       .catch(e => console.error('[digest] run failed:', e?.message || e))
       .finally(() => { _digestRunning = false; });
   }, 5 * 60 * 1000);
+  timer.unref();
 }
