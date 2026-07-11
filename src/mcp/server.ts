@@ -299,6 +299,12 @@ async function handleWebTool(name: string, args: Record<string, unknown>): Promi
     message: `Read ${safeText.length} chars and ${safeLinks.length} link(s) from the page.` };
 }
 
+function safeErrorMsg(err: any): string {
+  const raw = String(err?.message || err || 'unknown error');
+  const first = raw.split('\n')[0].slice(0, 200);
+  return first.replace(/[A-Z]:\\[^\s"',)]+|\/(?:home|usr|app|tmp|var|src|node_modules)\/[^\s"',)]+/g, '<path>');
+}
+
 // Run one async (HTTP/Supabase) tool handler and shape its result as the MCP text response, with a UNIFORM
 // honest catch (a failed McpToolResult) so a thrown handler never escapes as a transport error. Shared by the
 // find_places / web / read / doc branches below (they differ only in which handler they call).
@@ -308,7 +314,7 @@ async function dispatchIO(name: string, run: () => Promise<McpToolResult>): Prom
     const r = await run();
     return { content: [{ type: 'text', text: JSON.stringify(r) }], isError: !r.ok };
   } catch (err: any) {
-    const failed: McpToolResult = { ok: false, tool: name, tier: 'auto', status: 'rejected', message: `${name} failed: ${err?.message || String(err)}` };
+    const failed: McpToolResult = { ok: false, tool: name, tier: 'auto', status: 'rejected', message: `${name} failed: ${safeErrorMsg(err)}` };
     return { content: [{ type: 'text', text: JSON.stringify(failed) }], isError: true };
   }
 }
@@ -351,7 +357,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       const ok: McpToolResult = { ok: true, tool: 'prepare_handoff', tier: 'confirm', status: 'requires_confirmation', artifact: draft, message: `Action staged: ${draft.summary}` };
       return { content: [{ type: 'text', text: JSON.stringify(ok) }], isError: false };
     } catch (err: any) {
-      const r = reject(`prepare_handoff failed: ${err?.message || String(err)}`);
+      const r = reject(`prepare_handoff failed: ${safeErrorMsg(err)}`);
       return { content: [{ type: 'text', text: JSON.stringify(r) }], isError: true };
     }
   }
@@ -383,7 +389,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const result = await persistResult(tool.run(args, ctx), persistence, preloaded);
     return { content: [{ type: 'text', text: JSON.stringify(result) }], isError: !result.ok };
   } catch (err: any) {
-    const failed: McpToolResult = { ok: false, tool: name, tier: 'auto', status: 'rejected', message: `Tool failed: ${err?.message || String(err)}` };
+    const failed: McpToolResult = { ok: false, tool: name, tier: 'auto', status: 'rejected', message: `Tool failed: ${safeErrorMsg(err)}` };
     return { content: [{ type: 'text', text: JSON.stringify(failed) }], isError: true };
   }
 });

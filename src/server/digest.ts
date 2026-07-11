@@ -73,38 +73,32 @@ export async function runDailyDigest(): Promise<void> {
     if (!prefs?.enabled || !recipients.length) continue;
     if (!shouldRunDigestNow(now, Number(prefs.sendHour ?? 7), prefs.lastRunDate || null, today)) continue;
     await admin.from('family_data').upsert(familyDataRow(row.household_id, 'digestprefs', [{ ...prefs, lastRunDate: today }]), { onConflict: FAMILY_DATA_CONFLICT });
-    const [ev, ch, st, lg, gl, sh, mb, mp] = await Promise.all([
-      admin.from('family_data').select('data').eq('household_id', row.household_id).eq('data_key', 'events').maybeSingle(),
-      admin.from('family_data').select('data').eq('household_id', row.household_id).eq('data_key', 'chores').maybeSingle(),
-      admin.from('family_data').select('data').eq('household_id', row.household_id).eq('data_key', 'settings').maybeSingle(),
-      admin.from('family_data').select('data').eq('household_id', row.household_id).eq('data_key', 'actionledger').maybeSingle(),
-      admin.from('family_data').select('data').eq('household_id', row.household_id).eq('data_key', 'goals').maybeSingle(),
-      admin.from('family_data').select('data').eq('household_id', row.household_id).eq('data_key', 'shopping').maybeSingle(),
-      admin.from('family_data').select('data').eq('household_id', row.household_id).eq('data_key', 'members').maybeSingle(),
-      admin.from('family_data').select('data').eq('household_id', row.household_id).eq('data_key', 'mealplan').maybeSingle(),
-    ]);
-    const events = asTypedArray<CalendarEvent>(ev.data?.data);
-    const choresArr = asTypedArray<Chore>(ch.data?.data);
-    const briefing = buildBriefing(events, choresArr, today, 14, (mp.data?.data as any[]) || []);
+    const DIGEST_KEYS = ['events', 'chores', 'settings', 'actionledger', 'goals', 'shopping', 'members', 'mealplan'] as const;
+    const { data: batchRows } = await admin.from('family_data').select('data_key,data').eq('household_id', row.household_id).in('data_key', [...DIGEST_KEYS]);
+    const byKey: Record<string, unknown> = {};
+    for (const r of batchRows || []) byKey[r.data_key] = r.data;
+    const events = asTypedArray<CalendarEvent>(byKey.events);
+    const choresArr = asTypedArray<Chore>(byKey.chores);
+    const briefing = buildBriefing(events, choresArr, today, 14, (byKey.mealplan as any[]) || []);
 
-    const home = (st.data?.data as any[])?.[0] || {};
+    const home = (byKey.settings as any[])?.[0] || {};
     const lat = Number(home.homeLat), lng = Number(home.homeLng);
     const hasHome = Number.isFinite(lat) && Number.isFinite(lng);
     const weather = hasHome ? await fetchWeatherDaily(lat, lng) : null;
     const aqiByDate = hasHome ? await fetchAirQualityDaily(lat, lng) : {};
     const weatherLine = buildBriefingWeather(weather, aqiByDate, today);
 
-    const goals = asTypedArray<Goal>(gl.data?.data);
+    const goals = asTypedArray<Goal>(byKey.goals);
     let stagedCount = 0;
     try {
-      const ledger = asTypedArray<LedgerEntry>(lg.data?.data);
+      const ledger = asTypedArray<LedgerEntry>(byKey.actionledger);
       if (!ledger.some(e => e?.proactiveDate === today)) {
         const stamp = { createdAt: new Date(now).toISOString(), createdByUserId: 'concierge', createdByEmail: 'concierge@familyhub' };
         const staged = buildProactiveLedger(briefing, weather, events, today, () => 'ledg-' + randomUUID(), stamp, ledger);
         let planned: LedgerEntry[] = [];
         try {
-          const shopping = asTypedArray<ShoppingItem>(sh.data?.data);
-          const chores = asTypedArray<Chore>(ch.data?.data);
+          const shopping = asTypedArray<ShoppingItem>(byKey.shopping);
+          const chores = asTypedArray<Chore>(byKey.chores);
           const plannerStores = sanitizeStoreList(home.storeList);
           const facts = buildMorningFacts({ today, agendaText: briefingToText(briefing, weatherLine), weatherLine, chores, shopping, goals, pendingLedger: [...ledger, ...staged] });
           const raw = await callGeminiJSON(facts, MORNING_PLANNER_SYSTEM, buildMorningPlannerSchema(plannerStores), '{"proposals":[]}', undefined, MORNING_GENCONFIG);
@@ -115,7 +109,7 @@ export async function runDailyDigest(): Promise<void> {
         }
         const routineDrafts = buildRoutineDrafts(
           home.routines, today, [...ledger, ...staged, ...planned],
-          asTypedArray<ShoppingItem>(sh.data?.data).filter(s => !s.completed).map(s => s.text),
+          asTypedArray<ShoppingItem>(byKey.shopping).filter((s: any) => !s.completed).map((s: any) => s.text),
           () => 'ledg-' + randomUUID(), stamp,
         );
         const allStaged = [...staged, ...planned, ...routineDrafts];
@@ -133,9 +127,9 @@ export async function runDailyDigest(): Promise<void> {
     const parts = [briefingToText(briefing, weatherLine)];
     if (stagedCount) parts.push(`🛎️ ${stagedCount} draft${stagedCount === 1 ? '' : 's'} waiting in Approvals — review when you open the app.`);
     if (goalNudges.length) parts.push(`Goals in progress:\n${goalNudges.join('\n')}`);
-    const memberSections = buildMemberSections(asTypedArray<FamilyMember>(mb.data?.data), events, choresArr, today);
+    const memberSections = buildMemberSections(asTypedArray<FamilyMember>(byKey.members), events, choresArr, today);
     if (memberSections.length) parts.push(memberSections.join('\n\n'));
-    const richNudges = buildRichNudges(events, today, asTypedArray<ShoppingItem>(sh.data?.data).filter(s => !s.completed).length);
+    const richNudges = buildRichNudges(events, today, asTypedArray<ShoppingItem>(byKey.shopping).filter((s: any) => !s.completed).length);
     if (richNudges.length) parts.push(`Worth planning ahead:\n${richNudges.map(n => `- ${n}`).join('\n')}`);
     const factsText = parts.join('\n\n');
     const body = (await composeBriefingViaAgent(factsText, today)) || factsText;
