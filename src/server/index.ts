@@ -34,3 +34,10 @@ export {
   isLocalToken,
   buildAttemptChain,
 } from './llmHelpers';
+
+export {
+  cleanHTML,
+  callGeminiJSON,
+  CALENDAR_EVENT_SCHEMA,
+  aiErrorResponse,
+} from './gemini';
