@@ -66,7 +66,8 @@ import {
 } from './utils/dates';
 import { isoWeekKey, applyWeeklyReset, applyDailyReset, acquireResetLock } from './utils/chores';
 import { mergeDeduplicateEvents, detectRecurringGroups, filterHiddenEvents, applySyncedPull, applySourceResync } from './utils/events';
-import { buildDailyReminder, shouldFireDailyReminder, dueEventReminders, type ReminderContent } from './utils/reminders';
+import { useReminders } from './hooks/useReminders';
+import { useGoogleSync } from './hooks/useGoogleSync';
 import { filterConflictWindow, detectConflicts } from './utils/conflicts';
 import type { RecurringGroup } from './utils/events';
 import { buildEventFromPayload, buildEventUpdateFromPayload, buildChoreFromPayload, buildChoresFromPayload, choreDedupeKey, suggestionKey, buildReservationDraft, buildCartDraft, resolveEventDeletion, type MealPlanDelete, type GoalDelete } from './utils/aiActions';
@@ -87,7 +88,7 @@ import { buildAgentActionResult, detectUnbackedClaims } from './utils/agentActio
 import { filterUnrequestedHolidayDeletes } from './utils/holidayGuard';
 import { resolveDoc, normalizeFolder } from './utils/docActions';
 import { upsertVisit } from './utils/historyFacts';
-import { buildGoogleEventBody, googleEventMarker, findGoogleEventByMarker, summarizePushResult, selectPushTargets, pushableLocalEvents, isFamilyHubMarked, selectAutoPushEvents, shouldAutoPull } from './utils/googleEvent';
+import { buildGoogleEventBody, googleEventMarker, findGoogleEventByMarker, summarizePushResult, pushableLocalEvents, isFamilyHubMarked } from './utils/googleEvent';
 import { LOG_CAP, LEDGER_CAP, appendCapped, buildCopilotLogEntry, buildQuickAddLogEntry, buildLedgerEntry } from './utils/historyLog';
 import { TOOL_REGISTRY } from './utils/toolRegistry';
 import { resolveLedgerEntry } from './utils/ledger';
@@ -261,17 +262,8 @@ export default function App() {
     kidMode, setKidMode,
     photosScreensaver, setPhotosScreensaver,
   } = devicePrefs;
-  // Date string of the last day the digest fired (so it fires once/day). Ref + localStorage
-  // so it survives reloads without re-creating the scheduler effect.
-  const reminderFiredDateRef = useRef<string | null>(localStorage.getItem('famplan_reminder_lastfired'));
-  // Per-event reminders already fired today (keys `date|eventId`), reset on day change.
-  const eventRemindersFiredRef = useRef<{ date: string; ids: Set<string> }>((() => {
-    try {
-      const raw = localStorage.getItem('famplan_event_reminders_fired');
-      if (raw) { const p = JSON.parse(raw); return { date: p.date || '', ids: new Set<string>(p.ids || []) }; }
-    } catch { /* ignore */ }
-    return { date: '', ids: new Set<string>() };
-  })());
+  // Reminders (daily digest + per-event lead-time) → src/hooks/useReminders.ts
+  useReminders(events, choresList, remindersEnabled, reminderTime, reminderLeadMinutes);
   const [screensaverOn, setScreensaverOn] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   // Suppresses Supabase echo-writes during cloud loads — a composing depth counter. Engine extracted
@@ -834,20 +826,6 @@ export default function App() {
   // (Per-device idle/reminder prefs + their persistence + the reminder toggle now live in
   // useDevicePrefs; the reminder SCHEDULER below stays here because it reads events/chores.)
 
-  // Show a reminder via the service-worker registration (required on mobile/installed PWAs);
-  // fall back to a page Notification on desktop. All failures are non-fatal.
-  const showReminderNotification = (content: ReminderContent) => {
-    const opts = { body: content.body, tag: 'familyhub-daily', icon: '/icon.svg', badge: '/icon.svg', renotify: true } as NotificationOptions;
-    try {
-      if ('serviceWorker' in navigator && navigator.serviceWorker?.ready) {
-        navigator.serviceWorker.ready
-          .then(reg => reg.showNotification(content.title, opts))
-          .catch(() => { try { new Notification(content.title, opts); } catch { /* ignore */ } });
-      } else {
-        new Notification(content.title, opts);
-      }
-    } catch { /* notifications unsupported — ignore */ }
-  };
 
   // Resolve a typed home town to lat/lon via the server geocode endpoint and persist it to the
   // household settings blob (used to ground the copilot's weather lookup). Returns a result the
@@ -884,51 +862,6 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings]);
 
-  // Keep the latest events/chores in a ref so the 60s reminder interval can read them WITHOUT listing
-  // them as effect deps — otherwise every event/chore edit tore down and recreated the interval
-  // (re-running runAll() on each), churning during a Google-sync burst.
-  const reminderDataRef = useRef({ events, choresList });
-  useEffect(() => { reminderDataRef.current = { events, choresList }; }, [events, choresList]);
-
-  // Daily reminder scheduler: while enabled, check each minute whether the configured time
-  // has passed today and (if so, once) show today's events + still-due chores. Marks the day
-  // as fired even when there's nothing to report, so it doesn't re-check all day.
-  useEffect(() => {
-    if (!remindersEnabled) return;
-    const tick = () => {
-      if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
-      const now = new Date();
-      const today = toLocalDateStr(now);
-      if (!shouldFireDailyReminder(now, reminderTime, reminderFiredDateRef.current, today)) return;
-      const content = buildDailyReminder(reminderDataRef.current.events, reminderDataRef.current.choresList, today);
-      // Nothing to report yet — stay "armed" (don't mark fired) so items added later today
-      // still trigger the reminder, instead of silently skipping the whole day.
-      if (!content) return;
-      // Mark fired synchronously BEFORE the async notification so a StrictMode/dep-rerun
-      // double-tick can't fire twice (the 2nd tick sees today's date and bails).
-      reminderFiredDateRef.current = today;
-      localStorage.setItem('famplan_reminder_lastfired', today);
-      showReminderNotification(content);
-    };
-
-    // Per-event "X min before" reminders for today's timed events (fired once each per day).
-    const tickEventReminders = () => {
-      if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
-      const now = new Date();
-      const today = toLocalDateStr(now);
-      const fired = eventRemindersFiredRef.current;
-      if (fired.date !== today) { fired.date = today; fired.ids = new Set(); }
-      const due = dueEventReminders(reminderDataRef.current.events, today, now, reminderLeadMinutes, fired.ids);
-      if (!due.length) return;
-      for (const d of due) { fired.ids.add(d.id); showReminderNotification({ title: d.title, body: d.body }); }
-      localStorage.setItem('famplan_event_reminders_fired', JSON.stringify({ date: fired.date, ids: [...fired.ids] }));
-    };
-
-    const runAll = () => { tick(); tickEventReminders(); };
-    runAll(); // check immediately (e.g. app opened after the reminder time)
-    const iv = setInterval(runAll, 60 * 1000);
-    return () => clearInterval(iv);
-  }, [remindersEnabled, reminderTime, reminderLeadMinutes]); // events/chores read via ref — no re-subscribe churn
 
   // Weekly chore reset — shared by bootstrap AND on-wake refresh, so a multi-day always-on
   // display rolls the week without a manual reload. Once per ISO week: bank each kid's earned
@@ -2037,57 +1970,17 @@ export default function App() {
     }
   };
 
-  // Silent auto-push ("to all users"): when the app is open and the signed-in parent has a connected PUSH
-  // rule, push this household's Family-Hub events to THEIR own Google calendar — so an approved/created trip
-  // reaches every parent's calendar without a manual Sync. Each device pushes its OWN account only (token
-  // scoping). Idempotent via the dedupe marker, windowed, and tracked in a per-account set so each event
-  // pushes once (no per-load API spam); edits still go through manual Sync. A connected Push rule is the opt-in.
-  const autoPushInFlightRef = useRef(false);
-  useEffect(() => {
-    const email = googleUser?.email;
-    if (!email || autoPushInFlightRef.current) return;
-    const targets = selectPushTargets(connectedCalendars, googleCalendarsList, email);
-    if (!targets.length) return;
-    const key = `famplan_autopushed_${email}`;
-    let pushed: string[] = [];
-    try { pushed = JSON.parse(localStorage.getItem(key) || '[]'); } catch { pushed = []; }
-    const now = new Date();
-    const fromDate = toLocalDateStr(new Date(now.getFullYear(), now.getMonth() - 1, 1));
-    const toDate = toLocalDateStr(new Date(now.getFullYear(), now.getMonth() + 5, 0));
-    const toPush = selectAutoPushEvents(events, pushed, fromDate, toDate);
-    if (!toPush.length) return;
-    autoPushInFlightRef.current = true;
-    (async () => {
-      try {
-        const token = await getGoogleToken();
-        if (!token) return; // no live token → skip silently; retries on the next change/open
-        const done = new Set(pushed);
-        for (const ev of toPush) {
-          try { await pushEventToGoogleCalendars(ev, targets); done.add(ev.id); } catch { /* push logs its own errors */ }
-        }
-        try { localStorage.setItem(key, JSON.stringify([...done].slice(-1000))); } catch { /* non-fatal */ }
-      } finally {
-        autoPushInFlightRef.current = false;
-      }
-    })();
-  }, [googleUser?.email, connectedCalendars, googleCalendarsList, events]);
-
-  // Auto-PULL on sign-in (W8, owner ask): the family's Google events appear without a manual Sync click.
-  // ONCE per session (ref-guarded like autoPushInFlightRef above), PULL-only (never pushes, never opens
-  // export confirms), cloud mode only, and only when this account has an active pull rule — all decided
-  // by shouldAutoPull (pure, tested). Token is fetched first and a missing one skips SILENTLY (no alert
-  // from inside syncGoogleCalendars) — the manual Sync button stays the recovery path.
-  const autoPullDoneRef = useRef(false);
-  useEffect(() => {
-    if (!shouldAutoPull({ backendMode: appMode, email: googleUser?.email, alreadyRan: autoPullDoneRef.current, connected: connectedCalendars })) return;
-    autoPullDoneRef.current = true; // one attempt per session, even if the token below turns out missing
-    (async () => {
-      const token = await getGoogleToken();
-      if (!token) return;
-      await syncGoogleCalendars(token, undefined, undefined, true);
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appMode, googleUser?.email, connectedCalendars]);
+  // Google Calendar auto-push + auto-pull → src/hooks/useGoogleSync.ts
+  useGoogleSync({
+    email: googleUser?.email,
+    appMode,
+    connectedCalendars,
+    googleCalendarsList,
+    events,
+    getGoogleToken,
+    syncGoogleCalendars,
+    pushEventToGoogleCalendars,
+  });
 
   // Handle addition of Custom Source Url via server-side scraper API
   const handleAddSource = async (e: React.FormEvent) => {
