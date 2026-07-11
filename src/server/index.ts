@@ -41,3 +41,11 @@ export {
   CALENDAR_EVENT_SCHEMA,
   aiErrorResponse,
 } from './gemini';
+
+export {
+  fetchWithTimeout,
+  pruneByAge,
+} from './fetchUtils';
+
+export { LOCAL_MODE, STORAGE_MODE, IS_PRODUCTION, PORT } from './config';
+export { requireAuth, aiRateLimit } from './middleware';

@@ -51,6 +51,9 @@ import { buildHistoryFacts } from './src/utils/historyFacts';
 import { buildPlacesFacts, indexedPlaces, parseGooglePlaces, parseOverpassPlaces, filterKeylessPlacesByName, parseDistanceConstraint, detectPlacesIntent, isPlacesQuery, flagHiddenGems, filterRecentlyVisited, GOOGLE_PLACE_TYPES, OVERPASS_TOURISM, OVERPASS_LEISURE, type Place } from './src/utils/placesFacts';
 import { buildEventsFacts, indexedEvents, parseTicketmasterEvents, type LocalEvent } from './src/utils/eventsFacts';
 import { cleanHTML, callGeminiJSON, CALENDAR_EVENT_SCHEMA, aiErrorResponse } from './src/server/gemini';
+import { fetchWithTimeout, pruneByAge } from './src/server/fetchUtils';
+import { LOCAL_MODE, STORAGE_MODE, IS_PRODUCTION, PORT } from './src/server/config';
+import { requireAuth, aiRateLimit } from './src/server/middleware';
 import { normalizeGmail, normalizeGraph, type NormalizedMessage } from './src/utils/email';
 import pdfParse from 'pdf-parse/lib/pdf-parse.js';
 import mammoth from 'mammoth';
@@ -94,14 +97,7 @@ declare global {
 }
 
 export const app = express(); // exported so the auth/data routes are testable via supertest (startServer is VITEST-gated)
-const PORT = Number(process.env.PORT) || 4894; // honor the platform-injected $PORT (Cloud Run/Heroku probe it); default for local/kiosk
-// The strict CSP applies only to the PRODUCTION serve (npm run start / Cloud Run). Dev (Vite middleware)
-// needs inline/eval scripts + an HMR websocket, so CSP is disabled there.
-const IS_PRODUCTION = process.env.NODE_ENV === 'production';
-// Storage/auth backend. LOCAL_MODE = the single-click LAN appliance (SQLite + local household passphrase, no
-// Supabase). Cloud mode (Supabase) keeps the existing direct-client path untouched.
-const STORAGE_MODE = storageMode();
-const LOCAL_MODE = STORAGE_MODE === 'sqlite';
+// Config (LOCAL_MODE, STORAGE_MODE, IS_PRODUCTION, PORT) → src/server/config.ts
 
 // gzip responses (the static bundle + JSON). Without this the ~580 kB bundle ships uncompressed
 // over the LAN — the "160 kB gzip" only happens if the server actually gzips. Big win for the
@@ -155,69 +151,7 @@ app.use(helmet({
 
 app.use(express.json({ limit: '10mb' }));
 
-// ── Auth: verify the caller's Supabase session on protected API routes ─────────
-// LOCAL_MODE (the LAN appliance) has no Supabase — and @supabase/supabase-js now throws on an empty
-// URL — so only construct the cloud auth client when Supabase is actually configured. requireAuth
-// returns on the LOCAL_MODE branch before ever touching it.
-const supabaseAuth = LOCAL_MODE
-  ? null
-  : createClient(
-      process.env.VITE_SUPABASE_URL || '',
-      process.env.VITE_SUPABASE_ANON_KEY || '',
-    );
-
-async function requireAuth(req: Request, res: Response, next: NextFunction) {
-  const header = req.headers.authorization || '';
-  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
-  if (!token) {
-    return res.status(401).json({ error: 'Authentication required.' });
-  }
-  // LAN appliance: a box-signed household session (from /api/auth/login), verified locally — no Supabase.
-  if (LOCAL_MODE) {
-    const sess = verifySession(token, getSessionSecret(getSqliteAdapter()), Date.now());
-    if (!sess) return res.status(401).json({ error: 'Invalid or expired session. Please sign in again.' });
-    req.householdId = sess.householdId;
-    return next();
-  }
-  const { data, error } = await supabaseAuth!.auth.getUser(token);
-  if (error || !data?.user) {
-    return res.status(401).json({ error: 'Invalid or expired session. Please sign in again.' });
-  }
-  req.user = data.user;
-  next();
-}
-
-// ── Per-user rate limit for the AI (cost-bearing) endpoints ─────────────────────
-// Auth alone doesn't stop a signed-in user (or a stolen session) running an automated loop that
-// burns the Gemini quota / runs up cost / DoSes the household. A fixed per-minute window per user
-// caps that. In-memory (single-instance app; resets on restart — fine here). Tune via env.
-const AI_RATE_LIMIT_PER_MIN = Number(process.env.AI_RATE_LIMIT_PER_MIN) || 20;
-const AI_RATE_WINDOW_MS = 60_000;
-const aiRateHits = new Map<string, { count: number; resetAt: number }>();
-
-// Rate-limit pure helpers (checkRateWindow, pruneExpired) → src/server/rateLimit.ts
-
-// Same idea for the best-effort grounding caches (weather/air/pollen/places), which key on lat/lng or a
-// query string: drop entries older than their TTL so a MULTI-household server can't accumulate one forever.
-// No-op below the small floor, so the single-household path (a handful of keys) pays nothing.
-function pruneByAge<V extends { at: number }>(map: Map<string, V>, ttlMs: number, now: number): void {
-  if (map.size < 256) return;
-  for (const [k, v] of map) if (now - v.at >= ttlMs) map.delete(k);
-}
-
-// Express middleware: rate-limit per authenticated user (falls back to IP). Returns 429 with
-// retryable:true so the client surfaces the same non-blocking "AI busy — add it manually" steer.
-function aiRateLimit(req: Request, res: Response, next: NextFunction) {
-  const key = req.user?.id || req.householdId || req.ip || 'anon';
-  const now = Date.now();
-  pruneExpired(aiRateHits, now);
-  const { allowed, entry } = checkRateWindow(aiRateHits.get(key), now, AI_RATE_LIMIT_PER_MIN, AI_RATE_WINDOW_MS);
-  aiRateHits.set(key, entry);
-  if (!allowed) {
-    return res.status(429).json({ error: "You're sending AI requests too fast — wait a moment and try again.", retryable: true });
-  }
-  next();
-}
+// Auth middleware (requireAuth, aiRateLimit) → src/server/middleware.ts
 
 // ── LAN appliance (LOCAL_MODE): household passphrase auth + SQLite data API ──────
 // On the single-click box there's no Supabase: the browser does first-run setup (set a household passphrase),
@@ -1630,18 +1564,7 @@ function withinDataFetchQuota(key: string): boolean {
   return true;
 }
 
-// Small fetch wrapper with an abort timeout, shared by the two Open-Meteo calls (geocode + weather).
-// Return type is inferred from fetch() (the global Response) — annotating it would collide with
-// express's `Response` imported at the top of this file.
-async function fetchWithTimeout(url: string, timeoutMs = 8000, init?: any) {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...(init || {}), signal: ctrl.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-}
+// fetchWithTimeout → src/server/fetchUtils.ts
 
 // Weather forecast cache: keyed by coarse lat,lng with a short TTL (the daily forecast updates only
 // a few times a day), so repeat planning queries don't re-hit Open-Meteo. Best-effort — any failure
