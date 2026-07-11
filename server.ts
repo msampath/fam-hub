@@ -5,7 +5,7 @@ import helmet from 'helmet';
 import path from 'path';
 import { readFileSync, existsSync, promises as fsp } from 'node:fs';
 import dotenv from 'dotenv';
-import { randomUUID, randomBytes, timingSafeEqual, createHash } from 'crypto';
+import { randomUUID, timingSafeEqual, createHash } from 'crypto';
 import { Type } from '@google/genai';
 import { createClient, type User } from '@supabase/supabase-js';
 // NOTE: `vite` is imported DYNAMICALLY in the dev branch below (not here) so it can be a devDependency and
@@ -17,6 +17,8 @@ import { verifyActions, buildCriticNote, verifyActionClaims, unbackedClaimCorrec
 import { verifyQuickAdd, buildQuickAddCriticNote, coerceQuickAdd } from './src/utils/quickAddCritic';
 import { krogerRouter } from './src/server/kroger';
 import { emailScanRouter } from './src/server/emailScan';
+import { stepUpRouter } from './src/server/stepUpRoutes';
+import { agentProxyRouter } from './src/server/agentProxy';
 import { buildRevisePrompt } from './src/utils/reviseDraft';
 import { validateExtractedEvents } from './src/utils/extractedEvents';
 import { filterUnrequestedHolidayDeletes } from './src/utils/holidayGuard';
@@ -58,8 +60,6 @@ import { storageMode, getSqliteAdapter } from './src/storage';
 import { handleDataGet, handleDataSave, handleDataLoadAll } from './src/storage/dataApi';
 import { verifySession, signSession, newSession, isValidPassphrase } from './src/storage/localAuth';
 import { getOrCreateHouseholdId, getSessionSecret, isHouseholdConfigured, setHouseholdPassphrase, checkHouseholdPassphrase, changeHouseholdPassphrase } from './src/storage/boxConfig';
-// Async agent jobs (roadmap): the queued-turn rows behind /api/agent/chat-async + /api/agent/job/:id.
-import { SqliteAgentJobStore, SupabaseAgentJobStore, lookupHouseholdId, type AgentJobStore } from './src/storage/agentJobs';
 // Pure helpers extracted to src/server/ — imported for internal use, re-exported for test consumers.
 import { checkRateWindow, pruneExpired } from './src/server/rateLimit';
 import { parseGeminiJSON, repairTruncatedJson, isTextOnlyContents, contentsToText, isTransientError, isRecoverableError, orderFallbackModels, isLikelyTextModel, resolveFallbackChain, isLocalToken, buildAttemptChain } from './src/server/llmHelpers';
@@ -1387,50 +1387,8 @@ app.post('/api/geocode', requireAuth, async (req, res) => {
 });
 
 
-// ── Step-up PIN — pure helpers in src/server/stepUpPin.ts; stateful limiters below ──────────────
-const STEPUP_VERIFY_PER_MIN = Number(process.env.STEPUP_VERIFY_PER_MIN) || 5;
-const stepUpHits = new Map<string, { count: number; resetAt: number }>();
-const STEPUP_LOCK_MAX_FAILS = 5;
-const STEPUP_LOCK_MS = 10 * 60_000;
-const stepUpFails = new Map<string, { fails: number; lockUntil: number }>();
-const STEPUP_SET_PER_5MIN = Number(process.env.STEPUP_SET_PER_5MIN) || 3;
-const stepUpSetHits = new Map<string, { count: number; resetAt: number }>();
-
-// Set/replace the household PIN: hash it server-side, hand back {hash,salt} for the client to persist.
-app.post('/api/stepup/set', requireAuth, (req, res) => {
-  const key = req.user?.id || req.ip || 'anon';
-  const now = Date.now();
-  pruneExpired(stepUpSetHits, now);
-  const { allowed, entry } = checkRateWindow(stepUpSetHits.get(key), now, STEPUP_SET_PER_5MIN, 5 * 60_000);
-  stepUpSetHits.set(key, entry);
-  if (!allowed) return res.status(429).json({ error: 'Too many PIN changes — wait a few minutes.', retryable: true });
-  const pin = req.body?.pin;
-  if (!isValidPin(pin)) return res.status(400).json({ error: 'PIN must be 4–8 digits.' });
-  const salt = randomBytes(16).toString('hex');
-  return res.json({ hash: hashStepUpPin(String(pin), salt), salt });
-});
-
-// Verify a submitted PIN against the stored {hash,salt}. Rate-limited per user to blunt brute force.
-app.post('/api/stepup/verify', requireAuth, (req, res) => {
-  const key = req.user?.id || req.ip || 'anon';
-  const now = Date.now();
-  pruneExpired(stepUpHits, now);
-  const { allowed, entry } = checkRateWindow(stepUpHits.get(key), now, STEPUP_VERIFY_PER_MIN, 60_000);
-  stepUpHits.set(key, entry);
-  if (!allowed) return res.status(429).json({ error: 'Too many PIN attempts — wait a minute.', retryable: true });
-  // Failure lockout (layer 2): while locked, refuse WITHOUT verifying — a locked window leaks nothing
-  // about further guesses, right or wrong.
-  const lockEntry = stepUpFails.get(key);
-  if (lockEntry && lockEntry.lockUntil > now) {
-    return res.status(429).json({ error: 'Too many wrong PINs — PIN entry is locked for 10 minutes.', retryable: true });
-  }
-  if (stepUpFails.size >= 256) for (const [k, v] of stepUpFails) if (v.lockUntil <= now) stepUpFails.delete(k); // same bounded-Map paranoia as pruneExpired
-  const { pin, hash, salt } = req.body || {};
-  const valid = verifyStepUpPin(String(pin ?? ''), String(hash ?? ''), String(salt ?? ''));
-  const nextLock = nextPinLockEntry(lockEntry, valid, now);
-  if (nextLock) stepUpFails.set(key, nextLock); else stepUpFails.delete(key);
-  return res.json({ valid });
-});
+// Step-up PIN routes → src/server/stepUpRoutes.ts
+app.use('/api/stepup', stepUpRouter);
 
 
 // Email scan routes (bills, newsletters, packages, kids' activities) → src/server/emailScan.ts
@@ -1483,127 +1441,8 @@ app.post('/api/morning-briefing', requireAuth, aiRateLimit, async (req, res) => 
   }
 });
 
-// ── Concierge ADK agent proxy ───────────────────────────────────────────────────
-// The React panel calls this SAME-ORIGIN route, NOT the Python agent directly: a direct browser fetch to
-// the agent's own origin/IP is blocked by the prod CSP (connect-src 'self'), and same-origin also avoids
-// CORS + baking the agent URL into the client bundle. We forward to the ADK service (AGENT_BASE_URL),
-// passing the caller's Supabase JWT so the agent's MCP writes are RLS-scoped to that visitor. requireAuth
-// (signed-in only) + aiRateLimit (it drives Gemini — cost-bearing, same as the other AI routes).
-const AGENT_BASE_URL = (process.env.AGENT_BASE_URL || 'http://127.0.0.1:8080').replace(/\/+$/, '');
-
-// Forward ONE chat turn to the ADK service — the single shared implementation for the sync proxy below
-// AND the async job worker (extracted so the two paths can't drift on headers/body handling). The caller's
-// JWT rides along so the agent's MCP writes stay RLS-scoped to that visitor.
-async function forwardAgentChat(authHeader: string, body: unknown): Promise<{ status: number; text: string }> {
-  const upstream = await fetch(`${AGENT_BASE_URL}/chat`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: authHeader, // the visitor's JWT (validated by requireAuth)
-    },
-    body: JSON.stringify(body ?? {}),
-  });
-  return { status: upstream.status, text: await upstream.text() };
-}
-
-app.post('/api/agent/chat', requireAuth, aiRateLimit, async (req, res) => {
-  try {
-    const upstream = await forwardAgentChat(req.headers.authorization as string, req.body);
-    // Pass the agent's JSON ({reply,sessionId} or its error) straight through with its status.
-    res.status(upstream.status).type('application/json').send(upstream.text);
-  } catch (err) {
-    return aiErrorResponse(res, err, 'The concierge agent is unavailable right now.');
-  }
-});
-
-// ── Async agent jobs (roadmap "Backlog High — Async agent jobs") ────────────────
-// POST /api/agent/chat-async queues a job row and returns { jobId } IMMEDIATELY; an in-process worker
-// runs the SAME forwardAgentChat the sync route uses and marks the row done/error. The client polls
-// GET /api/agent/job/:id (askConciergeAgentAsync) — no held-open HTTP request, no spinner-length turn.
-//
-// SCOPE (deliberate): the worker is in-process and runs NOW, within the caller's JWT lifetime — no
-// durable queue, no webhooks. If the server dies mid-turn the row stays 'running'; the client poller
-// times out honestly (~3 min). See src/storage/agentJobs.ts for the store + the same note.
-
-// Per-request store: LOCAL_MODE scopes by the box session's household over SQLite (app-enforced filter);
-// cloud mode builds a JWT-scoped Supabase client — the SAME per-visitor-RLS pattern the MCP child uses
-// (src/mcp/persistence.ts) — so Postgres RLS enforces the household boundary on every job row. Returns
-// null when the caller has no household yet (cloud first-run edge; the routes turn that into a 403).
-async function agentJobStoreFor(req: Request): Promise<AgentJobStore | null> {
-  if (LOCAL_MODE) return new SqliteAgentJobStore(getSqliteAdapter(), req.householdId!);
-  const token = String(req.headers.authorization || '').slice(7); // "Bearer " — validated by requireAuth
-  const client = createClient(
-    process.env.VITE_SUPABASE_URL || '',
-    process.env.VITE_SUPABASE_ANON_KEY || '',
-    { global: { headers: { Authorization: `Bearer ${token}` } }, auth: { persistSession: false, autoRefreshToken: false } },
-  );
-  const hid = await lookupHouseholdId(client);
-  return hid ? new SupabaseAgentJobStore(client, hid) : null;
-}
-
-app.post('/api/agent/chat-async', requireAuth, aiRateLimit, async (req, res) => {
-  try {
-    const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
-    if (!message) return res.status(400).json({ error: 'A message is required.' });
-    const store = await agentJobStoreFor(req);
-    if (!store) return res.status(403).json({ error: 'No household found for this account.' });
-    const jobId = randomUUID();
-    await store.insert(jobId, message); // throws pre-migration on cloud → clean 500 below, nothing queued
-    const authHeader = req.headers.authorization as string;
-    const body = req.body; // the FULL turn body (sessionId/history/goals/…) — same contract as /chat
-    // The in-process worker — deliberately NOT awaited, so { jobId } returns immediately. Every failure
-    // path lands the row in 'error' with an honest message; if even that write fails (process-level
-    // trouble), log it — the row stays 'running' and the client poller times out rather than hanging.
-    void (async () => {
-      try {
-        await store.update(jobId, { status: 'running' });
-        const upstream = await forwardAgentChat(authHeader, body);
-        if (upstream.status >= 200 && upstream.status < 300) {
-          let data: any = {};
-          try { data = JSON.parse(upstream.text); } catch { /* non-JSON 2xx — treat fields as absent */ }
-          await store.update(jobId, {
-            status: 'done',
-            reply: String(data?.reply ?? ''),
-            actions: Array.isArray(data?.actions) ? data.actions : [],
-            ...(data?.model ? { model: String(data.model) } : {}),
-            ...(data?.sessionId ? { sessionId: String(data.sessionId) } : {}),
-          });
-        } else {
-          // Surface the agent's own error text when it sent one; otherwise an honest status line.
-          let msg = `The agent returned HTTP ${upstream.status}.`;
-          try { const e = JSON.parse(upstream.text); if (e?.error) msg = String(e.error); } catch { /* keep the status line */ }
-          await store.update(jobId, { status: 'error', reply: msg });
-        }
-      } catch (err: any) {
-        console.error('agent job worker error:', err?.message || err);
-        try { await store.update(jobId, { status: 'error', reply: 'The concierge agent is unavailable right now.' }); }
-        catch (e2: any) { console.error('agent job error-write failed (job stays running):', e2?.message || e2); }
-      }
-    })();
-    return res.json({ jobId });
-  } catch (err: any) {
-    console.error('agent chat-async error:', err?.message || err);
-    return res.status(500).json({ error: 'Could not queue the agent request.' });
-  }
-});
-
-// Poll a job. Household scoping is the storage layer's invariant (SQLite: app-enforced household_id
-// filter; cloud: RLS via the caller's JWT-scoped client + the explicit filter) — another household's
-// job id is indistinguishable from a nonexistent one (404), by design.
-app.get('/api/agent/job/:id', requireAuth, async (req, res) => {
-  try {
-    const id = String(req.params.id || '');
-    if (!/^[0-9a-fA-F-]{36}$/.test(id)) return res.status(400).json({ error: 'Invalid job id.' });
-    const store = await agentJobStoreFor(req);
-    if (!store) return res.status(403).json({ error: 'No household found for this account.' });
-    const job = await store.get(id);
-    if (!job) return res.status(404).json({ error: 'No such job.' });
-    return res.json(job); // { id, status, message, reply, actions, model, sessionId, createdAt, updatedAt }
-  } catch (err: any) {
-    console.error('agent job read error:', err?.message || err);
-    return res.status(500).json({ error: 'Could not read the job.' });
-  }
-});
+// Agent proxy + async job routes → src/server/agentProxy.ts
+app.use('/api/agent', agentProxyRouter);
 
 
 // Set up Dev server vs Static serving for client React
