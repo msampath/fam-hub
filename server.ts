@@ -23,9 +23,8 @@ import {
 import { buildRevisePrompt } from './src/utils/reviseDraft';
 import { validateExtractedEvents } from './src/utils/extractedEvents';
 import { filterUnrequestedHolidayDeletes } from './src/utils/holidayGuard';
-import { buildBriefing, type Briefing } from './src/utils/briefing';
-import { buildProactiveLedger, buildGoalNudges } from './src/utils/proactiveBriefing';
-import { MORNING_PLANNER_SYSTEM, buildMorningPlannerSchema, MORNING_GENCONFIG, buildMorningFacts, validateMorningProposals, toLedgerEntries } from './src/utils/morningAgent';
+import { buildBriefing } from './src/utils/briefing';
+import { MORNING_PLANNER_SYSTEM, buildMorningPlannerSchema, MORNING_GENCONFIG, buildMorningFacts, validateMorningProposals } from './src/utils/morningAgent';
 import { sanitizeStoreList } from './src/constants';
 
 // Household store routing for the shopping-AI prompts (Phase-5): name the family's exact lists, and
@@ -39,14 +38,10 @@ const storeRoutingLine = (stores: string[]): string => {
   ].filter(Boolean).join(' ');
   return `Assign each to the most likely store from exactly: ${quoted}.${hints ? ' ' + hints : ''}`;
 };
-import { LEDGER_CAP } from './src/utils/historyLog';
-import { shouldRunDigestNow } from './src/utils/digest';
-import { sendDigestEmail } from './src/utils/mailer';
-import { familyDataRow, FAMILY_DATA_CONFLICT } from './src/utils/familyData';
 import { CHORE_PLAN_STYLE_EXEMPLAR, sanitizeGeneratedChores } from './src/utils/chorePlan';
 import { buildAvailabilityBlock } from './src/utils/availability';
 import { buildLongWeekendBlock } from './src/utils/longWeekend';
-import { buildWeatherFacts, buildBriefingWeather, isPlanningQuery } from './src/utils/weatherFacts';
+import { buildWeatherFacts, isPlanningQuery } from './src/utils/weatherFacts';
 import { buildHistoryFacts } from './src/utils/historyFacts';
 import { buildPlacesFacts, indexedPlaces, parseDistanceConstraint, detectPlacesIntent, isPlacesQuery, flagHiddenGems, filterRecentlyVisited } from './src/utils/placesFacts';
 import { buildEventsFacts, indexedEvents } from './src/utils/eventsFacts';
@@ -55,6 +50,7 @@ import { fetchWithTimeout } from './src/server/fetchUtils';
 import { LOCAL_MODE, STORAGE_MODE, IS_PRODUCTION, PORT } from './src/server/config';
 import { requireAuth, aiRateLimit } from './src/server/middleware';
 import { withinDataFetchQuota, fetchWeatherDaily, fetchAirQualityDaily, fetchPollenDaily, fetchNearbyPlaces, attachTravelTimes, fetchLocalEvents, parseUsZip } from './src/server/grounding';
+import { runDailyDigest, startDigestScheduler, briefingToText, composeBriefingViaAgent } from './src/server/digest';
 import { normalizeGmail, normalizeGraph, type NormalizedMessage } from './src/utils/email';
 import pdfParse from 'pdf-parse/lib/pdf-parse.js';
 import mammoth from 'mammoth';
@@ -64,9 +60,6 @@ import { buildBillQuery, billToSuggestion, buildBillParsePrompt, type ParsedBill
 import { buildNewsletterQuery, buildNewsletterClassifyPrompt } from './src/utils/newsletters';
 import { buildPackageQuery, packageToSuggestion, buildPackageParsePrompt, type ParsedPackage } from './src/utils/packages';
 import { buildKidsActivityQuery, activityToSuggestion, buildKidsActivityParsePrompt, type ParsedActivity } from './src/utils/kidsActivities';
-import type { CalendarEvent, Chore, FamilyMember, LedgerEntry, Goal, ShoppingItem } from './src/types';
-import { buildMemberSections, buildRichNudges } from './src/utils/personalDigest';
-import { buildRoutineDrafts } from './src/utils/routineMiner';
 // Single-click LAN appliance: local SQLite storage + local household auth (no Supabase). See src/storage/.
 import { storageMode, getSqliteAdapter } from './src/storage';
 import { handleDataGet, handleDataSave, handleDataLoadAll } from './src/storage/dataApi';
@@ -2183,194 +2176,7 @@ async function startServer() {
   startDigestScheduler();
 }
 
-// ── Daily-digest scheduler (closed-app autonomy) ──────────────────────────────────────────────────
-// Server-side: runs the Morning Briefing for opted-in households at their chosen hour and emails it — so
-// value arrives with the app closed (the client auto-scan only runs while open). Gated: it does nothing
-// without DIGEST_SCHEDULER_ENABLED + a service-role key (to read households) + RESEND_API_KEY (to send).
-// For a Cloud Run deploy, prefer Cloud Scheduler hitting an endpoint over this in-process interval.
-function briefingToText(b: Briefing, weatherLine?: string): string {
-  const out = [b.title, '', ...b.lines];
-  if (weatherLine) out.push('', weatherLine); // today's weather/AQI, right under the agenda
-  if (b.nudges.length) { out.push('', 'A few nudges:'); for (const n of b.nudges) out.push(`- ${n.text}`); }
-  return out.join('\n');
-}
-
-// Coerce a service-role Supabase JSONB blob to a typed array: guard + cast, so a schema drift to a non-array
-// surfaces as empty here and the digest builders keep their compile-time element types (not a lying `as any[]`).
-const asTypedArray = <T>(d: unknown): T[] => (Array.isArray(d) ? (d as T[]) : []);
-
-// Have the ADK concierge AUTHOR the briefing email from the deterministically-extracted facts, so the
-// proactive Morning Briefing is genuinely agent-generated (the concierge routes to its briefing specialist),
-// not template text. The cron has NO visitor JWT, so the agent's own read tools would come back empty — we
-// therefore pass the already-verified facts in the prompt and tell it to use ONLY those (grounded, no
-// hallucinated events). Best-effort: any non-2xx, timeout, or empty reply returns null and the caller falls
-// back to the deterministic facts text, so a cold Cloud Run agent instance never blocks the email.
-async function composeBriefingViaAgent(factsText: string, today: string): Promise<string | null> {
-  const prompt =
-    `Write today's family morning-briefing email (${today}). Use ONLY the verified facts below — do not ` +
-    `invent events, chores, or places, and do not call any tools. Keep it warm, brief, and skimmable: a ` +
-    `one-line greeting, then the agenda, then any nudges as short bullets. Plain text, no markdown headers.\n\n` +
-    `VERIFIED FACTS:\n${factsText}`;
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 45000); // a cold agent instance + Gemini call can be slow
-  try {
-    const r = await fetch(`${AGENT_BASE_URL}/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: prompt }), // no Authorization: read-only + facts supplied in-prompt
-      signal: ctrl.signal,
-    });
-    if (!r.ok) { console.warn(`[digest] agent compose HTTP ${r.status} — using deterministic briefing`); return null; }
-    const j: any = await r.json();
-    const reply = typeof j?.reply === 'string' ? j.reply.trim() : '';
-    return reply || null;
-  } catch (e: any) {
-    console.warn('[digest] agent compose failed — using deterministic briefing:', e?.message || e);
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function runDailyDigest(): Promise<void> {
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!serviceKey || !process.env.RESEND_API_KEY) {
-    console.log('[digest] tick — not configured (needs SUPABASE_SERVICE_ROLE_KEY + RESEND_API_KEY); skipping.');
-    return;
-  }
-  const admin = createClient(process.env.VITE_SUPABASE_URL || '', serviceKey, { auth: { persistSession: false } });
-  const now = new Date();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-  const { data: prefsRows } = await admin.from('family_data').select('household_id,data').eq('data_key', 'digestprefs');
-  for (const row of prefsRows || []) {
-    const prefs = Array.isArray(row.data) ? row.data[0] : null;
-    // Recipient list: every parent who added their email (de-duped, valid). Falls back to the legacy single
-    // `email`, so an older household keeps working and a second parent can now also receive the digest.
-    const recipients = Array.from(new Set([
-      ...(Array.isArray(prefs?.emails) ? prefs.emails : []),
-      ...(prefs?.email ? [prefs.email] : []),
-    ].map((e: any) => String(e || '').trim()).filter((e: string) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e))));
-    if (!prefs?.enabled || !recipients.length) continue;
-    if (!shouldRunDigestNow(now, Number(prefs.sendHour ?? 7), prefs.lastRunDate || null, today)) continue;
-    // Stamp lastRunDate BEFORE sending so an overlapping tick won't also send this household today — prefer a
-    // missed digest on a send failure over a duplicate. (True multi-instance safety needs an atomic claim /
-    // Cloud Scheduler; the in-process reentrancy guard below covers the single-instance overlap.)
-    await admin.from('family_data').upsert(familyDataRow(row.household_id, 'digestprefs', [{ ...prefs, lastRunDate: today }]), { onConflict: FAMILY_DATA_CONFLICT });
-    const [ev, ch, st, lg, gl, sh, mb, mp] = await Promise.all([
-      admin.from('family_data').select('data').eq('household_id', row.household_id).eq('data_key', 'events').maybeSingle(),
-      admin.from('family_data').select('data').eq('household_id', row.household_id).eq('data_key', 'chores').maybeSingle(),
-      admin.from('family_data').select('data').eq('household_id', row.household_id).eq('data_key', 'settings').maybeSingle(),
-      admin.from('family_data').select('data').eq('household_id', row.household_id).eq('data_key', 'actionledger').maybeSingle(),
-      admin.from('family_data').select('data').eq('household_id', row.household_id).eq('data_key', 'goals').maybeSingle(),
-      admin.from('family_data').select('data').eq('household_id', row.household_id).eq('data_key', 'shopping').maybeSingle(),
-      admin.from('family_data').select('data').eq('household_id', row.household_id).eq('data_key', 'members').maybeSingle(),
-      admin.from('family_data').select('data').eq('household_id', row.household_id).eq('data_key', 'mealplan').maybeSingle(),
-    ]);
-    const events = asTypedArray<CalendarEvent>(ev.data?.data);
-    const choresArr = asTypedArray<Chore>(ch.data?.data);
-    // The meal-plan collection rides into the digest's briefing lines ("Lunch today / Dinner
-    // tonight: …" — buildDinnerLines picks the newest week's plans per meal).
-    const briefing = buildBriefing(events, choresArr, today, 14, (mp.data?.data as any[]) || []);
-
-    // Home location → today's weather + air quality. Fetched once here and reused by BOTH the proactive
-    // umbrella nudge and the email's weather line (best-effort; cached; null/empty when no home is set).
-    const home = (st.data?.data as any[])?.[0] || {};
-    const lat = Number(home.homeLat), lng = Number(home.homeLng);
-    const hasHome = Number.isFinite(lat) && Number.isFinite(lng);
-    const weather = hasHome ? await fetchWeatherDaily(lat, lng) : null;
-    const aqiByDate = hasHome ? await fetchAirQualityDaily(lat, lng) : {};
-    const weatherLine = buildBriefingWeather(weather, aqiByDate, today);
-
-    // Proactive pre-staging (#1): build approvable shopping drafts (gift/supplies nudges + an umbrella when
-    // rain is likely during a today outdoor event) and APPEND them to the household's action ledger, so they
-    // wait in Approvals when the parent next opens the app. Best-effort; never blocks the email.
-    const goals = asTypedArray<Goal>(gl.data?.data);
-    let stagedCount = 0;
-    try {
-      const ledger = asTypedArray<LedgerEntry>(lg.data?.data);
-      if (!ledger.some(e => e?.proactiveDate === today)) { // same-day dedupe (re-run safe)
-        const stamp = { createdAt: new Date(now).toISOString(), createdByUserId: 'concierge', createdByEmail: 'concierge@familyhub' };
-        const staged = buildProactiveLedger(briefing, weather, events, today, () => 'ledg-' + randomUUID(), stamp, ledger);
-        // MORNING PLANNER (§7a): one grounded model call proposes up to 3 further next actions (incl. the
-        // next step of an open goal — the scheduled goal re-check); deterministic validation stages them
-        // CONFIRM-tier. Best-effort: on any model failure the deterministic `staged` above still lands, so
-        // the digest never gets worse than it was pre-planner. KAGGLE_EVAL: proactive closed-app agency.
-        let planned: LedgerEntry[] = [];
-        try {
-          const shopping = asTypedArray<ShoppingItem>(sh.data?.data);
-          const chores = asTypedArray<Chore>(ch.data?.data);
-          const plannerStores = sanitizeStoreList(home.storeList); // household lists from settings (Phase-5)
-          const facts = buildMorningFacts({ today, agendaText: briefingToText(briefing, weatherLine), weatherLine, chores, shopping, goals, pendingLedger: [...ledger, ...staged] });
-          const raw = await callGeminiJSON(facts, MORNING_PLANNER_SYSTEM, buildMorningPlannerSchema(plannerStores), '{"proposals":[]}', undefined, MORNING_GENCONFIG);
-          const proposals = validateMorningProposals(raw?.proposals, { today, shopping, pendingLedger: [...ledger, ...staged], goals, factsText: facts, stores: plannerStores });
-          planned = toLedgerEntries(proposals, today, () => 'ledg-' + randomUUID(), stamp);
-        } catch (e: any) {
-          console.warn('[digest] morning planner skipped (deterministic nudges still staged):', e?.message || e);
-        }
-        // Pattern-4 ROUTINES (parent-enabled Manage toggles only — never mined-and-injected silently):
-        // an enabled routine whose weekday is today stages its confirm-tier draft, deduped against
-        // everything already pending/staged and the live shopping list.
-        const routineDrafts = buildRoutineDrafts(
-          home.routines, today, [...ledger, ...staged, ...planned],
-          asTypedArray<ShoppingItem>(sh.data?.data).filter(s => !s.completed).map(s => s.text),
-          () => 'ledg-' + randomUUID(), stamp,
-        );
-        const allStaged = [...staged, ...planned, ...routineDrafts];
-        if (allStaged.length) {
-          const merged = [...ledger, ...allStaged].slice(-LEDGER_CAP);
-          await admin.from('family_data').upsert(familyDataRow(row.household_id, 'actionledger', merged), { onConflict: FAMILY_DATA_CONFLICT });
-          stagedCount = allStaged.length;
-        }
-      }
-    } catch (e: any) {
-      console.warn('[digest] proactive staging failed (email still sent):', e?.message || e);
-    }
-
-    // Goal nudges (the agentic goal loop, scheduler half): remind the family of in-progress goals so a
-    // multi-day goal doesn't stall silently. Email lines, not fabricated approvable rows.
-    const goalNudges = buildGoalNudges(goals);
-    const parts = [briefingToText(briefing, weatherLine)];
-    if (stagedCount) parts.push(`🛎️ ${stagedCount} draft${stagedCount === 1 ? '' : 's'} waiting in Approvals — review when you open the app.`);
-    if (goalNudges.length) parts.push(`Goals in progress:\n${goalNudges.join('\n')}`);
-    // Personalized sections (W4): each member's own day + the richer calendar-grounded nudge set.
-    // Deterministic facts — the composing agent may rephrase them, never invent beyond them.
-    const memberSections = buildMemberSections(asTypedArray<FamilyMember>(mb.data?.data), events, choresArr, today);
-    if (memberSections.length) parts.push(memberSections.join('\n\n'));
-    const richNudges = buildRichNudges(events, today, asTypedArray<ShoppingItem>(sh.data?.data).filter(s => !s.completed).length);
-    if (richNudges.length) parts.push(`Worth planning ahead:\n${richNudges.map(n => `- ${n}`).join('\n')}`);
-    const factsText = parts.join('\n\n');
-    // The ADK concierge AUTHORS the briefing from these verified facts (genuinely agent-generated, not
-    // template text); falls back to the deterministic facts text if the agent is unreachable.
-    const body = (await composeBriefingViaAgent(factsText, today)) || factsText;
-    // Send to each parent who opted in (best-effort, independent — one bad address doesn't block the others).
-    // LOG every failure: a Resend rejection (e.g. sandbox mode — unverified domain → deliverable only to the
-    // account owner) was previously discarded here, so a recipient silently never received a single digest.
-    for (const to of recipients) {
-      const sent = await sendDigestEmail(to, `Your Family-Hub briefing — ${today}`, body);
-      if (!sent.ok && !sent.skipped) console.warn(`[digest] send to ${to} FAILED: ${sent.error} — if this is 'resend 403', verify a domain in Resend and set DIGEST_FROM_EMAIL to it (the shared onboarding@resend.dev sender only delivers to the Resend account owner).`);
-    }
-  }
-}
-
-let _digestRunning = false; // reentrancy guard: a slow run must not overlap the next 5-min tick (→ double sends)
-function startDigestScheduler(): void {
-  // Cloud Scheduler mode: an external cron drives POST /internal/run-digest, so do NOT also run the in-process
-  // interval — that's the multi-instance double-send the review flagged. (Preferred for Cloud Run.)
-  if (process.env.DIGEST_TRIGGER_SECRET) {
-    console.log('[digest] Cloud Scheduler mode — in-process interval disabled; trigger via POST /internal/run-digest.');
-    return;
-  }
-  if (process.env.DIGEST_SCHEDULER_ENABLED !== 'true') return;
-  console.log('[digest] in-process scheduler enabled (every 5 min). For multi-instance, set DIGEST_TRIGGER_SECRET + Cloud Scheduler.');
-  setInterval(() => {
-    if (_digestRunning) return;
-    _digestRunning = true;
-    void runDailyDigest()
-      .catch(e => console.error('[digest] run failed:', e?.message || e))
-      .finally(() => { _digestRunning = false; });
-  }, 5 * 60 * 1000);
-}
+// Daily-digest scheduler + runner → src/server/digest.ts
 
 if (!process.env.VITEST) {
   startServer();
