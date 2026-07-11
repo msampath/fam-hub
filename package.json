@@ -8,7 +8,7 @@
     "node": ">=22.5"
   },
   "scripts": {
-    "dev": "tsx server.ts",
+    "dev": "tsx -r dotenv/config server.ts",
     "mcp": "tsx src/mcp/server.ts",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs && npm run build:mcp",
     "build:mcp": "esbuild src/mcp/server.ts --bundle --platform=node --format=cjs --packages=external --outfile=dist/mcp-server.cjs",

@@ -148,7 +148,10 @@ app.use((req, res, next) => {
 });
 
 // Auth middleware (requireAuth, aiRateLimit, preAuthThrottle) → src/server/middleware.ts
-app.use(preAuthThrottle);
+// Scoped to /api ONLY: it caps the pre-auth token-verify flood, and every requireAuth route is under
+// /api. Mounting it globally would also count static assets + Vite dev modules (hundreds per page load)
+// against the per-IP cap and 429 the app's own bundle → blank page.
+app.use('/api', preAuthThrottle);
 
 // ── LAN appliance (LOCAL_MODE): household passphrase auth + SQLite data API ──────
 // On the single-click box there's no Supabase: the browser does first-run setup (set a household passphrase),
