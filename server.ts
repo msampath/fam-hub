@@ -47,7 +47,7 @@ import { buildEventsFacts, indexedEvents } from './src/utils/eventsFacts';
 import { cleanHTML, callGeminiJSON, CALENDAR_EVENT_SCHEMA, aiErrorResponse } from './src/server/gemini';
 import { fetchWithTimeout } from './src/server/fetchUtils';
 import { LOCAL_MODE, STORAGE_MODE, IS_PRODUCTION, PORT } from './src/server/config';
-import { requireAuth, aiRateLimit } from './src/server/middleware';
+import { requireAuth, aiRateLimit, preAuthThrottle } from './src/server/middleware';
 import { withinDataFetchQuota, fetchWeatherDaily, fetchAirQualityDaily, fetchPollenDaily, fetchNearbyPlaces, attachTravelTimes, fetchLocalEvents, parseUsZip } from './src/server/grounding';
 import { runDailyDigest, startDigestScheduler, briefingToText, composeBriefingViaAgent } from './src/server/digest';
 
@@ -147,7 +147,8 @@ app.use((req, res, next) => {
   (UPLOAD_ROUTES.has(req.path) ? bigBody : smallBody)(req, res, next);
 });
 
-// Auth middleware (requireAuth, aiRateLimit) → src/server/middleware.ts
+// Auth middleware (requireAuth, aiRateLimit, preAuthThrottle) → src/server/middleware.ts
+app.use(preAuthThrottle);
 
 // ── LAN appliance (LOCAL_MODE): household passphrase auth + SQLite data API ──────
 // On the single-click box there's no Supabase: the browser does first-run setup (set a household passphrase),

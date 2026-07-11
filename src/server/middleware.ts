@@ -38,6 +38,25 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   next();
 }
 
+// ── Pre-auth IP throttle (cloud only): cap requests per IP before the Supabase getUser call ──
+// Without this, anyone can flood requireAuth with random Bearer tokens, each triggering a
+// blocking getUser round-trip. In LOCAL_MODE the LAN login has its own per-IP limiter.
+const PRE_AUTH_PER_MIN = Number(process.env.PRE_AUTH_PER_MIN) || 60;
+const preAuthHits = new Map<string, { count: number; resetAt: number }>();
+
+export function preAuthThrottle(req: Request, res: Response, next: NextFunction) {
+  if (LOCAL_MODE) return next();
+  const key = req.ip || 'anon';
+  const now = Date.now();
+  pruneExpired(preAuthHits, now);
+  const { allowed, entry } = checkRateWindow(preAuthHits.get(key), now, PRE_AUTH_PER_MIN, 60_000);
+  preAuthHits.set(key, entry);
+  if (!allowed) {
+    return res.status(429).json({ error: 'Too many requests — please wait a moment.' });
+  }
+  next();
+}
+
 // ── Per-user rate limit for the AI (cost-bearing) endpoints ─────────────────────
 // Auth alone doesn't stop a signed-in user (or a stolen session) running an automated loop that
 // burns the Gemini quota / runs up cost / DoSes the household. A fixed per-minute window per user
