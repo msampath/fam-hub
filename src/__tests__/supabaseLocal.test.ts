@@ -63,15 +63,17 @@ describe('supabase.ts — LAN appliance client (sqlite mode)', () => {
 });
 
 describe('invite-code join gate (F-04 — format-validate before the RPC)', () => {
-  it('isValidInviteCode accepts exactly the live 6-hex shape (case/space tolerant)', async () => {
+  it('isValidInviteCode accepts exactly the live 16-hex CSPRNG shape (case/space tolerant)', async () => {
     const { isValidInviteCode } = await import('../supabase');
-    expect(isValidInviteCode('a1b2c3')).toBe(true);
-    expect(isValidInviteCode('A1B2C3')).toBe(true);
-    expect(isValidInviteCode('  a1b2c3  ')).toBe(true); // the RPC upper/trims too
-    expect(isValidInviteCode('a1b2c')).toBe(false);     // too short
-    expect(isValidInviteCode('a1b2c3d')).toBe(false);   // too long
-    expect(isValidInviteCode('g1b2c3')).toBe(false);    // non-hex letter
-    expect(isValidInviteCode("a1' or")).toBe(false);    // junk/probe
+    const code = 'a1b2c3d4e5f6a1b2';
+    expect(isValidInviteCode(code)).toBe(true);
+    expect(isValidInviteCode(code.toUpperCase())).toBe(true);
+    expect(isValidInviteCode(`  ${code}  `)).toBe(true); // the RPC upper/trims too
+    expect(isValidInviteCode('a1b2c3')).toBe(false);     // the OLD 6-hex shape (pre-hardening) — too short now
+    expect(isValidInviteCode(code.slice(0, 15))).toBe(false);  // too short
+    expect(isValidInviteCode(code + 'a')).toBe(false);         // too long
+    expect(isValidInviteCode('g1b2c3d4e5f6a1b2')).toBe(false); // non-hex letter
+    expect(isValidInviteCode("a1' or 1=1--")).toBe(false);     // junk/probe
     expect(isValidInviteCode('')).toBe(false);
   });
 

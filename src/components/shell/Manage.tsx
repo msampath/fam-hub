@@ -138,7 +138,16 @@ export default function Manage({ account, onClose }: ManageProps) {
   const [newRecipient, setNewRecipient] = useState(account.user?.email || '');
   const canAddRecipient = isEmail(newRecipient) && !recipients.includes(newRecipient.trim());
   const addRecipient = () => { if (canAddRecipient) { setRecipients([...recipients, newRecipient.trim()]); setNewRecipient(''); } };
-  const { homeLabel, saveHomeLocation, cloudInviteCode } = useCalendar();
+  const { homeLabel, saveHomeLocation, cloudInviteCode, regenerateInviteCode } = useCalendar();
+  const [isRegeneratingCode, setIsRegeneratingCode] = useState(false);
+  const [regenError, setRegenError] = useState<string | null>(null);
+  const handleRegenerateCode = async () => {
+    setIsRegeneratingCode(true);
+    setRegenError(null);
+    const res = await regenerateInviteCode();
+    if (!res.ok) setRegenError(res.error || 'Could not generate a new code.');
+    setIsRegeneratingCode(false);
+  };
   // Escape-to-close + focus trap/restore. No backdrop-click-close here — settings has live inputs (PIN,
   // home location) a stray click shouldn't discard; the X (and Escape) are the deliberate close.
   const dialogRef = useModalA11y<HTMLDivElement>(onClose);
@@ -428,12 +437,17 @@ export default function Manage({ account, onClose }: ManageProps) {
             </div>
           </form>
 
-          {/* Your household invite code — share so another parent can join */}
+          {/* Your household invite code — share so another parent can join. Codes expire after 7 days
+              (F-04 §5c) — Regenerate mints a fresh one; the old one stops working immediately. */}
           {cloudInviteCode && (
             <div className="mt-3 flex flex-wrap items-center gap-2 rounded-[10px] p-2.5" style={{ border: `2px solid ${C.elevated}` }}>
               <span className="text-[11px] font-bold uppercase tracking-wide" style={{ color: C.muted }}>Your invite code</span>
               <span className="rounded-[8px] px-2.5 py-1 text-sm font-extrabold tracking-widest" style={{ background: C.app, color: C.indigo }}>{cloudInviteCode}</span>
               <button type="button" onClick={() => copyInvite(cloudInviteCode)} className="text-[11px] font-bold" style={{ color: copied ? C.emerald : C.indigo }}>{copied ? 'Copied!' : 'Copy'}</button>
+              <button type="button" onClick={handleRegenerateCode} disabled={isRegeneratingCode} className="text-[11px] font-bold" style={{ color: C.muted }}>
+                {isRegeneratingCode ? 'Generating…' : 'Regenerate'}
+              </button>
+              {regenError && <span className="w-full text-[11px] font-semibold" style={{ color: C.muted }}>{regenError}</span>}
             </div>
           )}
 

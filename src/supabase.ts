@@ -175,6 +175,16 @@ export const getGoogleToken = async (): Promise<string | null> => {
 
 // ── Household management ─────────────────────────────────────────────────────
 
+// F-04 §5a: create a brand-new household + this user's own membership row ATOMICALLY, server-side. Must
+// go through this SECURITY DEFINER RPC — the migration's §5a denies direct household_members INSERTs
+// (closing the bypass where an attacker who learns a household_id could self-insert a membership), so
+// the client can no longer do the old two-step insert dance. Returns null if unauthenticated.
+export const createHousehold = async (): Promise<string> => {
+  const { data, error } = await supabase.rpc('create_household');
+  if (error || !data) throw new Error('Failed to create household: ' + (error?.message || 'no id returned'));
+  return data as string;
+};
+
 /**
  * Returns the household ID the user belongs to.
  * Auto-creates a new household on first sign-in.
@@ -194,25 +204,21 @@ export const getOrCreateHousehold = async (userId: string): Promise<string> => {
   if (readErr) throw new Error('Failed to read household membership: ' + readErr.message);
   if (memberships && memberships.length > 0) return memberships[0].household_id;
 
-  const { data: household, error } = await supabase
-    .from('households')
-    .insert({ owner_id: userId })
-    .select('id')
-    .single();
-
-  if (error || !household) throw new Error('Failed to create household: ' + error?.message);
-
-  const { error: memberErr } = await supabase.from('household_members').insert({ user_id: userId, household_id: household.id });
-  if (memberErr) throw new Error('Failed to add user to household: ' + memberErr.message);
-
-  return household.id;
+  return createHousehold();
 };
 
-// F-04: live invite codes are exactly upper(substr(md5(...),1,6)) → 6 hex chars (schema.sql:9). Gate the
-// join call on that shape so junk/probing input never even reaches the RPC. Pure + exported for tests.
-// If the post-judging migration lengthens codes (supabase/migrations/2026-07-06-post-capstone.sql §5),
-// relax this regex in the same change.
-export const isValidInviteCode = (code: string): boolean => /^[0-9a-f]{6}$/i.test(code.trim());
+// F-04: live invite codes are upper(encode(gen_random_bytes(8),'hex')) → 16 hex chars (CSPRNG, migration
+// §5b — was upper(substr(md5(...),1,6)), 6 hex chars, before that hardening). Gate the join call on that
+// shape so junk/probing input never even reaches the RPC. Pure + exported for tests.
+export const isValidInviteCode = (code: string): boolean => /^[0-9a-f]{16}$/i.test(code.trim());
+
+// F-04 §5c: mint a fresh CSPRNG invite code (server-side, 7-day expiry) for the caller's own household —
+// the old code stops working. Returns null if unauthenticated or the caller has no household.
+export const regenerateInviteCode = async (): Promise<string | null> => {
+  const { data, error } = await supabase.rpc('regenerate_invite_code');
+  if (error) { console.error('regenerateInviteCode RPC error:', error.message); return null; }
+  return (data as string) ?? null;
+};
 
 /**
  * Joins a household via invite code, leaving any existing household.

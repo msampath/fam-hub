@@ -185,6 +185,7 @@ export function makeCalendarCtx(overrides: Partial<CalendarCtx> = {}): CalendarC
 
     // Google Calendar sync
     cloudInviteCode: null,
+    regenerateInviteCode: vi.fn(async () => ({ ok: true })),
     inviteCodeInput: '',
     setInviteCodeInput: vi.fn(),
     isJoiningHousehold: false,

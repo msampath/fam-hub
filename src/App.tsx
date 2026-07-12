@@ -7,6 +7,7 @@ import {
   getOrCreateHousehold,
   joinHousehold,
   getInviteCode,
+  regenerateInviteCode,
   loadHouseholdData,
   saveHouseholdData,
   setStaleWriteHandler,
@@ -846,6 +847,16 @@ export default function App() {
     } catch (err: any) {
       return { ok: false, error: 'Could not reach the location service.' };
     }
+  };
+
+  // F-04 §5c: mint a fresh invite code (7-day expiry) — the OLD code stops working the moment this
+  // succeeds. Updates the displayed code on success; leaves the old one showing (and surfaces an error)
+  // on failure, so a parent never loses their only working code to a UI glitch.
+  const handleRegenerateInviteCode = async (): Promise<{ ok: boolean; error?: string }> => {
+    const fresh = await regenerateInviteCode();
+    if (!fresh) return { ok: false, error: 'Could not generate a new code — try again.' };
+    setCloudInviteCode(fresh);
+    return { ok: true };
   };
 
   // One-time migration (#4): a home previously stored with a raw "lat, lng" label gets reverse-geocoded to
@@ -3156,6 +3167,7 @@ export default function App() {
     handleAddSource, handleTextSubmit, handlePdfUpload, handleDeleteSource,
     handleSyncSources, isSyncingSources,
     cloudInviteCode,
+    regenerateInviteCode: handleRegenerateInviteCode,
     inviteCodeInput, setInviteCodeInput,
     isJoiningHousehold, handleJoinHousehold,
     isFetchingCalendars, connectedCalendars, googleCalendarsList,

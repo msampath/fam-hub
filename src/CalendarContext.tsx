@@ -78,6 +78,7 @@ export interface CalendarCtx {
 
   // Google Calendar sync
   cloudInviteCode: string | null;
+  regenerateInviteCode: () => Promise<{ ok: boolean; error?: string }>;
   inviteCodeInput: string;
   setInviteCodeInput: React.Dispatch<React.SetStateAction<string>>;
   isJoiningHousehold: boolean;
