@@ -14,6 +14,7 @@ import { buildRoutineDrafts } from '../utils/routineMiner';
 import { callGeminiJSON } from './gemini';
 import { fetchWeatherDaily, fetchAirQualityDaily } from './grounding';
 import { SUPABASE_URL } from './config';
+import { fetchCloudRunIdToken } from './fetchUtils';
 import type { CalendarEvent, Chore, FamilyMember, LedgerEntry, Goal, ShoppingItem } from '../types';
 
 const AGENT_BASE_URL = (process.env.AGENT_BASE_URL || 'http://127.0.0.1:8080').replace(/\/+$/, '');
@@ -36,9 +37,14 @@ export async function composeBriefingViaAgent(factsText: string, today: string):
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 45000);
   try {
+    // H1: a system/cron call (no visitor) — only needs the Google ID token for Cloud Run's own IAM gate,
+    // not the X-Visitor-Authorization header agentProxy.ts attaches for real user turns.
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const idToken = await fetchCloudRunIdToken(AGENT_BASE_URL);
+    if (idToken) headers.Authorization = `Bearer ${idToken}`;
     const r = await fetch(`${AGENT_BASE_URL}/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ message: prompt }),
       signal: ctrl.signal,
     });

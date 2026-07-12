@@ -33,3 +33,23 @@ export function pruneByAge<V extends { at: number }>(map: Map<string, V>, ttlMs:
   if (map.size < 256) return;
   for (const [k, v] of map) if (now - v.at >= ttlMs) map.delete(k);
 }
+
+// H1: when the concierge-agent Cloud Run service is deployed --no-allow-unauthenticated, its own IAM
+// layer requires a Google-signed ID token (Authorization: Bearer <token>, audience = the agent's own URL)
+// before a request is even allowed through to the container — a plain API key or the visitor's own
+// Supabase JWT won't satisfy it. The ONLY way to mint one is the per-instance metadata server, which only
+// exists ON Cloud Run/GCE (K_SERVICE is set by Cloud Run itself), so local dev and an --allow-unauthenticated
+// deploy correctly skip this and attach nothing. Not cached: the metadata server is a local, sub-millisecond
+// link (no real network hop), so caching would add TTL-tracking complexity for no measurable latency win on
+// this low-QPS, server-to-server call.
+export async function fetchCloudRunIdToken(audienceUrl: string): Promise<string | null> {
+  if (!process.env.K_SERVICE) return null;
+  try {
+    const url = `http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=${encodeURIComponent(audienceUrl)}`;
+    const res = await fetchWithTimeout(url, 3000, { headers: { 'Metadata-Flavor': 'Google' } });
+    if (!res.ok) return null;
+    return (await res.text()).trim() || null;
+  } catch {
+    return null;
+  }
+}

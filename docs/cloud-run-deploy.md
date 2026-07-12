@@ -63,11 +63,17 @@ gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
 
 The root `Dockerfile` is the agent image, so `--source .` builds it directly — no manual Docker needed.
 
+**H1 hardening (public-deploy):** deploy `--no-allow-unauthenticated` — the web service attaches a
+Google-signed ID token to every call (`src/server/fetchCloudRunIdToken`, code already in place), so this
+does NOT require `--allow-unauthenticated` even though the web service isn't deployed yet at this point.
+Without this flag the agent's `/chat` is open to the internet and anyone with the URL can spend your Gemini
+quota.
+
 ```bash
 gcloud run deploy concierge-agent \
   --source . \
   --region us-central1 \
-  --allow-unauthenticated \
+  --no-allow-unauthenticated \
   --memory 2Gi --cpu 2 \
   --concurrency 4 \
   --timeout 300 \
@@ -82,6 +88,8 @@ gcloud run deploy concierge-agent \
 ```
 
 Why these flags:
+- **`--no-allow-unauthenticated`** — see the H1 note above. The caller must present a Google-signed ID
+  token valid for THIS service's URL; Cloud Run checks it before the request ever reaches the container.
 - **`--memory 2Gi --cpu 2 --concurrency 4`** — each `/chat` spawns **8 Node MCP children** (one per specialist). High concurrency × 8 children would exhaust memory; cap it.
 - **`--min-instances 1`** — keeps one instance warm so the MCP children don't cold-start mid-demo (the documented session-timeout risk). **Set back to 0 after the demo to stop paying for idle.**
 - **`--timeout 300`** — multi-agent runs make 3–5 model calls; the default 60s can clip a slow outings loop.
@@ -98,13 +106,28 @@ Why these flags:
 
 **Copy the service URL** it prints, e.g. `https://concierge-agent-abc123-uc.a.run.app`. You need it in step 3.
 
-Smoke test — **note: NOT `/healthz`.** Google's frontend reserves the `/healthz` path on `*.run.app` and
-answers it with its own 404 without ever forwarding to your container (found live — the service looked
-dead while being perfectly healthy). Probe the real contract instead:
+**Grant the web service's identity permission to call this one** (needed BEFORE the web service can reach
+the agent — do this right after step 3 deploys the web service and you know its runtime service account;
+the default is `PROJECT_NUMBER-compute@developer.gserviceaccount.com` unless you assigned a dedicated one):
+```bash
+gcloud run services add-iam-policy-binding concierge-agent \
+  --region us-central1 \
+  --member="serviceAccount:PROJECT_NUMBER-compute@developer.gserviceaccount.com" \
+  --role="roles/run.invoker"
+```
+
+Smoke test — **you can no longer `curl` this directly without a valid ID token** (Cloud Run's IAM layer
+now rejects it with a 403 before the container ever sees the request — that's the fix working). To test as
+yourself (needs YOUR gcloud identity to also have `roles/run.invoker` on this service, or a project-owner
+role which implies it):
 ```bash
 curl -s -X POST https://concierge-agent-abc123-uc.a.run.app/chat \
+  -H "Authorization: Bearer $(gcloud auth print-identity-token)" \
   -H "Content-Type: application/json" -d '{"message":"hi"}'   # -> {"reply":"…","sessionId":…}
 ```
+(**Note: NOT `/healthz`** — Google's frontend reserves that path on `*.run.app` and answers it with its own
+404 without ever forwarding to your container, found live — the service looked dead while being perfectly
+healthy, independent of the auth question above.)
 
 ---
 
@@ -166,6 +189,10 @@ Grounding keys (the copilot degrades honestly without them, but the demo loses i
 - **`GOOGLE_MAPS_API_KEY`** — real nearby venues + drive times in the quick-path FACTS. Same key the agent
   service needs (see step 1) — setting it on ONE service does not cover the other.
 - **`TICKETMASTER_API_KEY`** — real ticketed events in the FACTS (web service only; the agent has no events tool).
+
+> **Don't skip:** go back to step 1's `gcloud run services add-iam-policy-binding concierge-agent …
+> roles/run.invoker` command now — the web service can't reach the agent without it, and the failure mode
+> is a silent-looking 403 on every concierge chat, not an obvious boot error.
 
 What each digest var does (all three required to actually send mail):
 - **`DIGEST_TRIGGER_SECRET`** — enables `POST /internal/run-digest` **and auto-disables** the in-process 5-min interval (so multi-instance Cloud Run won't send duplicates).
@@ -248,12 +275,18 @@ Or trigger the scheduled job directly: `gcloud scheduler jobs run family-hub-dig
 
 ## Known limitations / honest notes (worth stating in the submission)
 
-- **The agent service is `--allow-unauthenticated`.** Its `/chat` endpoint is open to the internet, so anyone
-  with the URL could spend your Gemini quota. Fine for a time-boxed demo; for a real deploy, give the web
-  service a service account, deploy the agent with `--no-allow-unauthenticated`, and have Express attach a
-  Google-signed **ID token** (or use `--ingress internal` + a serverless VPC connector). Called out in
-  [agent/api.py:99](../agent/api.py) (`_visitor_id` decodes the JWT **without** verifying — only a session key,
-  not auth; RLS in the MCP child is the real gate).
+- ~~The agent service is `--allow-unauthenticated`~~ — **FIXED (H1, 2026-07-12).** Step 1 above now deploys
+  `--no-allow-unauthenticated`; the web service attaches a Google-signed ID token to every call
+  (`src/server/fetchCloudRunIdToken`, only active when `K_SERVICE` is set — i.e. on Cloud Run, never
+  locally). Cloud Run's own IAM layer rejects an unauthenticated caller before the request ever reaches
+  the container, closing the open-internet Gemini-quota-spend risk.
+- **Still open: the visitor's OWN JWT is decoded but not signature-verified.** `_visitor_id()` in
+  `agent/api.py` reads the `sub` claim from the caller's Supabase JWT (now carried in
+  `X-Visitor-Authorization`, separate from the Cloud Run IAM token above) WITHOUT verifying its signature —
+  it's only used as an in-memory session-partitioning key, not an auth decision; real household-data auth
+  is Supabase RLS in the MCP child, which does verify. A forged `sub` could only ever read another
+  visitor's in-memory chat HISTORY (never their household data) — verifying the signature here would close
+  even that.
 - **`InMemorySessionService`** — conversation history is per-instance and lost on cold start / scale-out. With
   `--min-instances 1` it's stable for a demo; production would swap in a persistent session service.
 - **7 MCP children per request** — intentional (per-specialist `tool_filter` scoping); the container uses the

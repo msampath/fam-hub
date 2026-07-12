@@ -7,16 +7,24 @@ import { requireAuth, aiRateLimit } from './middleware';
 import { LOCAL_MODE, SUPABASE_URL, SUPABASE_ANON_KEY } from './config';
 import { storageMode, getSqliteAdapter } from '../storage';
 import { SqliteAgentJobStore, SupabaseAgentJobStore, lookupHouseholdId, type AgentJobStore } from '../storage/agentJobs';
+import { fetchCloudRunIdToken } from './fetchUtils';
 
 const AGENT_BASE_URL = (process.env.AGENT_BASE_URL || 'http://127.0.0.1:8080').replace(/\/+$/, '');
 
+// H1: Authorization now carries the Google ID token that satisfies Cloud Run's IAM gate (only attached
+// when running ON Cloud Run — see fetchCloudRunIdToken); the visitor's OWN Supabase JWT moves to
+// X-Visitor-Authorization so agent/api.py can still read it for per-visitor session partitioning +
+// RLS-scoped MCP persistence, without it being consumed/overwritten by the IAM layer.
 async function forwardAgentChat(authHeader: string, body: unknown): Promise<{ status: number; text: string }> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'X-Visitor-Authorization': authHeader,
+  };
+  const idToken = await fetchCloudRunIdToken(AGENT_BASE_URL);
+  if (idToken) headers.Authorization = `Bearer ${idToken}`;
   const upstream = await fetch(`${AGENT_BASE_URL}/chat`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: authHeader,
-    },
+    headers,
     body: JSON.stringify(body ?? {}),
   });
   return { status: upstream.status, text: await upstream.text() };

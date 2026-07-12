@@ -1,13 +1,22 @@
-"""FastAPI service exposing the concierge ADK agent over HTTP for the React surface.
+"""FastAPI service exposing the concierge ADK agent over HTTP. The ONLY direct caller is the Node web
+service (src/server/agentProxy.ts + digest.ts) — the browser never reaches this service directly, it
+always goes through the Node same-origin proxy (see src/utils/agentClient.ts's own comment).
 
 KAGGLE_EVAL: Deployability + Security (per-request isolation). Each /chat call builds the agent graph with
-the VISITOR's Supabase JWT (from `Authorization: Bearer`), so the MCP child persists ONLY under that
-visitor's household (RLS-scoped) — the per-visitor isolation invariant from the security review. With no
-token the agent still runs but writes are rejected (validate-only).
+the VISITOR's Supabase JWT (from `X-Visitor-Authorization: Bearer`), so the MCP child persists ONLY under
+that visitor's household (RLS-scoped) — the per-visitor isolation invariant from the security review. With
+no token the agent still runs but writes are rejected (validate-only).
 
-Contract (matches src/utils/agentClient.ts):
-    POST /chat   { message, sessionId? }  + Authorization: Bearer <supabase-jwt>  ->  { reply, sessionId }
-    GET  /healthz                                                                  ->  { ok: true }
+H1 (public-deploy hardening): `Authorization` is reserved for Cloud Run's OWN IAM gate — when this service
+is deployed --no-allow-unauthenticated, Cloud Run requires a Google-signed ID token there before a request
+is even let through, and passes that SAME header to the container. The visitor's own Supabase JWT therefore
+travels in a separate header (X-Visitor-Authorization) so it survives untouched regardless of how Cloud Run
+handles Authorization. Locally / on an --allow-unauthenticated deploy, Authorization is simply absent or
+irrelevant here — nothing reads it.
+
+Contract (as sent by agentProxy.ts / digest.ts — NOT what the browser sends to the Node proxy):
+    POST /chat   { message, sessionId? }  + X-Visitor-Authorization: Bearer <supabase-jwt>  ->  { reply, sessionId }
+    GET  /healthz                                                                            ->  { ok: true }
 
 Run locally (from the REPO ROOT, after `pip install -r agent/requirements.txt` + a Gemini key in env):
     uvicorn agent.api:app --host 0.0.0.0 --port 8080
@@ -94,7 +103,7 @@ app.add_middleware(
     allow_origins=_origins,
     allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_headers=["Authorization", "X-Visitor-Authorization", "Content-Type"],
 )
 
 
@@ -108,6 +117,14 @@ class ChatIn(BaseModel):
     stores: list[str] | None = None     # household store lists (Phase-5) — route add_shopping_item to THESE
     mealplan: list[dict] | None = None  # the CURRENT week's dinners [{date,dish,note?}] — adjustment turns need it
     clientDate: str | None = None       # client's civil YYYY-MM-DD — avoids UTC drift on a UTC container
+
+
+def _extract_bearer(header_value: str | None) -> str | None:
+    """Pull the token out of a `Bearer <token>` header value (case-insensitive scheme). Returns None for
+    anything else — missing header, wrong scheme, or an empty token after the prefix."""
+    if not header_value or not header_value.lower().startswith("bearer "):
+        return None
+    return header_value[7:].strip() or None
 
 
 def _visitor_id(jwt: str | None) -> str:
@@ -155,16 +172,20 @@ async def healthz():
 
 
 @app.post("/chat")
-async def chat(body: ChatIn, request: Request, authorization: str | None = Header(default=None)):
+async def chat(
+    body: ChatIn,
+    request: Request,
+    x_visitor_authorization: str | None = Header(default=None, alias="X-Visitor-Authorization"),
+):
     if not rate_ok(_client_ip(request), time.monotonic()):
         raise HTTPException(status_code=429, detail="Too many requests — please slow down.")
     message = (body.message or "").strip()
     if not message:
         raise HTTPException(status_code=400, detail="A message is required.")
 
-    jwt = None
-    if authorization and authorization.lower().startswith("bearer "):
-        jwt = authorization[7:].strip() or None
+    # H1: the visitor's Supabase JWT travels in X-Visitor-Authorization, NOT Authorization — that header
+    # is reserved for Cloud Run's own IAM gate (see the module docstring).
+    jwt = _extract_bearer(x_visitor_authorization)
     user_id = _visitor_id(jwt)
 
     # Continue the conversation if a known sessionId was supplied; otherwise start a fresh one.
