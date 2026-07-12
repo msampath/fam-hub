@@ -7,7 +7,7 @@ import { buildNewsletterQuery, buildNewsletterClassifyPrompt } from '../utils/ne
 import { buildPackageQuery, packageToSuggestion, buildPackageParsePrompt, type ParsedPackage } from '../utils/packages';
 import { buildKidsActivityQuery, activityToSuggestion, buildKidsActivityParsePrompt, type ParsedActivity } from '../utils/kidsActivities';
 import { callGeminiJSON } from './gemini';
-import { fetchWithTimeout } from './fetchUtils';
+import { fetchWithTimeout, mapWithConcurrency } from './fetchUtils';
 import { requireAuth, aiRateLimit } from './middleware';
 
 async function gmailScan(accessToken: string, query: string, maxResults = 30):
@@ -21,15 +21,19 @@ async function gmailScan(accessToken: string, query: string, maxResults = 30):
   }
   const listData: any = await listR.json();
   const ids: string[] = (Array.isArray(listData?.messages) ? listData.messages : []).slice(0, maxResults).map((m: any) => m?.id).filter(Boolean);
-  const messages: NormalizedMessage[] = [];
-  for (const id of ids) {
+  // Hydrate up to 6 messages concurrently (was strictly serial — ~30 sequential round-trips blocked
+  // every interactive scan for several seconds before the AI parse even started). null marks a skipped
+  // message (same try/catch-skip semantics as before), filtered out below; order is preserved.
+  const hydrated = await mapWithConcurrency(ids, 6, async (id): Promise<NormalizedMessage | null> => {
     try {
       const r = await fetchWithTimeout(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(id)}?format=full`, 8000, auth);
-      if (r.ok) messages.push(normalizeGmail(await r.json()));
+      return r.ok ? normalizeGmail(await r.json()) : null;
     } catch (e: any) {
       console.warn('gmailScan: skipped a message:', e?.message || e);
+      return null;
     }
-  }
+  });
+  const messages: NormalizedMessage[] = hydrated.filter((m): m is NormalizedMessage => m !== null);
   return { messages };
 }
 

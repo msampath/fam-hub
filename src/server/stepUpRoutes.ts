@@ -6,8 +6,6 @@ import { requireAuth } from './middleware';
 
 const STEPUP_VERIFY_PER_MIN = Number(process.env.STEPUP_VERIFY_PER_MIN) || 5;
 const stepUpHits = new Map<string, { count: number; resetAt: number }>();
-const STEPUP_LOCK_MAX_FAILS = 5;
-const STEPUP_LOCK_MS = 10 * 60_000;
 const stepUpFails = new Map<string, { fails: number; lockUntil: number }>();
 const STEPUP_SET_PER_5MIN = Number(process.env.STEPUP_SET_PER_5MIN) || 3;
 const stepUpSetHits = new Map<string, { count: number; resetAt: number }>();

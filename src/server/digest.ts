@@ -13,6 +13,7 @@ import { buildMemberSections, buildRichNudges } from '../utils/personalDigest';
 import { buildRoutineDrafts } from '../utils/routineMiner';
 import { callGeminiJSON } from './gemini';
 import { fetchWeatherDaily, fetchAirQualityDaily } from './grounding';
+import { SUPABASE_URL } from './config';
 import type { CalendarEvent, Chore, FamilyMember, LedgerEntry, Goal, ShoppingItem } from '../types';
 
 const AGENT_BASE_URL = (process.env.AGENT_BASE_URL || 'http://127.0.0.1:8080').replace(/\/+$/, '');
@@ -59,7 +60,7 @@ export async function runDailyDigest(): Promise<void> {
     console.log('[digest] tick — not configured (needs SUPABASE_SERVICE_ROLE_KEY + RESEND_API_KEY); skipping.');
     return;
   }
-  const admin = createClient(process.env.VITE_SUPABASE_URL || '', serviceKey, { auth: { persistSession: false } });
+  const admin = createClient(SUPABASE_URL, serviceKey, { auth: { persistSession: false } });
   const now = new Date();
   const pad = (n: number) => String(n).padStart(2, '0');
   const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
@@ -72,7 +73,12 @@ export async function runDailyDigest(): Promise<void> {
     ].map((e: any) => String(e || '').trim()).filter((e: string) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e))));
     if (!prefs?.enabled || !recipients.length) continue;
     if (!shouldRunDigestNow(now, Number(prefs.sendHour ?? 7), prefs.lastRunDate || null, today)) continue;
-    await admin.from('family_data').upsert(familyDataRow(row.household_id, 'digestprefs', [{ ...prefs, lastRunDate: today }]), { onConflict: FAMILY_DATA_CONFLICT });
+    // Re-read THIS household's prefs right before writing — narrows the window since the batch read
+    // above (taken before every OTHER household in this run was processed) so a user's own edit in the
+    // meantime (e.g. disabling the digest) isn't reverted by the stale `enabled`/fields we'd otherwise spread.
+    const { data: freshPrefsRow } = await admin.from('family_data').select('data').eq('household_id', row.household_id).eq('data_key', 'digestprefs').maybeSingle();
+    const freshPrefs = Array.isArray(freshPrefsRow?.data) ? freshPrefsRow.data[0] : prefs;
+    await admin.from('family_data').upsert(familyDataRow(row.household_id, 'digestprefs', [{ ...freshPrefs, lastRunDate: today }]), { onConflict: FAMILY_DATA_CONFLICT });
     const DIGEST_KEYS = ['events', 'chores', 'settings', 'actionledger', 'goals', 'shopping', 'members', 'mealplan'] as const;
     const { data: batchRows } = await admin.from('family_data').select('data_key,data').eq('household_id', row.household_id).in('data_key', [...DIGEST_KEYS]);
     const byKey: Record<string, unknown> = {};
@@ -114,7 +120,12 @@ export async function runDailyDigest(): Promise<void> {
         );
         const allStaged = [...staged, ...planned, ...routineDrafts];
         if (allStaged.length) {
-          const merged = [...ledger, ...allStaged].slice(-LEDGER_CAP);
+          // Re-read the ledger right before writing — narrows the window since the batch read above:
+          // the weather + Gemini planner calls in between can take real seconds, during which a parent
+          // could have approved/rejected an entry in the app, and this upsert must not revert that.
+          const { data: freshLedgerRow } = await admin.from('family_data').select('data').eq('household_id', row.household_id).eq('data_key', 'actionledger').maybeSingle();
+          const freshLedger = freshLedgerRow ? asTypedArray<LedgerEntry>(freshLedgerRow.data) : ledger;
+          const merged = [...freshLedger, ...allStaged].slice(-LEDGER_CAP);
           await admin.from('family_data').upsert(familyDataRow(row.household_id, 'actionledger', merged), { onConflict: FAMILY_DATA_CONFLICT });
           stagedCount = allStaged.length;
         }

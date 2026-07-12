@@ -6,7 +6,7 @@ import {
   buildCartAddBody, KROGER_MATCH_SCHEMA, krogerSearchTerm, krogerFallbackTerm, type ProductCandidate,
 } from '../utils/krogerApi';
 import { callGeminiJSON } from './gemini';
-import { fetchWithTimeout } from './fetchUtils';
+import { fetchWithTimeout, mapWithConcurrency } from './fetchUtils';
 import { requireAuth, aiRateLimit } from './middleware';
 
 const KROGER_CLIENT_ID = process.env.KROGER_CLIENT_ID || '';
@@ -116,7 +116,11 @@ krogerRouter.post('/match', requireAuth, aiRateLimit, async (req, res) => {
       if (!r.ok) { console.warn(`[kroger] product search HTTP ${r.status} for term "${term}"`); return null; }
       return shapeProductCandidates(await r.json().catch(() => ({})));
     };
-    for (const item of items) {
+    // Up to 5 items searched concurrently (was strictly serial — up to ~50 sequential product-search
+    // round-trips per list, 7-15s of latency before the AI match even starts). Each item's own
+    // primary-term + optional-fallback-retry sequence is unchanged; different items write to distinct
+    // keys of `candidates`/`searchFailed`, so concurrent writes here are safe (no shared key contention).
+    await mapWithConcurrency(items, 5, async (item: string) => {
       const term = krogerSearchTerm(item);
       let found = term ? await searchProducts(term) : [];
       if (found && !found.length) {
@@ -128,7 +132,7 @@ krogerRouter.post('/match', requireAuth, aiRateLimit, async (req, res) => {
         candidates[item] = found;
         if (!found.length) console.warn(`[kroger] zero candidates for "${item}" (term "${term}") at ${locationId}`);
       }
-    }
+    });
     const matchSystem = 'You match grocery-list items to store products. Choose ONLY from the listed candidates; -1 when none truly is the item.';
     const judge = (subset: string[]) => callGeminiJSON(
       buildMatchPrompt(subset, candidates), matchSystem, KROGER_MATCH_SCHEMA, '{}', undefined, { temperature: 0.2 },

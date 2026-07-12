@@ -8,7 +8,7 @@
     "node": ">=22.5"
   },
   "scripts": {
-    "dev": "tsx -r dotenv/config server.ts",
+    "dev": "tsx server.ts",
     "mcp": "tsx src/mcp/server.ts",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs && npm run build:mcp",
     "build:mcp": "esbuild src/mcp/server.ts --bundle --platform=node --format=cjs --packages=external --outfile=dist/mcp-server.cjs",
@@ -58,7 +58,6 @@
     "eslint": "^10.7.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "jsdom": "^25.0.1",
-    "playwright": "^1.61.0",
     "supertest": "^7.2.2",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",

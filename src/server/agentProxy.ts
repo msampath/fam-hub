@@ -4,7 +4,7 @@ import { randomUUID } from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 import { aiErrorResponse } from './gemini';
 import { requireAuth, aiRateLimit } from './middleware';
-import { LOCAL_MODE } from './config';
+import { LOCAL_MODE, SUPABASE_URL, SUPABASE_ANON_KEY } from './config';
 import { storageMode, getSqliteAdapter } from '../storage';
 import { SqliteAgentJobStore, SupabaseAgentJobStore, lookupHouseholdId, type AgentJobStore } from '../storage/agentJobs';
 
@@ -26,8 +26,8 @@ async function agentJobStoreFor(req: Request): Promise<AgentJobStore | null> {
   if (LOCAL_MODE) return new SqliteAgentJobStore(getSqliteAdapter(), req.householdId!);
   const token = String(req.headers.authorization || '').slice(7);
   const client = createClient(
-    process.env.VITE_SUPABASE_URL || '',
-    process.env.VITE_SUPABASE_ANON_KEY || '',
+    SUPABASE_URL,
+    SUPABASE_ANON_KEY,
     { global: { headers: { Authorization: `Bearer ${token}` } }, auth: { persistSession: false, autoRefreshToken: false } },
   );
   const hid = await lookupHouseholdId(client);

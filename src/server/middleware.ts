@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
-import { LOCAL_MODE } from './config';
+import { LOCAL_MODE, SUPABASE_URL } from './config';
 import { verifySession } from '../storage/localAuth';
 import { getSqliteAdapter } from '../storage';
 import { getSessionSecret } from '../storage/boxConfig';
@@ -9,9 +9,12 @@ import { checkRateWindow, pruneExpired } from './rateLimit';
 // ── Auth: verify the caller's JWT locally (no per-request Supabase round-trip) ──
 // Cloud mode: verify the Supabase-issued JWT signature against the project's JWKS endpoint.
 // createRemoteJWKSet caches keys and auto-refetches on unknown kid (handles rotation).
-const jwks = LOCAL_MODE
+// Guarded on SUPABASE_URL being non-empty: constructing `new URL('')` would throw an opaque TypeError
+// at import time, pre-empting startServer()'s clear FATAL "missing required env var" message (which
+// runs later — this module is imported well before that check ever gets a chance to run).
+const jwks = (LOCAL_MODE || !SUPABASE_URL)
   ? null
-  : createRemoteJWKSet(new URL(`${process.env.VITE_SUPABASE_URL}/auth/v1/.well-known/jwks.json`));
+  : createRemoteJWKSet(new URL(`${SUPABASE_URL}/auth/v1/.well-known/jwks.json`));
 
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   const header = req.headers.authorization || '';

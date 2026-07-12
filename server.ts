@@ -1,13 +1,18 @@
+// MUST be the first import: several modules below (src/server/config.ts's storageMode(), gemini.ts,
+// kroger.ts, etc.) read process.env at their own module-scope (import-time), not inside a function —
+// so .env must be loaded before ANY of them are imported. A static import's side effect runs at the
+// point it's declared, in file order, regardless of where esbuild/tsx places it in the bundle — so this
+// one line, first, guarantees the order for `npm run dev`, `npm start` (the esbuild bundle), AND vitest.
+import 'dotenv/config';
 import express from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import compression from 'compression';
 import helmet from 'helmet';
 import path from 'path';
 import { readFileSync, existsSync, promises as fsp } from 'node:fs';
-import dotenv from 'dotenv';
 import { randomUUID, timingSafeEqual, createHash } from 'crypto';
 import { Type } from '@google/genai';
-import { createClient, type User } from '@supabase/supabase-js';
+import type { User } from '@supabase/supabase-js';
 // NOTE: `vite` is imported DYNAMICALLY in the dev branch below (not here) so it can be a devDependency and
 // stay out of the production runtime image — the dev middleware never loads in production.
 import { buildCopilotPrompt, COPILOT_SYSTEM, COPILOT_HARNESS_SYSTEM, COPILOT_SCHEMA } from './src/utils/copilotPrompt';
@@ -46,7 +51,7 @@ import { buildPlacesFacts, indexedPlaces, parseDistanceConstraint, detectPlacesI
 import { buildEventsFacts, indexedEvents } from './src/utils/eventsFacts';
 import { cleanHTML, callGeminiJSON, CALENDAR_EVENT_SCHEMA, aiErrorResponse } from './src/server/gemini';
 import { fetchWithTimeout } from './src/server/fetchUtils';
-import { LOCAL_MODE, STORAGE_MODE, IS_PRODUCTION, PORT } from './src/server/config';
+import { LOCAL_MODE, STORAGE_MODE, IS_PRODUCTION, PORT, SUPABASE_URL, SUPABASE_ANON_KEY } from './src/server/config';
 import { requireAuth, aiRateLimit, preAuthThrottle } from './src/server/middleware';
 import { withinDataFetchQuota, fetchWeatherDaily, fetchAirQualityDaily, fetchPollenDaily, fetchNearbyPlaces, attachTravelTimes, fetchLocalEvents, parseUsZip } from './src/server/grounding';
 import { runDailyDigest, startDigestScheduler, briefingToText, composeBriefingViaAgent } from './src/server/digest';
@@ -58,7 +63,7 @@ import { hasUsableText } from './src/utils/pdfText';
 // Single-click LAN appliance: local SQLite storage + local household auth (no Supabase). See src/storage/.
 import { storageMode, getSqliteAdapter } from './src/storage';
 import { handleDataGet, handleDataSave, handleDataLoadAll } from './src/storage/dataApi';
-import { verifySession, signSession, newSession, isValidPassphrase } from './src/storage/localAuth';
+import { signSession, newSession, isValidPassphrase } from './src/storage/localAuth';
 import { getOrCreateHouseholdId, getSessionSecret, isHouseholdConfigured, setHouseholdPassphrase, checkHouseholdPassphrase, changeHouseholdPassphrase } from './src/storage/boxConfig';
 // Pure helpers extracted to src/server/ — imported for internal use, re-exported for test consumers.
 import { checkRateWindow, pruneExpired } from './src/server/rateLimit';
@@ -73,10 +78,8 @@ export type { GroundingFact } from './src/server/copilotHelpers';
 export { hashStepUpPin, verifyStepUpPin, isValidPin, nextPinLockEntry } from './src/server/stepUpPin';
 export { parseUsZip } from './src/server/grounding';
 
-dotenv.config();
-
 // Type req.user (set by requireAuth) via Express declaration merging, so call sites use a typed
-// `req.user` instead of `req.user`.
+// `req.user: User` instead of an untyped `req.user: any`.
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
@@ -98,16 +101,18 @@ if (!LOCAL_MODE) app.set('trust proxy', 1);
 // frame protection, etc. The CSP (prod only) caps XSS blast radius: scripts/styles/connections are
 // pinned to self + Supabase; no inline/eval scripts (the Vite build emits none — verified in
 // dist/index.html); images allow Google avatars + data URIs.
-const supaUrl = process.env.VITE_SUPABASE_URL || '';
-const supaConnect = supaUrl ? [supaUrl, supaUrl.replace(/^http/, 'ws')] : []; // https→wss for realtime
+const supaConnect = SUPABASE_URL ? [SUPABASE_URL, SUPABASE_URL.replace(/^http/, 'ws')] : []; // https→wss for realtime
 // The prod static serve injects ONE inline script — the runtime web config (see the static-serve block:
 // "build once, deploy anywhere"). Allow exactly that script by CSP hash; everything else stays inline-free.
 // The content is env-derived and fixed for the process lifetime, and the injection site uses this SAME
 // constant, so the hash can never drift from what's served. Without this, script-src 'self' blocks the
 // injection and a prebuilt image (no baked VITE_*) can't reach Supabase at all.
+// This script is SERVER-authored (not Vite build-time env exposure), so it can resolve the same
+// SUPABASE_URL/SUPABASE_ANON_KEY fallback the rest of the cloud-mode boot path uses, not just the
+// VITE_-prefixed pair — a SUPABASE_URL-only deploy must reach the browser too, not just the server.
 const APP_CONFIG_SCRIPT = `window.__APP_CONFIG__=${JSON.stringify({
-  supabaseUrl: process.env.VITE_SUPABASE_URL || '',
-  supabaseAnonKey: process.env.VITE_SUPABASE_ANON_KEY || '',
+  supabaseUrl: SUPABASE_URL,
+  supabaseAnonKey: SUPABASE_ANON_KEY,
 }).replace(/</g, '\\u003c')}`;
 const APP_CONFIG_SCRIPT_SHA256 = `'sha256-${createHash('sha256').update(APP_CONFIG_SCRIPT).digest('base64')}'`;
 app.use(helmet({
@@ -137,6 +142,16 @@ app.use(helmet({
   crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' }, // keep an OAuth popup's opener working
 }));
 
+// Auth middleware (requireAuth, aiRateLimit, preAuthThrottle) → src/server/middleware.ts
+// Scoped to /api ONLY: it caps the pre-auth token-verify flood, and every requireAuth route is under
+// /api. Mounting it globally would also count static assets + Vite dev modules (hundreds per page load)
+// against the per-IP cap and 429 the app's own bundle → blank page.
+// MOUNTED BEFORE the body parser below: preAuthThrottle only reads req.ip, never req.body, so a
+// throttled/unauthenticated request gets 429'd before its body is ever buffered or JSON.parsed —
+// otherwise an unauthenticated flood of large (up to 10mb on upload routes) bodies would pay the full
+// parse cost on every request, including the ones that end up 429'd.
+app.use('/api', preAuthThrottle);
+
 const UPLOAD_ROUTES = new Set([
   '/api/parse-pdf', '/api/extract-pdf-text', '/api/extract-docx-text',
   '/api/extract-xlsx-text', '/api/vision-scan-pantry', '/api/photos/upload',
@@ -146,12 +161,6 @@ const smallBody = express.json({ limit: '256kb' });
 app.use((req, res, next) => {
   (UPLOAD_ROUTES.has(req.path) ? bigBody : smallBody)(req, res, next);
 });
-
-// Auth middleware (requireAuth, aiRateLimit, preAuthThrottle) → src/server/middleware.ts
-// Scoped to /api ONLY: it caps the pre-auth token-verify flood, and every requireAuth route is under
-// /api. Mounting it globally would also count static assets + Vite dev modules (hundreds per page load)
-// against the per-IP cap and 429 the app's own bundle → blank page.
-app.use('/api', preAuthThrottle);
 
 // ── LAN appliance (LOCAL_MODE): household passphrase auth + SQLite data API ──────
 // On the single-click box there's no Supabase: the browser does first-run setup (set a household passphrase),
@@ -238,6 +247,12 @@ app.get('/api/data', requireAuth, async (req: Request, res: Response) => {
 import { isBlockedIp, assertSafeUrl, safeFetch } from './src/utils/ssrfGuard';
 export { isBlockedIp, assertSafeUrl, safeFetch };
 
+// Distinguishes an SSRF/validation rejection (thrown by safeFetch/assertSafeUrl) from a genuine network
+// failure, by message. Shared by /api/parse-calendar and /api/extract-url-text, which each surface the
+// two cases differently (throw-and-rewrap vs. a direct 400/502 response).
+const isSsrfRejection = (message: unknown): boolean =>
+  /allowed|private or local|valid URL|Too many redirects/i.test(String(message || ''));
+
 // Gemini/LLM engine (SDK init, callGeminiJSON, cleanHTML, aiErrorResponse, Ollama, fallback chain) → src/server/gemini.ts
 
 // Copilot helpers (ICS parser, action sanitization, suggestion resolver) → src/server/copilotHelpers.ts
@@ -246,6 +261,17 @@ export { isBlockedIp, assertSafeUrl, safeFetch };
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
 });
+
+// Shared by parse-calendar / parse-pdf / parse-text: validate the model's raw extracted events (real
+// ISO dates within ±1yr only — drops an invented/garbled date) and tag each with a source-prefixed id
+// + its category. The only per-caller difference is the id prefix, so each source stays distinguishable.
+function tagExtractedEvents(parsedEvents: unknown, category: string, idPrefix: string) {
+  return validateExtractedEvents(Array.isArray(parsedEvents) ? parsedEvents : [], new Date().toLocaleDateString('en-CA')).map((evt: any) => ({
+    ...evt,
+    id: idPrefix + randomUUID(),
+    category: evt.category || category
+  }));
+}
 
 /**
  * Endpoint to parse a given URL calendar feed (ICS or HTML).
@@ -272,7 +298,7 @@ app.post('/api/parse-calendar', requireAuth, aiRateLimit, async (req, res) => {
       });
     } catch (fetchErr: any) {
       // Surface SSRF/validation rejections with their specific message; only wrap genuine network failures.
-      if (/allowed|private or local|valid URL|Too many redirects/i.test(fetchErr?.message || '')) {
+      if (isSsrfRejection(fetchErr?.message)) {
         throw fetchErr;
       }
       throw new Error(`Connection failed when reaching "${url}". Fastest fix: copy the events text from the page and paste it into the "Paste Text" tab, or save the page as a PDF and use the "Upload PDF Calendar" tab.`);
@@ -326,11 +352,7 @@ ${cleanedText}
     );
     // Add unique string IDs. Validator (Phase-3): real ISO dates within ±1yr only — a weak model's
     // "next Tuesday" / invented-year events get dropped here, not imported.
-    const eventsWithIds = validateExtractedEvents(Array.isArray(parsedEvents) ? parsedEvents : [], new Date().toLocaleDateString('en-CA')).map((evt: any) => ({
-      ...evt,
-      id: 'ai-' + randomUUID(),
-      category: evt.category || category
-    }));
+    const eventsWithIds = tagExtractedEvents(parsedEvents, category, 'ai-');
 
     return res.json({ events: eventsWithIds, format: 'html-scraped' });
 
@@ -377,11 +399,7 @@ app.post('/api/parse-pdf', requireAuth, aiRateLimit, async (req, res) => {
       "You are a precise parsing model. Extract school schedules, summer programs, and calendar listings from the attached file into accurate JSON. Ensure exact dates. If years are not explicitly declared, assume 2026. Return a schema-compliant array.",
       CALENDAR_EVENT_SCHEMA,
     );
-    const eventsWithIds = validateExtractedEvents(Array.isArray(parsedEvents) ? parsedEvents : [], new Date().toLocaleDateString('en-CA')).map((evt: any) => ({
-      ...evt,
-      id: 'pdf-' + randomUUID(),
-      category: evt.category || category
-    }));
+    const eventsWithIds = tagExtractedEvents(parsedEvents, category, 'pdf-');
 
     return res.json({ events: eventsWithIds, format: 'pdf-scraped' });
 
@@ -523,9 +541,8 @@ app.post('/api/extract-url-text', requireAuth, aiRateLimit, async (req, res) => 
       });
     } catch (fetchErr: any) {
       // safeFetch throws plain Errors, so we distinguish an SSRF/validation rejection (→ 400, surface the
-      // specific reason) from a genuine network failure (→ 502) by message. NOTE: these substrings must track
-      // the messages thrown in safeFetch/assertSafeUrl — mirrors the same guard in /api/parse-calendar.
-      if (/allowed|private or local|valid URL|Too many redirects/i.test(fetchErr?.message || '')) {
+      // specific reason) from a genuine network failure (→ 502) by message.
+      if (isSsrfRejection(fetchErr?.message)) {
         return res.status(400).json({ error: fetchErr.message });
       }
       return res.status(502).json({ error: `Could not reach "${url}".` });
@@ -558,10 +575,15 @@ app.post('/api/extract-url-text', requireAuth, aiRateLimit, async (req, res) => 
  */
 app.post('/api/parse-text', requireAuth, aiRateLimit, async (req, res) => {
   try {
-    const { calendarText, category = 'School' } = req.body;
+    const { category = 'School' } = req.body;
+    let calendarText = String(req.body?.calendarText || '');
     if (!calendarText || calendarText.trim().length === 0) {
       return res.status(400).json({ error: 'Calendar text content is required.' });
     }
+    // Capped like every sibling extracted-text endpoint (PDF/DOCX/XLSX/URL, all .slice(0, 20000)) — this
+    // one is pasted directly by the client with no upload-size backstop, so an uncapped value here is an
+    // unbounded prompt straight onto the owner-funded Gemini key.
+    calendarText = calendarText.slice(0, 20000);
 
     console.log(`Sending pasted calendar text of size ${calendarText.length} to Gemini 3.5-flash`);
 
@@ -578,11 +600,7 @@ ${calendarText}
       "You are a precise parsing model. Extract school schedules, summer programs, and calendar listings from raw text into accurate JSON. Ensure exact dates. If years are not explicitly declared, assume 2026. Return a schema-compliant array.",
       CALENDAR_EVENT_SCHEMA,
     );
-    const eventsWithIds = validateExtractedEvents(Array.isArray(parsedEvents) ? parsedEvents : [], new Date().toLocaleDateString('en-CA')).map((evt: any) => ({
-      ...evt,
-      id: 'text-' + randomUUID(),
-      category: evt.category || category
-    }));
+    const eventsWithIds = tagExtractedEvents(parsedEvents, category, 'text-');
 
     return res.json({ events: eventsWithIds, format: 'text-scraped' });
 
@@ -598,10 +616,13 @@ ${calendarText}
  */
 app.post('/api/parse-recipe', requireAuth, aiRateLimit, async (req, res) => {
   try {
-    const { text } = req.body;
+    let text = String(req.body?.text || '');
     if (!text || text.trim().length === 0) {
       return res.status(400).json({ error: 'A dish name or recipe text is required.' });
     }
+    // A dish name is normally a few words — but this field is free text with no upload-size backstop,
+    // so cap it like every sibling extracted-text endpoint (.slice(0, 20000)) against a pasted-in essay.
+    text = text.slice(0, 20000);
     // Household-defined store lists (Phase-5): the client sends its live list; junk/absent → defaults.
     const stores = sanitizeStoreList(req.body?.stores);
     const storeLine = storeRoutingLine(stores);
@@ -1058,10 +1079,15 @@ app.post('/api/generate-chores', requireAuth, aiRateLimit, async (req, res) => {
  */
 app.post('/api/copilot', requireAuth, aiRateLimit, async (req, res) => {
   try {
-    const { events, prompt, familyMembers = [], home, visitLog = [], chatHistory = [], documents = [], mealplan = [] } = req.body;
+    const { events, familyMembers = [], home, visitLog = [], chatHistory = [], documents = [], mealplan = [] } = req.body;
+    let prompt = req.body?.prompt;
     if (!prompt) {
       return res.status(400).json({ error: 'Prompt is required' });
     }
+    // Capped like every extracted-text endpoint (.slice(0, 20000)) — this is the highest-traffic AI
+    // route and its critic/retry passes can resend the full prompt up to ~3x, so an uncapped chat
+    // message here is the largest token-cost-DoS surface on the owner-funded Gemini key.
+    prompt = String(prompt).slice(0, 20000);
 
     // Accept either name strings or full member objects (be tolerant of either client shape). Label with
     // age when known ("Leo (8)") so the copilot tailors activities by real age instead of guessing.
@@ -1471,8 +1497,8 @@ async function startServer() {
   const required: [string, boolean][] = [
     // Supabase creds are required ONLY in cloud mode. The LAN appliance (LOCAL_MODE = SQLite) has no
     // Supabase, so demanding them would block the box from booting — skip them when LOCAL_MODE.
-    ['VITE_SUPABASE_URL', LOCAL_MODE || !!process.env.VITE_SUPABASE_URL],
-    ['VITE_SUPABASE_ANON_KEY', LOCAL_MODE || !!process.env.VITE_SUPABASE_ANON_KEY],
+    ['SUPABASE_URL (or VITE_SUPABASE_URL)', LOCAL_MODE || !!SUPABASE_URL],
+    ['SUPABASE_ANON_KEY (or VITE_SUPABASE_ANON_KEY)', LOCAL_MODE || !!SUPABASE_ANON_KEY],
     ['GEMINI_API_KEY', !!process.env.GEMINI_API_KEY || localLlm], // optional only if a local model is the primary
   ];
   const missing = required.filter(([, ok]) => !ok).map(([name]) => name);
@@ -1529,7 +1555,11 @@ async function startServer() {
     // anywhere"). The client reads window.__APP_CONFIG__ (falling back to import.meta.env in dev). Cached:
     // the server env is fixed for the process lifetime.
     let indexHtmlInjected: string | null = null;
-    app.get('*', (_req, res) => {
+    app.get('*', (req, res, next) => {
+      // Exclude /api: an unmatched or wrong-method /api/* request (typo'd path, or GET on a POST-only
+      // route) would otherwise fall through to this SPA shell and get a misleading 200 HTML page
+      // instead of a proper 404 — let it continue past this handler to the real 404 instead.
+      if (req.path.startsWith('/api')) return next();
       if (indexHtmlInjected == null) {
         const raw = readFileSync(path.join(distPath, 'index.html'), 'utf8');
         // APP_CONFIG_SCRIPT is the module-level constant the CSP script-src hash was computed from —
@@ -1543,6 +1573,10 @@ async function startServer() {
   // Cloud Scheduler trigger for the daily digest: an external cron POSTs here (one trigger source → no
   // multi-instance double-send, the issue the in-process interval has). Gated by a shared secret header so
   // only the scheduler can fire it. Per-household work is best-effort + logged inside runDailyDigest.
+  // Reentrancy guard: a Cloud Scheduler retry on a slow response (or two triggers landing close
+  // together) could otherwise start a second run while the first is still in flight, double-sending
+  // emails and double-staging ledger entries for the same households.
+  let digestRunning = false;
   app.post('/internal/run-digest', async (req, res) => {
     const secret = process.env.DIGEST_TRIGGER_SECRET;
     if (!secret) return res.status(404).json({ error: 'Digest trigger not enabled.' });
@@ -1555,12 +1589,16 @@ async function startServer() {
     // (no length-leak from the buffer-length check timingSafeEqual would otherwise require).
     const ok = timingSafeEqual(createHash('sha256').update(provided).digest(), createHash('sha256').update(secret).digest());
     if (!ok) return res.status(401).json({ error: 'Unauthorized.' });
+    if (digestRunning) return res.json({ ok: true, skipped: 'already running' });
+    digestRunning = true;
     try {
       await runDailyDigest();
       return res.json({ ok: true });
     } catch (e: any) {
       console.error('[digest] /internal/run-digest failed:', e?.message || e);
       return res.status(500).json({ error: 'Digest run failed.' });
+    } finally {
+      digestRunning = false;
     }
   });
 
@@ -1591,7 +1629,18 @@ async function startServer() {
 
   process.on('SIGTERM', () => {
     console.log('SIGTERM received — draining connections...');
+    // Hard deadline: server.close() alone only stops NEW connections and waits for in-flight ones to
+    // finish — a hung request (e.g. the digest's composeBriefingViaAgent call, which itself waits up
+    // to 45s — src/server/digest.ts) could otherwise stall the drain indefinitely. Force-exit past a
+    // reasonable ceiling rather than hang until the orchestrator's SIGKILL. unref'd + cleared on a
+    // clean drain so this timer can never be the reason the process outlives its own shutdown.
+    const forceExitTimer = setTimeout(() => {
+      console.error('Graceful drain timed out after 60s — forcing exit.');
+      process.exit(1);
+    }, 60_000);
+    forceExitTimer.unref();
     server.close(() => {
+      clearTimeout(forceExitTimer);
       console.log('All connections drained — exiting.');
       process.exit(0);
     });

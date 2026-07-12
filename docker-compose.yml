@@ -35,8 +35,11 @@ services:
       - "8080:8080"
     environment:
       PORT: 8080
-      # ADK / Gemini (AI Studio key). Set GOOGLE_API_KEY to your Gemini key.
-      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+      # ADK / Gemini (AI Studio key) — ONE key powers both containers, matching .env.example's single
+      # GEMINI_API_KEY promise. The agent aliases it to GOOGLE_API_KEY internally (api.py); GOOGLE_API_KEY
+      # is passed through too so a key set that way directly still works (Vertex-style callers).
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
       GOOGLE_GENAI_USE_VERTEXAI: "FALSE"
       CONCIERGE_MODEL: ${CONCIERGE_MODEL:-gemini-2.5-flash}
       # CORS allow-list for the browser bundle's /chat calls (the web origin). "*" allows any (demo default).

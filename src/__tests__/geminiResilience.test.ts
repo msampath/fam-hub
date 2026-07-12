@@ -171,6 +171,19 @@ describe('pruneExpired (rate/quota Map eviction — prevents unbounded growth)',
     pruneExpired(m, 100_001); // within 60s — skipped
     expect(m.size).toBe(300);
   });
+
+  it('tracks the prune interval PER MAP — pruning one map does not starve a sibling map', () => {
+    resetPruneTimer();
+    const mapA = new Map<string, { count: number; resetAt: number }>();
+    const mapB = new Map<string, { count: number; resetAt: number }>();
+    for (let i = 0; i < 300; i++) { mapA.set('a' + i, { count: 1, resetAt: 100 }); mapB.set('b' + i, { count: 1, resetAt: 100 }); }
+    pruneExpired(mapA, 100_000); // mapA prunes first
+    expect(mapA.size).toBe(0);
+    // A shared _lastPrune would make this a no-op (only 1ms after mapA's prune) — it must run anyway,
+    // since mapB has never been pruned before.
+    pruneExpired(mapB, 100_001);
+    expect(mapB.size).toBe(0);
+  });
 });
 
 describe('parseUsZip (home-location input)', () => {
