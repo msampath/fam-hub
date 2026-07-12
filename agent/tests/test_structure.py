@@ -112,6 +112,35 @@ def test_skills_load_from_folders():
     assert agent.SPECIALIST_TOOLS == {n: list(s.tools) for n, s in load_skills().items()}
 
 
+def test_load_skills_skips_a_malformed_skill_instead_of_crashing(tmp_path, monkeypatch, caplog):
+    # Regression: a single broken SKILL.md (bad frontmatter, or missing the required `description` field)
+    # used to raise out of load_skills() — called at import time — taking down the ENTIRE agent. It must
+    # instead log a warning naming the broken skill and keep loading the others.
+    import logging
+
+    from concierge import skills as skills_mod
+
+    (tmp_path / "good_agent").mkdir()
+    (tmp_path / "good_agent" / "SKILL.md").write_text(
+        "---\ndescription: a fine skill\ntools: [get_events]\n---\nPersona body.", encoding="utf-8"
+    )
+    (tmp_path / "no_frontmatter_agent").mkdir()
+    (tmp_path / "no_frontmatter_agent" / "SKILL.md").write_text("no frontmatter here at all", encoding="utf-8")
+    (tmp_path / "missing_description_agent").mkdir()
+    (tmp_path / "missing_description_agent" / "SKILL.md").write_text(
+        "---\ntools: [get_events]\n---\nPersona body.", encoding="utf-8"
+    )
+
+    monkeypatch.setattr(skills_mod, "SKILLS_DIR", tmp_path)
+    with caplog.at_level(logging.WARNING):
+        loaded = skills_mod.load_skills()  # must not raise
+
+    assert set(loaded) == {"good_agent"}
+    warned_names = " ".join(rec.message for rec in caplog.records)
+    assert "no_frontmatter_agent" in warned_names
+    assert "missing_description_agent" in warned_names
+
+
 def test_goal_crud_complete():
     # delete_goal completes goal CRUD (the agent could create/update but not hard-delete). outings_agent
     # owns set_goal, so it also owns delete_goal; ROOT + OUTINGS instruct removing a goal, not just abandoning.

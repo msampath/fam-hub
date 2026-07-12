@@ -48,7 +48,9 @@ the full deploy walkthrough is [`docs/cloud-run-deploy.md`](./docs/cloud-run-dep
 
 ## Per-commit gates
 
-Every commit must pass, locally (there is no PR CI yet — the only workflow builds appliance images):
+Every commit must pass, locally and in CI — [`appliance-images.yml`](./.github/workflows/appliance-images.yml)
+runs the same gate (lint, vitest, build, plus the keyless agent pytest layer) on every pull request; only a
+push to the default branch or a tag goes on to publish images:
 
 ```bash
 npm run lint && npx vitest run && npm run build

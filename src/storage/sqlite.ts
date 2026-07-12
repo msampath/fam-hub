@@ -117,6 +117,15 @@ export class SqliteAdapter implements StorageAdapter {
     return row ?? null;
   }
 
+  // Bounded cleanup (agentJobs.ts calls this after every insert): delete THIS household's rows older
+  // than the cutoff, so the table doesn't grow unbounded over the life of the box. Mirrors putWebCache's
+  // prune-on-write below.
+  pruneAgentJobs(householdId: string, olderThanIso: string): void {
+    this.db
+      .prepare('DELETE FROM agent_jobs WHERE household_id = ? AND created_at < ?')
+      .run(householdId, olderThanIso);
+  }
+
   // Raw cache row (or null). Freshness (the 7-day TTL) is the CALLER's check — one shared pure helper
   // (isCacheFresh) rather than per-backend SQL date math that could drift.
   getWebCache(householdId: string, urlHash: string): { url: string; content: string; fetched_at: string } | null {

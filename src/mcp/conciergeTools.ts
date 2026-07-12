@@ -74,7 +74,7 @@ export function buildToolCtx(today: string, over?: Partial<ToolValidateCtx>): To
 
 const memberArray = { type: 'array', items: { type: 'string' }, description: 'Family member names, or ["Everyone"].' };
 
-// The six state-mutating tools that wrap TOOL_REGISTRY — shape/description only; their `run` is
+// The state-mutating tools that wrap TOOL_REGISTRY — shape/description only; their `run` is
 // synthesized once below from the name (so the tool name isn't repeated as a string literal, which
 // risked a copy-paste mismatch routing to the wrong validator).
 const REGISTRY_TOOL_DEFS: Omit<McpToolDef, 'run'>[] = [
@@ -334,7 +334,7 @@ const REGISTRY_TOOL_DEFS: Omit<McpToolDef, 'run'>[] = [
   },
 ];
 
-// The toolbelt. The six registry tools share one `run` (validate via TOOL_REGISTRY by name);
+// The toolbelt. The REGISTRY_TOOL_DEFS tools share one `run` (validate via TOOL_REGISTRY by name);
 // `home_control` is an HONEST stub (no executor → "unavailable", not a fabricated success). No
 // purchase/checkout/pay tool exists — the no-payment invariant, by design.
 export const MCP_TOOLS: McpToolDef[] = [

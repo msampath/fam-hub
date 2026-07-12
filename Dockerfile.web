@@ -24,7 +24,7 @@ ENV VITE_AGENT_BASE_URL=$VITE_AGENT_BASE_URL
 RUN npm run build
 
 # ---- 2. proddeps: a clean production-only node_modules (esbuild externalizes runtime deps, so the bundled
-#         server.cjs still requires them at runtime — express/helmet/@google/genai/mammoth/xlsx/pdf-parse/...) ----
+#         server.cjs still requires them at runtime — express/helmet/@google/genai/mammoth/xlsx/pdfjs-dist/...) ----
 FROM node:24-bookworm-slim AS proddeps
 WORKDIR /app
 COPY package.json package-lock.json ./

@@ -13,6 +13,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { SqliteAdapter } from './sqlite';
 
+// Bounded growth: rows are never listed/deleted by the routes/worker (see the SCOPE note above), so a
+// fresh insert also prunes THIS household's own rows older than this — otherwise the table grows
+// unboundedly over the life of a deployment. Mirrors src/mcp/persistence.ts's webCachePut prune-on-write.
+const AGENT_JOB_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
 export type AgentJobStatus = 'queued' | 'running' | 'done' | 'error';
 
 export interface AgentJob {
@@ -54,6 +59,8 @@ export class SqliteAgentJobStore implements AgentJobStore {
 
   async insert(id: string, message: string): Promise<void> {
     this.adapter.insertAgentJob(this.householdId, id, message);
+    // Best-effort prune (see AGENT_JOB_MAX_AGE_MS above) — never blocks/breaks job creation.
+    try { this.adapter.pruneAgentJobs(this.householdId, new Date(Date.now() - AGENT_JOB_MAX_AGE_MS).toISOString()); } catch { /* best-effort */ }
   }
 
   async update(id: string, patch: AgentJobPatch): Promise<void> {
@@ -92,6 +99,12 @@ export class SupabaseAgentJobStore implements AgentJobStore {
     // Surfaces "relation agent_jobs does not exist" until the morning migration is pasted — the route
     // turns that into a clean 500, and nothing calls chat-async before the UI wiring lands.
     if (error) throw new Error(`agent_jobs insert failed: ${error.message}`);
+    // Best-effort prune (see AGENT_JOB_MAX_AGE_MS above) — a failure here costs nothing but slightly
+    // slower cleanup, never the job just queued.
+    try {
+      await this.client.from('agent_jobs').delete()
+        .eq('household_id', this.householdId).lt('created_at', new Date(Date.now() - AGENT_JOB_MAX_AGE_MS).toISOString());
+    } catch { /* best-effort */ }
   }
 
   async update(id: string, patch: AgentJobPatch): Promise<void> {

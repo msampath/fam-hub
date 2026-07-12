@@ -8,10 +8,13 @@ loops over `SKILLS` to construct the specialists — so adding a specialist is d
 whole thing is model-agnostic (the model is injected at build time). Dependency-free frontmatter parsing
 (no pyyaml) for our small controlled schema: `key: value`, with `[a, b, c]` for list values.
 """
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
 from .. import safety
+
+logger = logging.getLogger(__name__)
 
 SKILLS_DIR = Path(__file__).resolve().parent
 
@@ -48,14 +51,19 @@ def load_skills() -> dict[str, Skill]:
         md = d / "SKILL.md"
         if not d.is_dir() or not md.exists():
             continue
-        meta, body = _parse_frontmatter(md.read_text(encoding="utf-8"))
-        guard = safety.EXTERNAL_CONTENT_GUARD if "external_content" in meta.get("guards", []) else ""
-        skills[d.name] = Skill(
-            name=d.name,
-            description=meta["description"],
-            tools=tuple(meta.get("tools", [])),
-            instruction=body + "\n" + guard + safety.SAFETY,
-        )
+        try:
+            meta, body = _parse_frontmatter(md.read_text(encoding="utf-8"))
+            guard = safety.EXTERNAL_CONTENT_GUARD if "external_content" in meta.get("guards", []) else ""
+            skills[d.name] = Skill(
+                name=d.name,
+                description=meta["description"],
+                tools=tuple(meta.get("tools", [])),
+                instruction=body + "\n" + guard + safety.SAFETY,
+            )
+        except Exception as e:
+            # One malformed SKILL.md (bad frontmatter, a missing required field, ...) must not take the
+            # whole agent down at import time — skip just this specialist and keep loading the rest.
+            logger.warning("Skipping skill %r: malformed SKILL.md (%s)", d.name, e)
     return skills
 
 
