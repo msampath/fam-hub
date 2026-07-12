@@ -16,9 +16,17 @@ import sys
 
 import pytest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Put the REPO ROOT (not agent/ itself) on sys.path so `agent` resolves as a real package (Python's
+# implicit namespace packages, PEP 420 — matches how the Dockerfile/uvicorn path already imports this
+# service: `uvicorn agent.api:app` from the repo root). This matters because api.py uses a package-
+# relative import (`from .concierge.agent import ...`) — importing it as a bare top-level `api` (the old
+# scheme: agent/ on sys.path, `import api`) gave it no parent package, so that relative import crashed
+# with "attempted relative import with no known parent package" the one time this was actually exercised
+# (previously masked: it only runs behind the _HAS_KEY guard below, which is normally False).
+_AGENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # .../agent
+sys.path.insert(0, os.path.dirname(_AGENT_DIR))  # .../  (agent's parent — the repo root)
 
-from concierge import agent, prompts, bridge  # noqa: E402
+from agent.concierge import agent, prompts, bridge  # noqa: E402
 
 # Tools that would move money / complete an order. The agent must NEVER hold one (no-payment invariant).
 PAYMENT_TOOLS = {"pay", "purchase", "checkout", "buy", "order", "transfer", "complete_payment"}
@@ -110,7 +118,7 @@ def test_router_override_is_ignored_on_an_explicit_model_attempt():
 def test_local_head_leads_the_chain_only_when_enabled(monkeypatch):
     if not _HAS_KEY:
         pytest.skip("importing agent.api needs a Gemini key (boot guard)")
-    import api  # agent/api.py — resolvable because tests add agent/ to sys.path
+    from agent import api  # agent/api.py — a real package-relative import (repo root is on sys.path)
     monkeypatch.setattr(api, "LOCAL_ENABLED", True)
     chain = api.build_model_chain()
     assert chain[0] == api.LOCAL_TOKEN and chain[1] is None
@@ -124,7 +132,7 @@ def test_extract_bearer_reads_visitor_jwt_case_insensitive_scheme():
     # Cloud Run's own IAM gate) — _extract_bearer is the pure parsing step both headers would use.
     if not _HAS_KEY:
         pytest.skip("importing agent.api needs a Gemini key (boot guard)")
-    import api  # agent/api.py — resolvable because tests add agent/ to sys.path
+    from agent import api  # agent/api.py — a real package-relative import (repo root is on sys.path)
     assert api._extract_bearer("Bearer abc.def.ghi") == "abc.def.ghi"
     assert api._extract_bearer("bearer abc.def.ghi") == "abc.def.ghi"  # scheme is case-insensitive
     assert api._extract_bearer("Bearer   ") is None  # empty token after the prefix
