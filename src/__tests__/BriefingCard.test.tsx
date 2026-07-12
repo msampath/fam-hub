@@ -76,4 +76,12 @@ describe('BriefingCard (morning planner surface)', () => {
     expect(await screen.findByText('Soccer at 4pm')).toBeInTheDocument();
     expect(screen.queryByText(/Stage .* in Approvals/)).not.toBeInTheDocument();
   });
+
+  it('surfaces a fetch failure as an error message (not silently dropped)', async () => {
+    const user = userEvent.setup();
+    apiFetch.mockResolvedValueOnce({ ok: false });
+    renderWithBoth(<BriefingCard />);
+    await user.click(screen.getByText(/Preview today/));
+    expect(await screen.findByText('Could not build the briefing. Try again.')).toBeInTheDocument();
+  });
 });

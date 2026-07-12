@@ -88,6 +88,31 @@ describe('GenerateChoresModal', () => {
     expect(container.querySelector('#gen-chore-age-Ava')).toBeTruthy();
   });
 
+  it('rows for two same-named kids use distinct React keys (no duplicate-key warning) in form and preview', async () => {
+    const dup: FamilyMember[] = [
+      { name: 'Alex', role: 'Kid', color: 'sky' },
+      { name: 'Alex', role: 'Kid', color: 'lime' },
+    ];
+    const plan: GeneratedChore[] = [
+      { title: 'Make bed', assignedTo: 'Alex', points: 10, timesPerDay: 1, repeatType: 'daily' },
+    ];
+    const handleGenerateChores = vi.fn(async () => plan);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { container, getByText, getAllByText } = renderWithApp(<GenerateChoresModal />, { familyMembers: dup, handleGenerateChores });
+    const ages = container.querySelectorAll('input[type=number]') as NodeListOf<HTMLInputElement>;
+    expect(ages).toHaveLength(2); // one row per kid — not collapsed by a colliding key
+    fireEvent.change(ages[0], { target: { value: '8' } });
+    fireEvent.change(ages[1], { target: { value: '5' } });
+    fireEvent.click(getByText('Generate plan'));
+    // Assignment is name-keyed (pre-existing, out of scope here), so BOTH same-named groups
+    // legitimately render their own "Make bed" row — the point of this test is that they render
+    // as two distinct (non-colliding) group sections, not that the content itself is deduped.
+    await waitFor(() => expect(getAllByText('Make bed')).toHaveLength(2)); // preview (groups.map) phase
+    const dupKeyWarning = errorSpy.mock.calls.some(args => /same key/i.test(String(args[0])));
+    expect(dupKeyWarning).toBe(false);
+    errorSpy.mockRestore();
+  });
+
   it('closes via setIsGeneratingChoresOpen(false)', () => {
     const setIsGeneratingChoresOpen = vi.fn();
     const { getByText } = renderWithApp(<GenerateChoresModal />, { familyMembers: members, setIsGeneratingChoresOpen });

@@ -1,6 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { User } from '@supabase/supabase-js';
-import { familyDataRow, FAMILY_DATA_CONFLICT } from './utils/familyData';
+import { familyDataRow } from './utils/familyData';
 
 // Runtime config (injected into index.html by the server as window.__APP_CONFIG__) wins, so one built image
 // runs against any backend; fall back to the build-time VITE_* vars in dev (vite serves index.html directly,
@@ -154,6 +154,7 @@ export const verifyStepUpPin = async (pin: string, hash: string, salt: string): 
  * exchanges the stored refresh token for a fresh one via our server endpoint.
  */
 export const getGoogleToken = async (): Promise<string | null> => {
+  if (_mode === 'sqlite') return null; // local appliance: no Google OAuth concept in this mode
   const { data: { session } } = await supabase.auth.getSession();
   if (session?.provider_token) return session.provider_token;
 
@@ -319,12 +320,24 @@ export const saveHouseholdData = async (
     fireStaleRefresh();
     return;
   }
-  // No cached version (first write of this collection): plain upsert, then seed the version for next time.
+  // No cached version (first write of this collection): INSERT (not upsert) so a concurrent first
+  // write from another device (e.g. two tabs on first sign-in) raises a unique-violation instead of
+  // silently clobbering it — same pattern as SupabasePersistence.casWrite in src/mcp/persistence.ts.
+  // The loser converges via the same stale-write refresh used for a lost CAS above, rather than
+  // overwriting the winner.
   const { data: rows, error } = await supabase
     .from('family_data')
-    .upsert(familyDataRow(householdId, key, data), { onConflict: FAMILY_DATA_CONFLICT })
+    .insert(familyDataRow(householdId, key, data))
     .select('updated_at');
-  if (error) { console.error(`Supabase sync failed for "${key}":`, error.message); return; }
+  if (error) {
+    if (error.code === '23505') {
+      console.warn(`[sync] stale write for "${key}" — another writer was ahead; refreshing to the latest.`);
+      fireStaleRefresh();
+      return;
+    }
+    console.error(`Supabase sync failed for "${key}":`, error.message);
+    return;
+  }
   if (rows && rows.length) dataVersions.set(vKey(householdId, key), rows[0].updated_at);
 };
 

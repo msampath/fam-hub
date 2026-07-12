@@ -58,15 +58,18 @@ export default function BriefingCard() {
 
   if (!briefing) {
     return (
-      <button
-        type="button"
-        onClick={loadBriefing}
-        disabled={loading}
-        className="self-center rounded-[12px] px-4 py-2 text-[13px] font-extrabold"
-        style={{ border: `2px solid ${C.indigo}`, boxShadow: brutShadow(C.indigoShadow, 4), background: `${C.indigo}12`, color: C.indigo, opacity: loading ? 0.6 : 1 }}
-      >
-        {loading ? 'Building…' : '☀️ Preview today’s briefing'}
-      </button>
+      <div className="flex flex-col items-center gap-2 self-center">
+        <button
+          type="button"
+          onClick={loadBriefing}
+          disabled={loading}
+          className="rounded-[12px] px-4 py-2 text-[13px] font-extrabold"
+          style={{ border: `2px solid ${C.indigo}`, boxShadow: brutShadow(C.indigoShadow, 4), background: `${C.indigo}12`, color: C.indigo, opacity: loading ? 0.6 : 1 }}
+        >
+          {loading ? 'Building…' : '☀️ Preview today’s briefing'}
+        </button>
+        {error && <div className="text-[12px] font-semibold" style={{ color: C.red }}>{error}</div>}
+      </div>
     );
   }
 

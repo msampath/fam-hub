@@ -1,4 +1,4 @@
-import { useState, type Dispatch, type SetStateAction, type FormEvent } from 'react';
+import { useState, type Dispatch, type SetStateAction } from 'react';
 import { uuid } from '../utils/uuid';
 import { safeParseArray } from './usePersistedCollection';
 import { availableXp } from '../utils/chores';
@@ -10,7 +10,6 @@ export interface UseChores {
   redemptionsList: Redemption[]; setRedemptionsList: Dispatch<SetStateAction<Redemption[]>>;
   xpBankList: XpBankEntry[]; setXpBankList: Dispatch<SetStateAction<XpBankEntry[]>>;
   choreWeekList: { week: string; day?: string }[]; setChoreWeekList: Dispatch<SetStateAction<{ week: string; day?: string }[]>>;
-  handleAddReward: (e: FormEvent) => void;
   handleDeleteReward: (id: string) => void;
   handleRedeemReward: (reward: Reward, memberName: string) => void;
 }
@@ -42,19 +41,6 @@ export function useChores(): UseChores {
     return safeParseArray(saved);
   });
 
-  const [newRewardTitle, setNewRewardTitle] = useState('');
-  const [newRewardCost, setNewRewardCost] = useState(50);
-
-  const handleAddReward = (e: FormEvent) => {
-    e.preventDefault();
-    const title = newRewardTitle.trim();
-    const cost = Number(newRewardCost);
-    if (!title || !cost || cost <= 0) return;
-    setRewardsList(prev => [...prev, { id: 'reward-' + uuid(), title, cost }]);
-    setNewRewardTitle('');
-    setNewRewardCost(50);
-  };
-
   const handleDeleteReward = (id: string) => {
     setRewardsList(prev => prev.filter(r => r.id !== id));
   };
@@ -79,6 +65,6 @@ export function useChores(): UseChores {
     redemptionsList, setRedemptionsList,
     xpBankList, setXpBankList,
     choreWeekList, setChoreWeekList,
-    handleAddReward, handleDeleteReward, handleRedeemReward,
+    handleDeleteReward, handleRedeemReward,
   };
 }

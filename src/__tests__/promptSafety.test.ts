@@ -57,4 +57,16 @@ describe('FACTS blocks neutralize injection in stored text', () => {
     expect(buildMealsFacts([], '2026-06-18')).toBeUndefined();
     expect(buildMealsFacts(undefined, '2026-06-18')).toBeUndefined();
   });
+
+  it('MEALS FACTS does NOT drop the CURRENT week just because a FUTURE week is also planned', () => {
+    // The future week's weekStart sorts after the current week's — picking purely by latest weekStart
+    // would have selected the future week (no entry for today) and silently dropped today's meal.
+    const plans = [
+      { weekStart: '2026-06-15', days: [{ date: '2026-06-18', dish: 'Tonight dinner' }] },
+      { weekStart: '2026-06-22', days: [{ date: '2026-06-23', dish: 'Next week dinner' }] },
+    ];
+    const out = buildMealsFacts(plans, '2026-06-18')!;
+    expect(out).toContain('Tonight dinner');
+    expect(out).not.toContain('Next week dinner');
+  });
 });

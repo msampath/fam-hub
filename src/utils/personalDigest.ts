@@ -5,13 +5,14 @@
 // nothing is invented from vibes. Retail moments deliberately exclude vendor-variable dates
 // (Prime Day moves yearly — an invented date is worse than no nudge).
 import type { CalendarEvent, Chore, FamilyMember } from '../types';
+import { isWholeFamilyTag } from './availability';
 
 const dayNum = (iso: string) => Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)) / 86400000;
 const daysUntil = (from: string, to: string) => dayNum(to) - dayNum(from);
 const eventDate = (e: CalendarEvent) => String(e.start || '').slice(0, 10);
 
 // Per-member "your day": their events today + their chores still open. Members with nothing get no
-// section (an empty "For Max:" is noise). 'Family'-tagged events count for everyone.
+// section (an empty "For Max:" is noise). Whole-family-tagged events ('Everyone'/'Family') count for everyone.
 export function buildMemberSections(
   members: FamilyMember[], events: CalendarEvent[], chores: Chore[], today: string,
 ): string[] {
@@ -19,7 +20,7 @@ export function buildMemberSections(
   for (const m of members || []) {
     const evs = (events || []).filter(e =>
       eventDate(e) === today
-      && (!(e.members || []).length || (e.members || []).includes(m.name) || (e.members || []).includes('Family')));
+      && (!(e.members || []).length || (e.members || []).some(x => x === m.name || isWholeFamilyTag(x))));
     const open = (chores || []).filter(c =>
       c.assignedTo === m.name && (c.completedCount ?? 0) < (c.timesPerDay || 1));
     if (!evs.length && !open.length) continue;

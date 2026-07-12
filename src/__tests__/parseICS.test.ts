@@ -31,12 +31,14 @@ describe('parseICS — all-day exclusive DTEND → inclusive', () => {
   });
 
   // Regression: a UTC ('Z') timestamp must be interpreted as UTC, not as naive local — otherwise it
-  // renders at the wrong time and (across the UTC day boundary) on the WRONG DAY. The parsed local
-  // wall-clock string, read back as local, must equal the original UTC instant.
-  it('interprets a UTC (Z) timed DTSTART as the correct absolute instant', () => {
+  // renders at the wrong time and (across the UTC day boundary) on the WRONG DAY. The output carries
+  // the verbatim UTC wall-clock digits (no zone suffix): deterministic regardless of the machine
+  // running this test's local timezone, unlike a round-trip through Date's LOCAL getters (which would
+  // shift the digits by whatever TZ the process happens to run in).
+  it('interprets a UTC (Z) timed DTSTART as the correct absolute instant, independent of local TZ', () => {
     const [e] = parseICS(ics('BEGIN:VEVENT\nSUMMARY:Webinar\nDTSTART:20260617T010000Z\nDTEND:20260617T020000Z\nEND:VEVENT'));
-    expect(new Date(e.start).getTime()).toBe(Date.UTC(2026, 5, 17, 1, 0, 0));
-    expect(new Date(e.end).getTime()).toBe(Date.UTC(2026, 5, 17, 2, 0, 0));
+    expect(e.start).toBe('2026-06-17T01:00:00');
+    expect(e.end).toBe('2026-06-17T02:00:00');
   });
 
   it('leaves a naive (no-Z) timed DTSTART as local wall-clock, unchanged', () => {

@@ -32,6 +32,20 @@ describe('mergeGoalSteps — re-emitting set_goal must not wipe in-flight progre
     const existing: GoalStep[] = [{ title: 'A', status: 'done' }];
     expect(mergeGoalSteps(existing, undefined)).toBe(existing);
   });
+  it('disambiguates duplicate-titled steps instead of colliding them on the same match', () => {
+    const existing: GoalStep[] = [
+      { title: 'Pack bags', status: 'done' },
+      { title: 'Pack bags', status: 'blocked', ledgerId: 'led-2' },
+    ];
+    const incoming: GoalStep[] = [
+      { title: 'Pack bags', status: 'pending' },
+      { title: 'Pack bags', status: 'pending' },
+    ];
+    expect(mergeGoalSteps(existing, incoming)).toEqual([
+      { title: 'Pack bags', status: 'done' },
+      { title: 'Pack bags', status: 'blocked', ledgerId: 'led-2' },
+    ]);
+  });
 });
 
 describe('blockNextGoalStep — stage a step as "waiting on you"', () => {

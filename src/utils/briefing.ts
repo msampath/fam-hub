@@ -60,8 +60,11 @@ const MEAL_LABEL: Record<string, [string, string]> = {
   dinner: ['Dinner tonight', 'Tomorrow'],
 };
 export function buildDinnerLines(mealPlans: { weekStart?: string; meal?: string; days?: { date: string; dish: string }[] }[] | undefined, today: string): string[] {
-  const sorted = (Array.isArray(mealPlans) ? mealPlans : [])
-    .filter(p => Array.isArray(p?.days))
+  const all = (Array.isArray(mealPlans) ? mealPlans : []).filter(p => Array.isArray(p?.days));
+  // Prefer the plan(s) that actually cover TODAY — picking purely by the latest weekStart silently
+  // dropped THIS week's plan whenever a LATER week was also planned (mirrors copilotHarness.ts's fix).
+  const current = all.filter(p => p.days!.some(d => d?.date === today));
+  const sorted = (current.length ? current : all)
     .sort((a, b) => String(b.weekStart || '').localeCompare(String(a.weekStart || '')));
   const week = sorted[0]?.weekStart;
   const plans = sorted.filter(p => p.weekStart === week);

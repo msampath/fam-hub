@@ -21,12 +21,6 @@ export function useWeather(lat?: number, lng?: number): WeatherNow | null {
   useEffect(() => {
     if (!key || lat == null || lng == null) { setWeather(null); return; }
 
-    const cached = cache.get(key);
-    if (cached && Date.now() - cached.at < TTL_MS) {
-      setWeather(cached.data);
-      return;
-    }
-
     const ctrl = new AbortController();
     let active = true;
     const load = async () => {
@@ -39,7 +33,11 @@ export function useWeather(lat?: number, lng?: number): WeatherNow | null {
       if (!active) return;
       if (data) { cache.set(key, { at: Date.now(), data }); setWeather(data); }
     };
-    load();
+
+    // Warm cache: seed synchronously and skip the redundant immediate fetch — but still schedule the
+    // background refresh below, otherwise a warm-cache mount never refreshes again (display goes stale).
+    const cached = cache.get(key);
+    if (cached && Date.now() - cached.at < TTL_MS) { setWeather(cached.data); } else { load(); }
     const iv = setInterval(load, REFRESH_MS);
     return () => { active = false; ctrl.abort(); clearInterval(iv); };
   }, [key, lat, lng]);

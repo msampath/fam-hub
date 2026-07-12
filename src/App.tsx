@@ -167,7 +167,7 @@ export default function App() {
   const {
     choresList, setChoresList, rewardsList, setRewardsList, redemptionsList, setRedemptionsList,
     xpBankList, setXpBankList, choreWeekList, setChoreWeekList,
-    handleAddReward, handleDeleteReward, handleRedeemReward,
+    handleDeleteReward, handleRedeemReward,
   } = chores;
 
   const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>(() => {
@@ -841,7 +841,7 @@ export default function App() {
       if (!res.ok || !data?.label || typeof data.lat !== 'number' || typeof data.lng !== 'number') {
         return { ok: false, error: data?.error || `Couldn't find "${q}".` };
       }
-      setSettings([{ homeLabel: data.label, homeLat: data.lat, homeLng: data.lng }]);
+      setSettings(prev => [{ ...(prev[0] || {}), homeLabel: data.label, homeLat: data.lat, homeLng: data.lng }]);
       return { ok: true, label: data.label };
     } catch (err: any) {
       return { ok: false, error: 'Could not reach the location service.' };
@@ -1201,6 +1201,14 @@ export default function App() {
         setNeedsNamePrompt(false);
         setStoredGoogleRefreshToken(null);
         suppressSync.current = 0;
+        // Reset every collection to empty — householdId is already null above, so each collection's
+        // usePersistedCollection effect short-circuits before scheduling a cloud write; its unconditional
+        // local-cache write still fires, overwriting localStorage with the empty value. Without this, the
+        // previous household's data survives in memory/localStorage past sign-out (and can bleed into
+        // whatever household the next sign-in resolves to, since famplan_household_id — swept by the same
+        // famplan_* localStorage clear on manual sign-out — no longer disambiguates a same-vs-different
+        // household load).
+        COLLECTIONS.forEach(c => c.set([]));
       }
 
       authResolvedRef.current = true;
@@ -1449,6 +1457,12 @@ export default function App() {
         setGoogleUser(null);
         setHouseholdId(null);
       }
+      // Cloud mode: set householdId null here too (don't wait on the async listener) so the collection
+      // resets below can never race a still-non-null householdId into scheduling a cloud write of the wipe.
+      if (getBackendMode() !== 'sqlite') setHouseholdId(null);
+      // Reset every collection to empty — see the matching reset in the onAuthStateChange SIGNED_OUT
+      // branch above for why (data must not survive sign-out in memory/localStorage).
+      COLLECTIONS.forEach(c => c.set([]));
       setGoogleCalendarsList([]);
       try {
         const keys = Object.keys(localStorage).filter(k => k.startsWith('famplan_'));
@@ -3094,7 +3108,7 @@ export default function App() {
     isGeneratingChoresOpen, setIsGeneratingChoresOpen, isGeneratingChores, choreGenError,
     handleGenerateChores, addGeneratedChores,
     rewardsList, redemptionsList, xpBankList,
-    handleAddReward, handleDeleteReward, handleRedeemReward,
+    handleDeleteReward, handleRedeemReward,
     setFamilyMembers,
     handleRenameMember, handleDeleteMember,
     handleSubmitName, handleReclaimProfile,

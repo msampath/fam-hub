@@ -79,7 +79,7 @@ export default function GenerateChoresModal() {
           </div>
           <div className="flex flex-col gap-3">
             {forms.map((f, i) => (
-              <div key={f.name} className="rounded-[14px] p-3" style={{ border: `2px solid ${C.elevated}` }}>
+              <div key={i} className="rounded-[14px] p-3" style={{ border: `2px solid ${C.elevated}` }}>
                 <div className="mb-2 text-[12px] font-extrabold" style={{ color: C.primary }}>{f.name}</div>
                 <div className="flex flex-wrap items-center gap-2">
                   <label className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: C.muted }}>Age
@@ -121,8 +121,8 @@ export default function GenerateChoresModal() {
             </div>
           )}
           <div className="flex max-h-[50vh] flex-col gap-3 overflow-y-auto">
-            {groups.map(g => (
-              <div key={g.kid}>
+            {groups.map((g, gi) => (
+              <div key={gi}>
                 <div className="mb-1.5 text-[11px] font-extrabold uppercase tracking-[0.1em]" style={{ color: C.indigo }}>{g.kid}</div>
                 <div className="flex flex-col gap-1.5">
                   {g.chores.map(c => {

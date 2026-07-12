@@ -1,4 +1,4 @@
-import { useState, type Dispatch, type SetStateAction } from 'react';
+import { useState, useRef, type Dispatch, type SetStateAction } from 'react';
 import { uuid } from '../utils/uuid';
 import { safeParseArray } from './usePersistedCollection';
 import { apiFetch } from '../supabase';
@@ -57,6 +57,11 @@ export function useShopping({ authorStamp, storeList, boundLists }: UseShoppingD
     const saved = localStorage.getItem('famplan_shopping');
     return safeParseArray(saved);
   });
+  // Tracks the LATEST shoppingList across renders (mirrors usePersistedCollection's `latest` ref) so
+  // appendShoppingItems can merge against current state even when it resolves after a multi-second
+  // await (recipe parse, restock suggest) during which the user made their own concurrent edit.
+  const shoppingListRef = useRef(shoppingList);
+  shoppingListRef.current = shoppingList;
   const [pantryList, setPantryList] = useState<PantryItem[]>(() => {
     const saved = localStorage.getItem('famplan_pantry');
     return safeParseArray(saved);
@@ -92,7 +97,7 @@ export function useShopping({ authorStamp, storeList, boundLists }: UseShoppingD
   const appendShoppingItems = (items: { text?: string; store?: string }[]) => {
     const stamp = authorStamp();
     const incoming = normalizeShoppingItems(items, VALID_STORES).map(i => ({ ...i, ...stamp }));
-    const { list, added, reactivated } = mergeShoppingItems(shoppingList, incoming);
+    const { list, added, reactivated } = mergeShoppingItems(shoppingListRef.current, incoming);
     if (added + reactivated) setShoppingList(list);
     return added + reactivated;
   };
@@ -119,9 +124,13 @@ export function useShopping({ authorStamp, storeList, boundLists }: UseShoppingD
         throw new Error(aiErrorMessage(res.status, body, 'Could not extract ingredients from that recipe.', 'Add the items to your list manually for now.'));
       }
       const data = await res.json();
-      const added = appendShoppingItems(data.items || []);
-      if (added === 0) throw new Error('No ingredients found — try a more detailed recipe or a clearer dish name.');
-      const offer = offerFor(data.items || []);
+      const rawItems = data.items || [];
+      // Only "no ingredients found" when the model genuinely returned none — added===0 alone doesn't
+      // mean that: it's also what mergeShoppingItems reports when every extracted ingredient was
+      // already active on the list, which is a successful parse, not a failure.
+      if (rawItems.length === 0) throw new Error('No ingredients found — try a more detailed recipe or a clearer dish name.');
+      appendShoppingItems(rawItems);
+      const offer = offerFor(rawItems);
       if (offer) setKrogerOffer(offer);
       return true;
     } catch (err: any) {

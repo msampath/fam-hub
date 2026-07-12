@@ -84,7 +84,6 @@ export interface AppCtx {
   rewardsList: Reward[];
   redemptionsList: Redemption[];
   xpBankList: XpBankEntry[];
-  handleAddReward: (e: React.FormEvent) => void;
   handleDeleteReward: (id: string) => void;
   handleRedeemReward: (reward: Reward, memberName: string) => void;
 

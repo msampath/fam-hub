@@ -1,6 +1,14 @@
 import { useEffect, useState, type Dispatch, type SetStateAction } from 'react';
 import { IDLE_TIMEOUT_MS } from '../useIdleTimeout';
 
+// Guarded JSON.parse for a boolean pref: a corrupted/half-written localStorage value used to throw
+// inside a useState lazy initializer and white-screen the app on render (same class of bug fixed via
+// safeParseArray in usePersistedCollection.ts). Falls back to `fallback` on any parse failure.
+function safeParseBool(raw: string | null, fallback: boolean): boolean {
+  if (!raw) return fallback;
+  try { const v = JSON.parse(raw); return typeof v === 'boolean' ? v : fallback; } catch { return fallback; }
+}
+
 // Per-device preferences (idle screensaver, auto-sign-out, the local daily reminder). These persist
 // to localStorage only (per-device, NOT to the cloud / COLLECTIONS), so the engine is fully
 // self-contained here. The reminder *scheduler* (which reads events/chores) stays in App — only the
@@ -42,13 +50,14 @@ export function useDevicePrefs(): DevicePrefs {
     return Number.isFinite(saved) && saved >= 0 ? saved : 0;
   });
   // Local daily reminder (per-device): a configurable morning notification. No server/push.
-  const [remindersEnabled, setRemindersEnabled] = useState<boolean>(() => {
-    const saved = localStorage.getItem('famplan_reminders_enabled');
-    return saved ? JSON.parse(saved) : false;
-  });
+  const [remindersEnabled, setRemindersEnabled] = useState<boolean>(() =>
+    safeParseBool(localStorage.getItem('famplan_reminders_enabled'), false));
   const [reminderTime, setReminderTime] = useState<number>(() => {
-    const saved = Number(localStorage.getItem('famplan_reminder_time'));
-    return Number.isFinite(saved) && saved > 0 ? saved : 8 * 60; // minutes since midnight; default 8:00 AM
+    // Distinguish "unset" from a stored 0 (midnight): Number(null) === 0 would otherwise be
+    // indistinguishable from an explicit midnight save and pin it back to the 8:00 AM default.
+    const raw = localStorage.getItem('famplan_reminder_time');
+    const saved = Number(raw);
+    return raw !== null && Number.isFinite(saved) && saved >= 0 ? saved : 8 * 60; // minutes since midnight; default 8:00 AM
   });
   // How long before a timed event the per-event reminder fires (minutes; 0 = at start).
   const [reminderLeadMinutes, setReminderLeadMinutes] = useState<number>(() => {
@@ -56,21 +65,15 @@ export function useDevicePrefs(): DevicePrefs {
     return Number.isFinite(saved) && saved >= 0 ? saved : 30;
   });
   // Opt-in proactive email scan (default off) — auto-scan the inbox on an interval while signed in.
-  const [autoScanEnabled, setAutoScanEnabled] = useState<boolean>(() => {
-    const saved = localStorage.getItem('famplan_autoscan');
-    return saved ? JSON.parse(saved) : false;
-  });
+  const [autoScanEnabled, setAutoScanEnabled] = useState<boolean>(() =>
+    safeParseBool(localStorage.getItem('famplan_autoscan'), false));
   // Kid mode (default off): locks THIS device to the kid-safe surface — Manage/Approvals/Actions/Import
   // and chore delete/add are hidden. Per-device on purpose (a wall tablet is the kid surface; a parent's
   // phone isn't), same rationale as the screensaver prefs above.
-  const [kidMode, setKidMode] = useState<boolean>(() => {
-    const saved = localStorage.getItem('famplan_kidmode');
-    return saved ? JSON.parse(saved) : false;
-  });
-  const [photosScreensaver, setPhotosScreensaver] = useState<boolean>(() => {
-    const saved = localStorage.getItem('famplan_photos_screensaver');
-    return saved ? JSON.parse(saved) : false;
-  });
+  const [kidMode, setKidMode] = useState<boolean>(() =>
+    safeParseBool(localStorage.getItem('famplan_kidmode'), false));
+  const [photosScreensaver, setPhotosScreensaver] = useState<boolean>(() =>
+    safeParseBool(localStorage.getItem('famplan_photos_screensaver'), false));
 
   useEffect(() => { localStorage.setItem('famplan_idle_timeout', String(idleTimeoutMs)); }, [idleTimeoutMs]);
   useEffect(() => { localStorage.setItem('famplan_photos_screensaver', JSON.stringify(photosScreensaver)); }, [photosScreensaver]);

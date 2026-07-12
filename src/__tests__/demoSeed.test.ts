@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildDemoSeed } from '../utils/demoSeed';
+import { weekdayOf } from '../utils/copilotHarness';
 
 const TODAY = '2026-06-21';
 
@@ -81,6 +82,17 @@ describe('buildDemoSeed', () => {
     const s = seed.settings[0];
     expect(Number.isFinite(s.homeLat) && Number.isFinite(s.homeLng)).toBe(true);
     expect(s.homeLabel).toBeTruthy();
+  });
+
+  it('names the CORRECT day-of-week in the approval summary for the actual staged date (not a hardcoded literal)', () => {
+    // Exercise a full week of `today` values so a hardcoded weekday (e.g. always "Sunday") can't
+    // coincidentally pass — the summary's day name must track the real payload.booking.start date.
+    for (let i = 0; i < 7; i++) {
+      const day = `2026-06-${String(21 + i).padStart(2, '0')}`;
+      const s = buildDemoSeed(day, 'anon-123');
+      const e: any = s.actionledger[0];
+      expect(e.summary).toContain(weekdayOf(e.payload.booking.start));
+    }
   });
 
   it('generates unique ids across all seeded records', () => {

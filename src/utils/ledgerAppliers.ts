@@ -66,16 +66,22 @@ const deleteOrClearChores: LedgerApplier = ({ entry, approve, choresList, setCho
   const victims = entry.tool === 'clear_chores'
     ? choresList
     : choresList.filter(c => (refId ? c.id === refId : (!!wantTitle && String(c.title).trim().toLowerCase() === wantTitle)));
-  if (approve && victims.length) {
+  // A title-only reference matching several chores is NOT bulk-deleted on one approval (mirrors
+  // deleteEvent's ambiguity guard below) — the parent only saw one title, so the delete's scope must
+  // never exceed what was approved.
+  const ambiguous = entry.tool === 'delete_chore' && !refId && victims.length > 1;
+  if (approve && !ambiguous && victims.length) {
     const ids = new Set(victims.map(c => c.id));
     setChoresList(prev => prev.filter(c => !ids.has(c.id)));
   }
-  markLedger(entry.id, approve);
-  say(approve
-    ? (victims.length
+  markLedger(entry.id, approve, ambiguous);
+  say(!approve
+    ? 'Okay, kept the chores.'
+    : ambiguous
+      ? `⚠️ There are ${victims.length} chores named "${victims[0].title}" — tell me which one, or clear all chores instead.`
+      : victims.length
         ? (entry.tool === 'clear_chores' ? `🗑️ Cleared all ${victims.length} chore${victims.length > 1 ? 's' : ''}.` : `🗑️ Deleted ${victims.length} chore${victims.length > 1 ? 's' : ''}.`)
-        : (entry.tool === 'clear_chores' ? `The chore list was already empty.` : `⚠️ Couldn't find that chore to delete.`))
-    : 'Okay, kept the chores.');
+        : (entry.tool === 'clear_chores' ? `The chore list was already empty.` : `⚠️ Couldn't find that chore to delete.`));
 };
 
 // Event delete (confirm-tier, destructive): resolve against the LIVE events by refId, else by exact

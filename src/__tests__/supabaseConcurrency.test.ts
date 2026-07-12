@@ -2,13 +2,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // The query builder resolves to whatever `result` is at await time; `calls` records what was sent.
 let result: any = { data: [], error: null };
-const calls: { update: any; upsert: any; eqs: [string, any][] } = { update: null, upsert: null, eqs: [] };
+const calls: { update: any; upsert: any; insert: any; eqs: [string, any][] } = { update: null, upsert: null, insert: null, eqs: [] };
 
 function makeBuilder() {
   const b: any = {
     select: vi.fn(() => b),
     update: vi.fn((p: any) => { calls.update = p; return b; }),
     upsert: vi.fn((p: any) => { calls.upsert = p; return b; }),
+    insert: vi.fn((p: any) => { calls.insert = p; return b; }),
     eq: vi.fn((col: string, val: any) => { calls.eqs.push([col, val]); return b; }),
     then: (resolve: any) => resolve(result), // thenable → await resolves to `result`
   };
@@ -24,7 +25,7 @@ vi.mock('@supabase/supabase-js', () => ({
 
 import { loadHouseholdData, saveHouseholdData, setStaleWriteHandler } from '../supabase';
 
-beforeEach(() => { result = { data: [], error: null }; calls.update = null; calls.upsert = null; calls.eqs = []; });
+beforeEach(() => { result = { data: [], error: null }; calls.update = null; calls.upsert = null; calls.insert = null; calls.eqs = []; });
 
 describe('optimistic concurrency (§5.3)', () => {
   it('caches each collection version on load, then a save compare-and-sets on that version', async () => {
@@ -67,10 +68,24 @@ describe('optimistic concurrency (§5.3)', () => {
     setStaleWriteHandler(null);
   });
 
-  it('upserts (not compare-and-set) the first write of a never-loaded collection', async () => {
+  it('INSERTs (not upsert) the first write of a never-loaded collection', async () => {
     result = { data: [{ updated_at: 'v1' }], error: null };
     await saveHouseholdData('hhC', 'newcol', [1]);
-    expect(calls.upsert).toBeTruthy();
+    expect(calls.insert).toBeTruthy();
+    expect(calls.upsert).toBeNull();
     expect(calls.update).toBeNull();
+  });
+
+  it('a concurrent first-write (unique-violation) converges instead of clobbering the winner', async () => {
+    const onStale = vi.fn();
+    setStaleWriteHandler(onStale);
+    vi.useFakeTimers();
+    result = { data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint' } };
+    await saveHouseholdData('hhE', 'newcol2', [1]);
+    expect(calls.insert).toBeTruthy();
+    vi.advanceTimersByTime(300);
+    expect(onStale).toHaveBeenCalledTimes(1); // lost the race — converge, don't clobber
+    vi.useRealTimers();
+    setStaleWriteHandler(null);
   });
 });

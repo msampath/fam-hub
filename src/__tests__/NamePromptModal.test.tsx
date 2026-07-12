@@ -41,6 +41,14 @@ describe('NamePromptModal — dismissable (on-demand "link my profile" open)', (
     const { container } = renderWithApp(<NamePromptModal />, { familyMembers: [] });
     expect(container.querySelector('#name-prompt-close')).toBeNull();
   });
+
+  it('is a labelled dialog and closes on Escape when dismissable (modal a11y)', () => {
+    const onDismiss = vi.fn();
+    const { container } = renderWithApp(<NamePromptModal dismissable onDismiss={onDismiss} />, { familyMembers: [] });
+    expect(container.querySelector('[role="dialog"][aria-modal="true"]')).not.toBeNull();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('NamePromptModal — optional onboarding prefs (first-login dietary/interests)', () => {

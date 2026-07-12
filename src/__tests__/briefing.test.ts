@@ -78,6 +78,12 @@ describe('buildDinnerLines (the meal planner in the briefing)', () => {
     const oldWeek = { weekStart: '2026-06-15', days: [{ date: TODAY, dish: 'Stale stew' }] };
     expect(buildDinnerLines([dinnerPlan, oldWeek], TODAY)[0]).toBe('🍽 Dinner tonight: Paneer butter masala');
   });
+  it('does NOT drop the CURRENT week just because a FUTURE week is also planned', () => {
+    // futureWeek's weekStart sorts after dinnerPlan's — picking purely by latest weekStart would have
+    // selected futureWeek (which has no entry for TODAY at all) and silently dropped tonight's dinner.
+    const futureWeek = { weekStart: '2026-06-29', days: [{ date: '2026-07-01', dish: 'Future feast' }] };
+    expect(buildDinnerLines([dinnerPlan, futureWeek], TODAY)).toEqual(['🍽 Dinner tonight: Paneer butter masala', '🍽 Tomorrow: Tacos']);
+  });
   it('rides into buildBriefing lines after the agenda', () => {
     const b = buildBriefing([ev('1', 'Dentist', TODAY)], [], TODAY, 14, [dinnerPlan]);
     expect(b.lines[b.lines.length - 2]).toBe('🍽 Dinner tonight: Paneer butter masala');

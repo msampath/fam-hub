@@ -3,8 +3,8 @@ import { toLocalDateStr } from '../utils/dates';
 import { buildDailyReminder, shouldFireDailyReminder, dueEventReminders, type ReminderContent } from '../utils/reminders';
 import type { CalendarEvent, Chore } from '../types';
 
-function showReminderNotification(content: ReminderContent) {
-  const opts = { body: content.body, tag: 'familyhub-daily', icon: '/icon.svg', badge: '/icon.svg', renotify: true } as NotificationOptions;
+function showReminderNotification(content: ReminderContent, tag: string) {
+  const opts = { body: content.body, tag, icon: '/icon.svg', badge: '/icon.svg', renotify: true } as NotificationOptions;
   try {
     if ('serviceWorker' in navigator && navigator.serviceWorker?.ready) {
       navigator.serviceWorker.ready
@@ -46,7 +46,9 @@ export function useReminders(
       if (!content) return;
       reminderFiredDateRef.current = today;
       localStorage.setItem('famplan_reminder_lastfired', today);
-      showReminderNotification(content);
+      // Tag includes the date: this fires at most once/day (guarded above), so same-day re-fires
+      // legitimately collapse, but it never collides with a same-day event reminder's own tag below.
+      showReminderNotification(content, `familyhub-daily-${today}`);
     };
 
     const tickEventReminders = () => {
@@ -57,7 +59,10 @@ export function useReminders(
       if (fired.date !== today) { fired.date = today; fired.ids = new Set(); }
       const due = dueEventReminders(reminderDataRef.current.events, today, now, reminderLeadMinutes, fired.ids);
       if (!due.length) return;
-      for (const d of due) { fired.ids.add(d.id); showReminderNotification({ title: d.title, body: d.body }); }
+      // Tag per-event (d.id is `${dateStr}|${event.id}`, already unique per event/day) so two events
+      // due close together don't collapse into a single visible notification (each fires at most once
+      // per day via `fired`, so a legitimate same-event re-fire still collapses on its own tag).
+      for (const d of due) { fired.ids.add(d.id); showReminderNotification({ title: d.title, body: d.body }, `familyhub-event-${d.id}`); }
       localStorage.setItem('famplan_event_reminders_fired', JSON.stringify({ date: fired.date, ids: [...fired.ids] }));
     };
 

@@ -73,8 +73,9 @@ export default function KrogerPanel() {
               <select
                 value={krogerConnection?.locationId || ''}
                 onChange={e => {
+                  if (!e.target.value) return; // blank placeholder — no-op; only "Disconnect" clears the connection
                   const s = stores.find(x => x.locationId === e.target.value);
-                  setKrogerConnection(s ? { locationId: s.locationId, name: s.name } : null);
+                  if (s) setKrogerConnection({ locationId: s.locationId, name: s.name });
                 }}
                 aria-label="Kroger store location for this connection"
                 className="min-w-0 flex-1 max-w-[62%] rounded-[8px] px-2 py-1.5 text-sm"

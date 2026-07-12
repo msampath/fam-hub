@@ -12,9 +12,12 @@ import type { Goal, GoalStep } from '../types';
 export function mergeGoalSteps(existing: GoalStep[] | undefined, incoming: GoalStep[] | undefined): GoalStep[] | undefined {
   if (!incoming) return existing;                 // text-only update → keep the current plan
   if (!existing?.length) return incoming;
+  const pool = [...existing]; // consumed as steps are matched, so duplicate-titled steps pair up in emission order instead of all colliding on the same first match
   return incoming.map(s => {
-    const prev = existing.find(p => p.title === s.title);
-    return prev && s.status === 'pending' ? prev : s; // preserve progress + ledgerId across a re-emit
+    const i = pool.findIndex(p => p.title === s.title);
+    if (i < 0) return s;
+    const [prev] = pool.splice(i, 1);
+    return s.status === 'pending' ? prev : s; // preserve progress + ledgerId across a re-emit
   });
 }
 

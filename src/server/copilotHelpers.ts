@@ -29,7 +29,7 @@ export function dedupeActions(actions: any[]): any[] {
   const out: any[] = [];
   for (const a of actions) {
     const p = a?.payload || {};
-    const key = [a?.type, p.title, p.start, p.text, p.assignedTo]
+    const key = [a?.type, p.id, p.title, p.start, p.text, p.assignedTo]
       .map(x => String(x ?? '').trim().toLowerCase()).join('|');
     if (seen.has(key)) continue;
     seen.add(key);
@@ -130,9 +130,13 @@ function parseICalDate(icalDate: string): string {
       const min = clean.substring(11, 13);
       const sec = clean.substring(13, 15);
       if (isUtc) {
+        // Read back via the UTC getters (not local) — the ICS 'Z' digits are already the UTC wall-clock;
+        // local getters would shift them by the SERVER process's timezone, drifting between a Cloud Run
+        // container (defaults to UTC) and a differently-zoned dev machine. Date.UTC still gives us
+        // rollover normalization for a malformed value (e.g. day=32) that the non-UTC branch below skips.
         const d = new Date(Date.UTC(+year, +month - 1, +day, +hour, +min, +sec));
         const p = (n: number) => String(n).padStart(2, '0');
-        return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+        return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}T${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
       }
       return `${year}-${month}-${day}T${hour}:${min}:${sec}`;
     }

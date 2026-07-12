@@ -87,8 +87,12 @@ export function buildConversationBlock(
 // dinners coexist), so "what's for dinner/lunch (Tuesday)?" is a deterministic read — routed LOCAL
 // by the router, answered from this block, never invented. Pure.
 export function buildMealsFacts(mealplan: any[] | undefined, today: string): string | undefined {
-  const sorted = (Array.isArray(mealplan) ? mealplan : [])
-    .filter((p: any) => Array.isArray(p?.days))
+  const all = (Array.isArray(mealplan) ? mealplan : []).filter((p: any) => Array.isArray(p?.days));
+  // Prefer the plan(s) that actually cover TODAY (a day entry dated today) — picking purely by the
+  // latest weekStart silently dropped THIS week's plan whenever a LATER week was also planned.
+  // Falls back to "latest weekStart" only when nothing covers today (no current-week plan at all).
+  const current = all.filter((p: any) => (p.days as any[]).some((d: any) => String(d?.date || '').slice(0, 10) === today));
+  const sorted = (current.length ? current : all)
     .sort((a, b) => String(b?.weekStart || '').localeCompare(String(a?.weekStart || '')));
   const week = sorted[0]?.weekStart;
   const plans = sorted.filter((p: any) => p.weekStart === week).slice(0, 3);

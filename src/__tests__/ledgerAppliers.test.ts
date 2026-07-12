@@ -66,6 +66,19 @@ describe('LEDGER_APPLIERS registry', () => {
     expect(clearAll.say).toHaveBeenCalledWith('🗑️ Cleared all 2 chores.');
   });
 
+  it('delete_chore BLOCKS an ambiguous title-only match (mirrors delete_event; deletes nothing, refId still works)', () => {
+    const dupes = [{ id: 'c1', title: 'Dishes' }, { id: 'c2', title: 'Dishes' }, { id: 'c3', title: 'Feed dog' }] as any;
+    const c = ctx({ choresList: dupes, entry: entry({ tool: 'delete_chore', payload: { title: 'Dishes' } }) });
+    LEDGER_APPLIERS.delete_chore(c);
+    expect(c.setChoresList).not.toHaveBeenCalled();
+    expect(c.markLedger).toHaveBeenCalledWith('led-1', true, true); // blocked
+    expect(String((c.say as any).mock.calls[0][0])).toMatch(/2 chores named/);
+    // A refId reference is unambiguous by construction — still deletes exactly one, even with duplicate titles.
+    const byId = ctx({ choresList: dupes, entry: entry({ tool: 'delete_chore', refId: 'c1', payload: { title: 'Dishes' } }) });
+    LEDGER_APPLIERS.delete_chore(byId);
+    expect(runUpdater(byId.setChoresList, dupes).map((c: any) => c.id)).toEqual(['c2', 'c3']);
+  });
+
   it('delete_event BLOCKS an ambiguous title-only match (marks rejected via blocked, deletes nothing)', () => {
     const events = [
       { id: 'e1', title: 'Soccer practice', start: '2026-07-08' },

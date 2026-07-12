@@ -2,7 +2,7 @@ import { useState, type CSSProperties } from 'react';
 import { useCalendar } from '../../../CalendarContext';
 import { useApp } from '../../../AppContext';
 import { buildTodayTomorrowAgenda } from '../../../utils/agenda';
-import { toLocalDateStr, formatTime } from '../../../utils/dates';
+import { toLocalDateStr, formatTime, parseLocalDate } from '../../../utils/dates';
 import { earnedXp } from '../../../utils/chores';
 import type { CalendarEvent } from '../../../types';
 import { C, brutShadow, memberHex, CATEGORY_EMOJI } from '../theme';
@@ -69,7 +69,7 @@ export default function TodayPage({ onNavigate, onOpenCalendar }: TodayPageProps
     .sort((a, b) => (a.start! < b.start! ? -1 : 1))
     .slice(0, 6)
     .map(e => ({
-      label: `${new Date(e.start! + 'T00:00').toLocaleDateString([], { weekday: 'short' })} · ${e.title}`,
+      label: `${parseLocalDate(e.start!.split('T')[0]).toLocaleDateString([], { weekday: 'short' })} · ${e.title}`,
       special: e.category === 'Holiday',
     }));
 

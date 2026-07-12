@@ -57,6 +57,14 @@ describe('KrogerPanel (two-level connections)', () => {
     expect(ctx.setKrogerConnection).toHaveBeenCalledWith({ locationId: '70100777', name: 'Fred Meyer - Bellevue' });
   });
 
+  it('selecting the blank "Shop at" placeholder is a no-op — it must NOT clear the existing connection', async () => {
+    const user = userEvent.setup();
+    const { ctx } = renderWithApp(<KrogerPanel />, base);
+    const shopAt = await screen.findByLabelText('Kroger store location for this connection');
+    await user.selectOptions(shopAt, '');
+    expect(ctx.setKrogerConnection).not.toHaveBeenCalled();
+  });
+
   it('list linking is disabled until the connection has a store', async () => {
     renderWithApp(<KrogerPanel />, { ...base, krogerConnection: null, storeBindings: {} });
     const row = await screen.findByLabelText('Connection for the Costco list');

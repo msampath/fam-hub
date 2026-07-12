@@ -66,7 +66,6 @@ export function makeAppCtx(overrides: Partial<AppCtx> = {}): AppCtx {
     rewardsList: [],
     redemptionsList: [],
     xpBankList: [],
-    handleAddReward: vi.fn(),
     handleDeleteReward: vi.fn(),
     handleRedeemReward: vi.fn(),
 

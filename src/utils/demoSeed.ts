@@ -5,7 +5,7 @@
 // (today, userId) apart from the uuid()s, so it's unit-testable.
 import { uuid } from './uuid';
 import { MEMBER_COLORS_LIST } from '../constants';
-import { addDaysISO } from './copilotHarness';
+import { addDaysISO, weekdayOf } from './copilotHarness';
 import type { FamilyMember, CalendarEvent, Chore, ShoppingItem, HouseholdSettings, Bill, LibraryDoc, Goal, LedgerEntry } from '../types';
 
 // `today` is local ISO 'YYYY-MM-DD'; `userId` is the anonymous visitor's auth id (links the "You" parent
@@ -87,12 +87,13 @@ export function buildDemoSeed(today: string, userId: string): Record<string, any
   // title/date from anything the morning planner proposes, so the briefing's "Stage drafts" beat still
   // stages its own drafts (no dedupe collision). No proactiveDate: this is an inbox find, not a
   // morning-planner draft, and that field keys the digest's same-day dedupe.
+  const walkDate = addDaysISO(today, 4);
   const actionledger: LedgerEntry[] = [
     {
       id: 'ledg-' + uuid(),
       tool: 'suggest_event', riskTier: 'confirm', status: 'pending',
-      summary: 'Add "Family nature walk — Lake Sammamish State Park" Sunday 10:00 AM (from your Eastside Weekend Guide)',
-      payload: { booking: { title: 'Family nature walk — Lake Sammamish State Park', start: addDaysISO(today, 4), startTime: '10:00' } },
+      summary: `Add "Family nature walk — Lake Sammamish State Park" ${weekdayOf(walkDate)} 10:00 AM (from your Eastside Weekend Guide)`,
+      payload: { booking: { title: 'Family nature walk — Lake Sammamish State Park', start: walkDate, startTime: '10:00' } },
       createdAt: today, createdByUserId: userId,
     },
   ];

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { X } from 'lucide-react';
 import { useApp } from '../AppContext';
 import { APP_NAME } from '../constants';
+import { useModalA11y } from '../hooks/useModalA11y';
 import { C } from './shell/theme';
 
 // Shared dark-input style (the app is a single dark theme). focus:ring layers on top of the inline border.
@@ -20,12 +21,20 @@ export default function NamePromptModal({ dismissable, onDismiss }: { dismissabl
   const [dietary, setDietary] = useState('');
   const [interests, setInterests] = useState('');
 
+  // Shared modal a11y (focus trap + Escape), same as Manage/EventSheet/CalendarOverlay. Escape only
+  // acts when the current step actually has a dismiss path: the onboarding-prefs step mirrors its own
+  // "Skip" button; the first-run name gate has none (dismissable/onDismiss unset) and must be resolved.
+  const dialogRef = useModalA11y<HTMLDivElement>(() => {
+    if (onboardingName) { dismissOnboarding(); return; }
+    if (dismissable && onDismiss) onDismiss();
+  });
+
   // Step 2 (optional, skippable): after a brand-new profile is created, capture dietary/interests so
   // the copilot can personalize food + activity suggestions from the first session.
   if (onboardingName) {
     return (
       <div className="fixed inset-0 bg-indigo-900/50 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in" id="onboarding-prefs-modal">
-        <div className="rounded-3xl max-w-sm w-full p-6" style={cardStyle}>
+        <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={`Welcome, ${onboardingName}`} className="rounded-3xl max-w-sm w-full p-6 outline-none" style={cardStyle}>
           <span className="text-[10px] font-extrabold uppercase tracking-widest block mb-1" style={{ color: C.indigo }}>Welcome, {onboardingName}</span>
           <h3 className="text-base font-black mb-1" style={{ color: C.primary }}>A few preferences (optional)</h3>
           <p className="text-xs mb-4" style={{ color: C.muted }}>These help the copilot tailor food and activity suggestions to your household. You can skip and add them later in Manage.</p>
@@ -85,7 +94,7 @@ export default function NamePromptModal({ dismissable, onDismiss }: { dismissabl
 
   return (
     <div className="fixed inset-0 bg-indigo-900/50 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in" id="name-prompt-modal">
-      <div className="rounded-3xl max-w-sm w-full p-6 relative" style={cardStyle}>
+      <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={emptyHousehold ? 'Joining your family, or starting fresh?' : 'What should we call you?'} className="rounded-3xl max-w-sm w-full p-6 relative outline-none" style={cardStyle}>
         {dismissable && onDismiss && (
           <button
             type="button"
