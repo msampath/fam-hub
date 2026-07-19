@@ -1,6 +1,6 @@
 // Async agent jobs (roadmap "Backlog High — Async agent jobs") — the storage behind
 // POST /api/agent/chat-async + GET /api/agent/job/:id. One row per agent turn, walked
-// queued → running → done|error by an IN-PROCESS worker in server.ts.
+// queued → running → done|error by an IN-PROCESS worker in src/server/agentProxy.ts.
 //
 // SCOPE (deliberate, per the roadmap): the worker runs immediately, inside the caller's JWT lifetime —
 // no durable queue, no webhooks, no FastAPI BackgroundTasks. If the server process dies mid-turn the row
@@ -87,7 +87,7 @@ export class SqliteAgentJobStore implements AgentJobStore {
 }
 
 // ── Supabase (cloud) — a PER-REQUEST client built from the caller's JWT (see agentJobStoreFor in
-// server.ts), so Postgres RLS scopes every row to that caller's household. ──
+// src/server/agentProxy.ts), so Postgres RLS scopes every row to that caller's household. ──
 export class SupabaseAgentJobStore implements AgentJobStore {
   constructor(private client: SupabaseClient, private householdId: string) {}
 

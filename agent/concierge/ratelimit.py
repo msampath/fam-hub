@@ -1,7 +1,8 @@
 """Per-key fixed-window rate limiter for the agent's public /chat cost guard (H1).
 
-The agent service runs `--allow-unauthenticated` on Cloud Run, so an open /chat would let anyone rack up
-owner-paid Gemini calls (each turn also fans out MCP children). This caps requests per client IP per window.
+The agent service now deploys `--no-allow-unauthenticated` on Cloud Run (the web tier attaches a Google ID
+token to reach it — H1), so IAM is the primary gate. This per-IP cap is defense-in-depth ON TOP of that gate:
+if a token ever leaks, it stops anyone racking up owner-paid Gemini calls (each turn also fans out MCP children).
 Pure + unit-tested — the clock is injected so tests need no sleeps. In-process (a multi-instance deploy wants
 a shared counter — Wave 4); this bounds a single instance's blast radius. `AGENT_RATE_LIMIT_PER_MIN` tunes it;
 0 disables (local dev / tests).

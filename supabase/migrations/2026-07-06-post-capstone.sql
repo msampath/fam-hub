@@ -13,6 +13,11 @@
 -- ASSUMES schema.sql has already been applied (this file references households and the
 -- get_user_household_id() helper it defines).
 --
+-- NOTE (2026-07-13): §§5 and 7 are now ALSO folded into schema.sql as the fresh-project baseline —
+-- a new project that runs schema.sql already has them, and this file's idempotent re-definitions
+-- simply converge to the same state. Projects created BEFORE that fold still need this file for §§5/7;
+-- every project needs it for §§1-4 and 6 (agent_jobs, web_cache, pgvector, oauth_tokens).
+--
 -- What it adds:
 --   1. agent_jobs  — queued async agent turns (POST /api/agent/chat-async + GET /api/agent/job/:id).
 --   2. web_cache   — 7-day household-scoped page cache for the concierge's fetch_page tool.
@@ -162,15 +167,26 @@ update households set invite_code = upper(encode(extensions.gen_random_bytes(8),
 --     "Regenerate" button.
 
 alter table households add column if not exists invite_code_expires_at timestamptz;
+-- Codes minted at household CREATION expire too (7 days, same as regenerated ones) — without this
+-- default the initial code stayed a standing secret forever, the exact thing §5c set out to fix.
+alter table households alter column invite_code_expires_at set default (now() + interval '7 days');
+-- Stamp the codes §5b just re-keyed (and any other NULL-expiry legacy code) with the same lifetime.
+update households set invite_code_expires_at = now() + interval '7 days' where invite_code_expires_at is null;
 
+-- NULL when unauthenticated OR the caller has no household (the client's documented contract — the
+-- old body returned a fresh code even when the UPDATE matched zero rows).
 create or replace function regenerate_invite_code()
 returns text language plpgsql security definer set search_path = public as $$
-declare new_code text;
+declare
+  hid uuid;
+  new_code text;
 begin
   if auth.uid() is null then return null; end if;
+  hid := get_user_household_id();
+  if hid is null then return null; end if;
   new_code := upper(encode(extensions.gen_random_bytes(8), 'hex'));
   update households set invite_code = new_code, invite_code_expires_at = now() + interval '7 days'
-    where id = get_user_household_id();
+    where id = hid;
   return new_code;
 end; $$;
 revoke execute on function regenerate_invite_code() from anon;
@@ -183,6 +199,9 @@ create table if not exists join_attempts (
   user_id uuid not null, attempted_at timestamptz default now() not null
 );
 alter table join_attempts enable row level security; -- no policies: only the definer fn below touches it
+-- Indexed for the per-user window count; each caller's own stale rows are pruned on their next attempt
+-- (inside the RPC), so the table stays bounded by recently-active users instead of growing forever.
+create index if not exists join_attempts_user_time on join_attempts (user_id, attempted_at);
 
 -- join_household_by_code, REDEFINED (schema.sql created the original; this replaces it with the same
 -- signature) to add the 5c expiry check and the 5d attempt throttle. A NULL invite_code_expires_at
@@ -201,6 +220,8 @@ begin
   if auth.uid() is null then
     return null;
   end if;
+  -- Prune this caller's stale attempts, then count the last hour's window.
+  delete from join_attempts where user_id = auth.uid() and attempted_at < now() - interval '1 hour';
   if (select count(*) from join_attempts where user_id = auth.uid()
       and attempted_at > now() - interval '1 hour') >= 10 then
     return null;
@@ -240,12 +261,18 @@ grant  execute on function join_household_by_code(text) to authenticated;
 -- pins every safeFetch hop to its validated IP, and all other outbound calls are fixed-host.
 
 create table if not exists oauth_tokens (
-  user_id      uuid        primary key references auth.users(id) on delete cascade,
+  user_id      uuid        not null references auth.users(id) on delete cascade,
   provider     text        not null default 'google' check (provider in ('google', 'kroger')),
   token_cipher text        not null,  -- AES-GCM ciphertext, key from server env (never plaintext)
   created_at   timestamptz default now() not null,
-  updated_at   timestamptz default now() not null
+  updated_at   timestamptz default now() not null,
+  primary key (user_id, provider)
 );
+-- Converge a table created by the earlier revision (PK was user_id alone — one row per user, so a
+-- user could never hold BOTH a Google and a Kroger token). Idempotent: drop whatever PK exists, put
+-- the composite one back. Safe pre-feature: nothing writes this table yet.
+alter table oauth_tokens drop constraint if exists oauth_tokens_pkey;
+alter table oauth_tokens add primary key (user_id, provider);
 alter table oauth_tokens enable row level security; -- no policies yet: server-only via service key,
   -- until the feature above actually lands and defines how the JWT-scoped client should touch this.
 

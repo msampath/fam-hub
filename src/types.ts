@@ -332,7 +332,8 @@ export interface DigestPrefs {
   enabled: boolean;
   email: string;          // legacy single recipient (kept for back-compat; merged into `emails` on read)
   emails?: string[];      // recipient list — each parent can add their own so the whole household gets the digest
-  sendHour: number;       // 0–23, server-local
+  sendHour: number;       // 0–23, in the household's timeZone (below)
+  timeZone?: string;      // IANA tz (e.g. 'America/Los_Angeles') the client stamps so the server fires at the family's local hour, not UTC
   lastRunDate?: string;   // YYYY-MM-DD, set by the scheduler
 }
 

@@ -34,6 +34,11 @@ async function freshApp(env: Record<string, string> = {}) {
   process.env.KROGER_CLIENT_SECRET = '';
   process.env.PHOTOS_DIR = '';
   process.env.EMAIL_SCAN_DISABLED = '';
+  // Tunables a previous freshApp call may have overridden (e.g. STEPUP_VERIFY_PER_MIN: '100' in the
+  // lockout suite) — reset to '' (falsy → module default) so no test depends on file order. Pinned,
+  // not deleted, for the same dotenv-repopulation reason as above.
+  process.env.STEPUP_VERIFY_PER_MIN = '';
+  process.env.STEPUP_SET_PER_5MIN = '';
   for (const [k, v] of Object.entries(env)) process.env[k] = v;
   const mod = await import('../../server');
   return mod.app;
@@ -378,5 +383,55 @@ describe('scoped body limits (B1)', () => {
     const res = await auth(request(app).post('/api/parse-pdf').set('Content-Type', 'application/json').send(big));
     // 400 (bad base64) is fine — proves the body was parsed, not 413'd
     expect(res.status).not.toBe(413);
+  });
+
+  it('accepts >256kb JSON on /api/data/:key — a LAN household saving a real documents collection', async () => {
+    const { app, auth } = await authedApp();
+    const docs = [{ id: 'd1', name: 'big.pdf', folder: 'School', text: 'x'.repeat(300 * 1024) }];
+    const res = await auth(request(app).post('/api/data/documents').send(docs));
+    // Any non-413 proves the parser tier is right; the save itself should succeed on the sqlite box.
+    expect(res.status).not.toBe(413);
+  });
+
+  it('accepts >256kb JSON on /api/copilot — the grounding corpus rides in the request body', async () => {
+    const { app, auth } = await authedApp();
+    // No prompt → the route's own 400 fires AFTER parsing, proving a large body clears the limit
+    // without this test ever reaching an AI call.
+    const big = { documents: [{ name: 'n', text: 'x'.repeat(300 * 1024) }] };
+    const res = await auth(request(app).post('/api/copilot').send(big));
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Prompt is required');
+  });
+});
+
+// ── Final error handler: body-parser client faults keep their 4xx (was a flattened 500) ───────────
+// startServer registers finalErrorHandler last; the bare test app registers the SAME export so
+// supertest exercises the production error path instead of Express's default handler.
+describe('finalErrorHandler (body-parser faults → 400/413, backstop → 500)', () => {
+  let app: any;
+  let auth: (r: request.Test) => request.Test;
+  beforeAll(async () => {
+    ({ app, auth } = await authedApp());
+    const mod = await import('../../server');
+    app.use(mod.finalErrorHandler);
+  });
+
+  it('malformed JSON body → 400 "Invalid request body." (not 500)', async () => {
+    const res = await request(app).post('/api/geocode').set('Content-Type', 'application/json').send('{"q": ');
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Invalid request body.');
+  });
+
+  it('over-limit JSON on a 256kb route → 413 "Request body too large." (not 500)', async () => {
+    const big = JSON.stringify({ q: 'x'.repeat(300 * 1024) });
+    const res = await auth(request(app).post('/api/geocode').set('Content-Type', 'application/json').send(big));
+    expect(res.status).toBe(413);
+    expect(res.body.error).toBe('Request body too large.');
+  });
+
+  it('parse-quickadd rejects a non-string text with 400 (was a TypeError → 500)', async () => {
+    const res = await auth(request(app).post('/api/parse-quickadd').send({ text: 5 }));
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Some text is required.');
   });
 });

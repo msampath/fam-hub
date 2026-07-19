@@ -10,15 +10,17 @@ CLI** (`adk run` / `adk web`).
 ```
 adk run / adk web
    └─ concierge (root)            routes to ONE specialist (LLM-driven delegation; holds no tools itself)
-        ├─ calendar_agent   →  MCP: create_event, update_event                      ┐
-        ├─ chores_agent     →  MCP: add_chore, delete_chore, clear_chores,          │ scoped CRUD adapters.
-        │                           update_chore                                    │ The split is for tool-scoping
-        ├─ shopping_agent   →  MCP: add_shopping_item, add_to_cart,                 │ (a specialist can't call a tool
-        │                           delete_shopping_item                            │ outside its slice) + small-model
-        ├─ briefing_agent   →  MCP: get_events/chores/upcoming (READ)               │ routing reliability — NOT autonomy.
-        ├─ bills_agent      →  MCP: get_bills (READ)                                │ delete/clear/update are confirm-
-        ├─ files_agent      →  MCP: search/move/delete_document                     ┘ tier (staged in Approvals).
-        └─ outings_agent    →  MCP: find_places, web_search, fetch_page, prepare_handoff, set_goal
+        ├─ calendar_agent     →  MCP: create_event, update_event, delete_event      ┐
+        ├─ chores_agent       →  MCP: add_chore, delete_chore, clear_chores,        │ scoped CRUD adapters.
+        │                             update_chore                                  │ The split is for tool-scoping
+        ├─ shopping_agent     →  MCP: add_shopping_item, add_to_cart,               │ (a specialist can't call a tool
+        │                             delete_shopping_item, add/delete_pantry_item  │ outside its slice) + small-model
+        ├─ meal_planner_agent →  MCP: set_meal_plan, delete_meal_plan,              │ routing reliability — NOT autonomy.
+        │                             add_shopping_item, +5 (full list: SKILL.md)   │ delete/clear/update are confirm-
+        ├─ briefing_agent     →  MCP: get_events/chores/upcoming/search (READ)      │ tier (staged in Approvals).
+        ├─ bills_agent        →  MCP: get_bills (READ)                              │
+        ├─ files_agent        →  MCP: search_local_knowledge, move/delete_document  ┘
+        └─ outings_agent      →  MCP: find_places, web_search, fetch_page, prepare_handoff, set_goal … (full list: SKILL.md)
                                   │  the ONE multi-step loop: research the venue's own site → read its real
                                   │  published booking link → stage a provenance-verified handoff draft
                                   │  (each specialist gets only its slice via tool_filter)
@@ -39,7 +41,7 @@ Prereqs: Node deps installed at the repo root (`npm install`), Python 3.10+, and
 cd agent
 python -m venv .venv && source .venv/bin/activate   # (Windows: .venv\Scripts\activate)
 pip install -r requirements.txt
-cp .env.example .env        # then put your GOOGLE_API_KEY in .env
+cp ../.env.example ../.env   # the agent reads the repo-root .env
 
 adk web          # open the browser UI, pick "concierge"
 # or
@@ -63,7 +65,7 @@ Contract (matches `src/utils/agentClient.ts`):
 
 | | |
 | --- | --- |
-| `POST /chat` | `{ message, sessionId?, history?, family?, goals?, copilotName? }` + `Authorization: Bearer <supabase-jwt>` → `{ reply, sessionId, actions, model }` — `history`/`family` carry the copilot's context; `goals` re-injects every turn as the CURRENT GOALS block; `copilotName` is the family's (kid-pickable) name for the copilot |
+| `POST /chat` | `{ message, sessionId?, history?, family?, goals?, copilotName? }` + `X-Visitor-Authorization: Bearer <supabase-jwt>` → `{ reply, sessionId, actions, model }` — the visitor's Supabase JWT rides in **`X-Visitor-Authorization`** (H1: `Authorization` is reserved for Cloud Run's own IAM Google ID token when the service is deployed `--no-allow-unauthenticated`); `history`/`family` carry the copilot's context; `goals` re-injects every turn as the CURRENT GOALS block; `copilotName` is the family's (kid-pickable) name for the copilot |
 | `GET /healthz` | `{ ok: true }` — local/docker only: on `*.run.app` Google's frontend RESERVES `/healthz` and 404s it without forwarding; probe `POST /chat` there instead |
 
 Each `/chat` call rebuilds the agent with the **caller's** JWT, so the MCP child persists only under that
@@ -130,11 +132,11 @@ cd agent && pytest        # asserts the root + 8 specialists are wired and carry
   tool it should have). The MCP toolset loaded **empty** — almost always the MCP stdio child didn't come up
   before ADK's session-connect timeout. The first `npx tsx src/mcp/server.ts` spawn transpiles and can take
   >5s (ADK's old default), so `_mcp` sets `timeout=MCP_STARTUP_TIMEOUT` (default **30s**). If you still hit
-  it on a slow/cold machine, raise `MCP_STARTUP_TIMEOUT` in `agent/.env`. Confirm the child works standalone
+  it on a slow/cold machine, raise `MCP_STARTUP_TIMEOUT` in the repo-root .env. Confirm the child works standalone
   with `npm run mcp` (should log `concierge MCP server ready — N tools over stdio`, N counted dynamically).
 - **`429 RESOURCE_EXHAUSTED` / "prepayment credits are depleted"** — the Gemini key's project ran out of
   paid credits. Use a key from a project **without** billing (free tier), or top up. Set it as
-  `GOOGLE_API_KEY` in `agent/.env` and restart.
+  `GOOGLE_API_KEY` in the repo-root .env and restart.
 - **`adk: command not found`** — the venv isn't active in that shell. Re-run `.venv\Scripts\Activate.ps1`
   (Windows) / `source .venv/bin/activate`; the `(.venv)` prompt prefix means it's live.
 
@@ -149,7 +151,7 @@ cd agent && pytest        # asserts the root + 8 specialists are wired and carry
   shopping/goals collections are client-owned + RLS-synced). `set_goal` is auto-tier but client-owned too
   (the client upserts it). In a hosted demo the
   ADK service sets `SUPABASE_ACCESS_TOKEN` per request from the visitor's anonymous session; for local
-  testing, set it in `agent/.env`.
+  testing, set it in the repo-root .env.
 - **`find_places` grounding:** the outings agent finds REAL nearby venues (same source as the copilot —
   Google Places New → keyless OSM Overpass fallback; Distance Matrix → OSRM drive times). It resolves the
   home location from the visitor's `settings`, so it needs persistence (a signed-in/seeded household) and a

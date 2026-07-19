@@ -157,7 +157,9 @@ krogerRouter.post('/cart-add', requireAuth, async (req, res) => {
     const { ok, data } = await krogerToken(refreshTokenBody(refreshToken));
     if (!ok || !data.access_token) {
       console.warn('[kroger] user token refresh failed:', data?.error_description || data?.error || 'unknown');
-      return res.status(400).json({ error: 'Kroger authorization expired — reconnect Kroger in Manage.' });
+      // `reconnect: true` marks THIS 400 as the token-invalid case so the client wipes the stored
+      // refresh token ONLY here — a validation 400 (e.g. "No valid items") must not force a reconnect.
+      return res.status(400).json({ error: 'Kroger authorization expired — reconnect Kroger in Manage.', reconnect: true });
     }
     const r = await fetchWithTimeout('https://api.kroger.com/v1/cart/add', 15000, {
       method: 'PUT',

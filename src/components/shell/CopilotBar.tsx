@@ -252,7 +252,9 @@ export default function CopilotBar({ onOpenManage }: CopilotBarProps) {
         {/* Actions (#) — proactive email finds to act on + manual inbox scans; opens the Actions modal.
             Always available (so a manual scan is reachable); prominent when there are finds, subtle at 0.
             Kid mode hides Actions/Approvals/Import/Manage below — the bar becomes ask-only; the input stays
-            because every destructive tool is confirm-tier, so a kid's request can only STAGE a draft. */}
+            because a kid's request can only STAGE a confirm-tier draft (parent-approved later) — and
+            applyCopilotActions additionally DROPS auto-tier deletes/clears in kid mode, so a chat request
+            can never bulk-wipe goals/meal-plans/pantry without a parent. */}
         {!kidMode && <button
           type="button"
           onClick={() => setActionsOpen(true)}

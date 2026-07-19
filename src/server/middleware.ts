@@ -15,6 +15,10 @@ import { checkRateWindow, pruneExpired } from './rateLimit';
 const jwks = (LOCAL_MODE || !SUPABASE_URL)
   ? null
   : createRemoteJWKSet(new URL(`${SUPABASE_URL}/auth/v1/.well-known/jwks.json`));
+// Supabase stamps the access token's `iss` as <project>/auth/v1 and `aud` as 'authenticated' for a
+// signed-in user. Verifying signature+exp alone would accept ANY token this JWKS can verify — pin the
+// issuer + audience so a token minted for a different Supabase project/audience is rejected.
+const EXPECTED_ISSUER = SUPABASE_URL ? `${SUPABASE_URL}/auth/v1` : undefined;
 
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   const header = req.headers.authorization || '';
@@ -30,17 +34,27 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     return next();
   }
   try {
-    const { payload } = await jwtVerify(token, jwks!);
-    req.user = { id: payload.sub } as any;
+    // Pin issuer + audience + require a `sub`; jwtVerify already enforces signature, exp, and (with a
+    // symmetric/asymmetric key) the alg family the JWKS advertises — so a wrong-project or aud-less
+    // token no longer passes on signature alone.
+    const { payload } = await jwtVerify(token, jwks!, {
+      issuer: EXPECTED_ISSUER,
+      audience: 'authenticated',
+    });
+    if (typeof payload.sub !== 'string' || !payload.sub) {
+      return res.status(401).json({ error: 'Invalid or expired session. Please sign in again.' });
+    }
+    req.user = { id: payload.sub };
     next();
   } catch {
     return res.status(401).json({ error: 'Invalid or expired session. Please sign in again.' });
   }
 }
 
-// ── Pre-auth IP throttle (cloud only): cap requests per IP before the Supabase getUser call ──
-// Without this, anyone can flood requireAuth with random Bearer tokens, each triggering a
-// blocking getUser round-trip. In LOCAL_MODE the LAN login has its own per-IP limiter.
+// ── Pre-auth IP throttle (cloud only): cap the pre-auth request flood before the JWKS verify ──
+// Without this, anyone can flood requireAuth with random Bearer tokens. The local jwtVerify is cheap,
+// but the throttle also caps unauthenticated body-parse cost (it's mounted before the parser) and any
+// JWKS refetch a burst of unknown-kid tokens would trigger. In LOCAL_MODE the LAN login self-limits.
 const PRE_AUTH_PER_MIN = Number(process.env.PRE_AUTH_PER_MIN) || 60;
 const preAuthHits = new Map<string, { count: number; resetAt: number }>();
 

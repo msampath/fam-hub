@@ -20,7 +20,8 @@ drafts into Approvals).
 
 Two services because the **digest scheduler lives in the Express web server** (`server.ts` →
 `/internal/run-digest` → `runDailyDigest()` → Resend), while the **agent** (`/chat`) is a separate Python
-container. Verified in the code: [server.ts:2700](../server.ts), [agent/api.py:133](../agent/api.py).
+container. Verified in the code: [`src/server/digest.ts` (`runDailyDigest`)](../src/server/digest.ts),
+[`agent/api.py` (`@app.post("/chat")`)](../agent/api.py).
 
 ---
 
@@ -28,7 +29,7 @@ container. Verified in the code: [server.ts:2700](../server.ts), [agent/api.py:1
 
 - **gcloud CLI** installed and logged in: `gcloud auth login`
 - A **GCP project with billing enabled** (Cloud Run + Cloud Build + Scheduler need it; usage stays in free tier for a demo)
-- A **Supabase project** already set up (`supabase/schema.sql` run, Google OAuth provider enabled)
+- A **Supabase project** already set up (`supabase/schema.sql` **and** `supabase/migrations/2026-07-06-post-capstone.sql` run, Google OAuth provider enabled)
 - Keys in hand:
   - `GEMINI_API_KEY` (Google AI Studio) — used by **both** services
   - Supabase **URL**, **anon key**, **service-role key**
@@ -289,5 +290,5 @@ Or trigger the scheduled job directly: `gcloud scheduler jobs run family-hub-dig
   even that.
 - **`InMemorySessionService`** — conversation history is per-instance and lost on cold start / scale-out. With
   `--min-instances 1` it's stable for a demo; production would swap in a persistent session service.
-- **7 MCP children per request** — intentional (per-specialist `tool_filter` scoping); the container uses the
+- **8 MCP children per request** — intentional (per-specialist `tool_filter` scoping); the container uses the
   prebuilt `dist/mcp-server.cjs` bundle (not `npx tsx`) to keep spawn time low. Hence the `--concurrency 4` cap.

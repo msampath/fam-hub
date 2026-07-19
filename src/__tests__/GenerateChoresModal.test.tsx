@@ -21,7 +21,7 @@ const SAMPLE: GeneratedChore[] = [
   { title: 'Toy bin tidy', assignedTo: 'Max', points: 5, timesPerDay: 1, repeatType: 'daily', scheduleTimeOfDay: 'Evening' },
 ];
 
-const fillAges = (getByLabelText: any = null, container?: HTMLElement) => {
+const fillAges = (_getByLabelText: any = null, container?: HTMLElement) => {
   const ava = (container ?? document).querySelector('#gen-chore-age-Ava') as HTMLInputElement;
   const max = (container ?? document).querySelector('#gen-chore-age-Max') as HTMLInputElement;
   fireEvent.change(ava, { target: { value: '8' } });

@@ -126,7 +126,10 @@ export default function Manage({ account, onClose }: ManageProps) {
   const [copilotNameDraft, setCopilotNameDraft] = useState(copilotName);
   // Daily-briefing email prefs (single-element blob); merge-patch the one entry.
   const digest: DigestPrefs = digestPrefs[0] || { enabled: false, email: account.user?.email || '', sendHour: 7 };
-  const setDigest = (patch: Partial<typeof digest>) => setDigestPrefs([{ ...digest, ...patch }]);
+  // Stamp the browser's IANA timezone on every save so the server fires the digest at the family's local
+  // sendHour, not the Cloud Run process's UTC hour (patch can still override if ever needed).
+  const setDigest = (patch: Partial<typeof digest>) =>
+    setDigestPrefs([{ ...digest, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, ...patch }]);
   // Recipients — a LIST so each parent can add their own email (the digest is one shared household pref). The
   // legacy single `email` is merged in (de-duped + valid); add/remove migrate to `emails` and clear `email`.
   const isEmail = (e: string) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e.trim());

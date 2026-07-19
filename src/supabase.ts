@@ -243,7 +243,7 @@ export const joinHousehold = async (_userId: string, inviteCode: string): Promis
   return !!data;
 };
 
-/** Returns the shareable 6-character invite code for a household. */
+/** Returns the shareable 16-character invite code for a household. */
 export const getInviteCode = async (householdId: string): Promise<string | null> => {
   const { data } = await supabase
     .from('households')

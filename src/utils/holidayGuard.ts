@@ -14,8 +14,22 @@ export function isHolidayOrAllDay(e: { startTime?: string; category?: string } |
   return String(e.category || '').trim().toLowerCase() === 'holiday';
 }
 
-// The family EXPLICITLY asked to remove something (so a holiday delete is intentional — keep it).
-const EXPLICIT_DELETE_RE = /\b(delete|remove|cancel|clear|get rid of|take off|drop)\b/i;
+// A delete verb ALONE isn't proof the family wants a HOLIDAY gone: "clear the driveway", "drop the
+// kids", "cancel the noise" all carry an incidental verb that used to disable the whole guard globally.
+// Instead, a protected delete counts as EXPLICIT only when the message pairs a delete verb with either
+// an event-referencing word OR the victim's own title — so an incidental verb elsewhere in the sentence
+// no longer switches off the data-loss protection. Erring toward PROTECT (a wrongly-kept holiday is
+// recoverable by a manual delete; a wrongly-executed delete is data loss).
+const DELETE_VERB_RE = /\b(delete|remove|cancel|clear|get rid of|take off|drop)\b/i;
+const EVENT_CONTEXT_RE = /\b(event|events|holiday|holidays|calendar|appointment|reminder|no[- ]?school|day off|it|that|this|them|those)\b/i;
+
+// Does the user text name this event? True when a "significant" title word (3+ chars) appears in the text.
+function titleMentioned(userText: string, titles: (string | undefined)[]): boolean {
+  const hay = userText.toLowerCase();
+  return titles.some(t => String(t || '')
+    .toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 3)
+    .some(w => hay.includes(w)));
+}
 
 export interface HolidayGuardResult<T> { kept: T[]; dropped: { title: string }[] }
 
@@ -30,7 +44,8 @@ export function filterUnrequestedHolidayDeletes<T>(
   read: (a: T) => { isDeleteEvent: boolean; ref: { id?: string; title?: string; start?: string } },
 ): HolidayGuardResult<T> {
   const list = Array.isArray(actions) ? actions : [];
-  if (EXPLICIT_DELETE_RE.test(String(userText || ''))) return { kept: list, dropped: [] };
+  const text = String(userText || '');
+  const hasDeleteVerb = DELETE_VERB_RE.test(text);
   const kept: T[] = [];
   const dropped: { title: string }[] = [];
   for (const a of list) {
@@ -38,8 +53,14 @@ export function filterUnrequestedHolidayDeletes<T>(
     if (!isDeleteEvent) { kept.push(a); continue; }
     const { victims } = resolveEventDeletion(events, { refId: ref.id, title: ref.title, start: ref.start });
     if (victims.length > 0 && victims.every(isHolidayOrAllDay)) {
-      dropped.push({ title: ref.title || victims[0]?.title || 'event' });
-      continue;
+      // Keep the protected delete ONLY if the family explicitly asked: a delete verb AND either an
+      // event-referencing word or this event named by title. Otherwise it's an unrequested delete → drop.
+      const explicit = hasDeleteVerb
+        && (EVENT_CONTEXT_RE.test(text) || titleMentioned(text, [ref.title, ...victims.map(v => v.title)]));
+      if (!explicit) {
+        dropped.push({ title: ref.title || victims[0]?.title || 'event' });
+        continue;
+      }
     }
     kept.push(a);
   }

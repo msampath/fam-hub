@@ -64,24 +64,47 @@ export function pinnedDispatcher(ip: string): Agent {
   });
 }
 
+// Headers that must NOT be replayed to a redirect target (they'd leak credentials across an origin hop).
+const REDIRECT_UNSAFE_HEADERS = new Set(['authorization', 'cookie']);
+
+// Build the init for the NEXT redirect hop: never resend the request body, and for a 301/302/303 switch
+// to GET (browser semantics — a POST that 303s becomes a GET), so we don't re-POST a body to a target the
+// caller never chose; also drop credential headers so they can't leak across the hop.
+function redirectInit(init: Parameters<typeof undiciFetch>[1], status: number): Parameters<typeof undiciFetch>[1] {
+  const next: any = { ...(init as any) };
+  delete next.body;
+  if (status === 301 || status === 302 || status === 303) next.method = 'GET';
+  const srcHeaders = (init as any)?.headers;
+  if (srcHeaders && !(srcHeaders instanceof Headers)) {
+    next.headers = Object.fromEntries(
+      Object.entries(srcHeaders).filter(([k]) => !REDIRECT_UNSAFE_HEADERS.has(k.toLowerCase())),
+    );
+  }
+  return next;
+}
+
 // Re-validate AND re-pin on every redirect hop, so a public URL can't 30x (or DNS-rebind) into a private
 // address after the initial check. Typed against undici's OWN fetch types.
 export async function safeFetch(
   initialUrl: string, init: Parameters<typeof undiciFetch>[1], maxHops = 5,
 ): Promise<Awaited<ReturnType<typeof undiciFetch>>> {
   let url = initialUrl;
+  let currentInit = init;
   for (let hop = 0; hop <= maxHops; hop++) {
     const pinnedIp = await assertSafeUrl(url);
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), 15_000);
     let res: Awaited<ReturnType<typeof undiciFetch>>;
     try {
-      res = await undiciFetch(url, { ...init, redirect: 'manual', dispatcher: pinnedDispatcher(pinnedIp), signal: ac.signal as any });
+      res = await undiciFetch(url, { ...currentInit, redirect: 'manual', dispatcher: pinnedDispatcher(pinnedIp), signal: ac.signal as any });
     } finally { clearTimeout(timer); }
     if (res.status >= 300 && res.status < 400) {
       const location = res.headers.get('location');
       if (!location) return res;
+      // Drain the 3xx body before the next hop so the socket is released, not left dangling.
+      await (res.body as any)?.cancel?.().catch(() => {});
       url = new URL(location, url).toString(); // resolve relative redirects
+      currentInit = redirectInit(currentInit, res.status); // don't replay body/credentials to the target
       continue;
     }
     return res;

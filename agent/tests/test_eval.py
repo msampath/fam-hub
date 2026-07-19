@@ -129,16 +129,16 @@ def test_local_head_leads_the_chain_only_when_enabled(monkeypatch):
 
 def test_extract_bearer_reads_visitor_jwt_case_insensitive_scheme():
     # H1: X-Visitor-Authorization carries the visitor's Supabase JWT (Authorization is reserved for
-    # Cloud Run's own IAM gate) — _extract_bearer is the pure parsing step both headers would use.
-    if not _HAS_KEY:
-        pytest.skip("importing agent.api needs a Gemini key (boot guard)")
-    from agent import api  # agent/api.py — a real package-relative import (repo root is on sys.path)
-    assert api._extract_bearer("Bearer abc.def.ghi") == "abc.def.ghi"
-    assert api._extract_bearer("bearer abc.def.ghi") == "abc.def.ghi"  # scheme is case-insensitive
-    assert api._extract_bearer("Bearer   ") is None  # empty token after the prefix
-    assert api._extract_bearer("Basic abc") is None  # wrong scheme
-    assert api._extract_bearer(None) is None
-    assert api._extract_bearer("") is None
+    # Cloud Run's own IAM gate). extract_bearer is the pure parsing step — imported from the standalone
+    # concierge.authheader module so this security assertion runs KEYLESS in CI (importing agent.api would
+    # trip its GOOGLE_API_KEY boot guard and self-skip, defeating the point of the test).
+    from agent.concierge.authheader import extract_bearer
+    assert extract_bearer("Bearer abc.def.ghi") == "abc.def.ghi"
+    assert extract_bearer("bearer abc.def.ghi") == "abc.def.ghi"  # scheme is case-insensitive
+    assert extract_bearer("Bearer   ") is None  # empty token after the prefix
+    assert extract_bearer("Basic abc") is None  # wrong scheme
+    assert extract_bearer(None) is None
+    assert extract_bearer("") is None
 
 
 # ── LIVE: prompt-driven behavior (owner-run, needs a Gemini key) ──────────────────────────────────

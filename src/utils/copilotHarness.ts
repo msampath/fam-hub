@@ -21,7 +21,10 @@ export function addDaysISO(iso: string, n: number): string {
 
 // Build the authoritative DATE FACTS block: today, the next `days` dates with weekdays, the next
 // two weekends spelled out, and known events tagged with their weekday.
-export function buildDateFacts(today: string, events: { title: string; start: string; end?: string }[] = [], days = 12, nowLabel?: string): string {
+// maxEvents caps how many events are spelled out — an unbounded household calendar would otherwise
+// inject hundreds of lines into the prompt (resent up to 3× by the critic loop) → unbounded token
+// cost on the owner's key. Events are sorted by start so the cap keeps the SOONEST ones.
+export function buildDateFacts(today: string, events: { title: string; start: string; end?: string }[] = [], days = 12, nowLabel?: string, maxEvents = 60): string {
   const upcoming: string[] = [];
   const saturdays: string[] = [];
   const sundays: string[] = [];
@@ -39,13 +42,16 @@ export function buildDateFacts(today: string, events: { title: string; start: st
   // Empty-state guard: spell out "no commitments" so a small model doesn't hallucinate placeholders.
   // Multi-day events are annotated "(through <end>)" so DATE FACTS doesn't read as a one-day event
   // while AVAILABILITY/LONG WEEKEND span the whole range (the two blocks would otherwise contradict).
-  const eventLines = events.length
-    ? events.map(e => {
+  const sorted = [...events].sort((a, b) => String(a.start).slice(0, 10).localeCompare(String(b.start).slice(0, 10)));
+  const shown = sorted.slice(0, Math.max(0, maxEvents));
+  const overflow = sorted.length - shown.length;
+  const eventLines = shown.length
+    ? shown.map(e => {
         const start = e.start.slice(0, 10);
         const end = e.end ? String(e.end).slice(0, 10) : '';
         const span = end && end !== start ? ` (through ${weekdayOf(end)} ${end})` : '';
         return `  - ${weekdayOf(start)} ${start}: ${sanitizeForPrompt(e.title, 100)}${span}`;
-      }).join('\n')
+      }).join('\n') + (overflow > 0 ? `\n  - (+${overflow} more later events not listed)` : '')
     : '  - (none) — the family has no existing commitments in this window.';
   // nowLabel is the server-local wall-clock time (e.g. "3:15 PM"); injecting it prevents after-hours
   // suggestions ("go to the zoo" at 5pm) and reinforces the date anchor.

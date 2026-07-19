@@ -82,20 +82,25 @@ describe('NamePromptModal — join an existing household by invite code', () => 
     const handleJoinHousehold = vi.fn(e => e.preventDefault());
     const { container } = renderWithApp(<NamePromptModal />, {
       handleJoinHousehold,
-      inviteCodeInput: 'ABC123', // ≥6 chars → Join enabled
+      inviteCodeInput: 'A1B2C3D4E5F60718', // valid 16-hex code (§5b shape) → Join enabled
     });
     const input = container.querySelector('#name-prompt-invite-input') as HTMLInputElement;
     expect(input).not.toBeNull();
+    // The field must physically accept a full 16-hex code (regression: maxLength=6 truncated them).
+    expect(input.maxLength).toBe(16);
     const joinBtn = container.querySelector('#name-prompt-join-btn') as HTMLButtonElement;
     expect(joinBtn.disabled).toBe(false);
     fireEvent.submit(joinBtn.closest('form')!);
     expect(handleJoinHousehold).toHaveBeenCalled();
   });
 
-  it('disables Join until a full 6-char code is entered', () => {
-    const { container } = renderWithApp(<NamePromptModal />, { inviteCodeInput: 'AB' });
-    const joinBtn = container.querySelector('#name-prompt-join-btn') as HTMLButtonElement;
-    expect(joinBtn.disabled).toBe(true);
+  it('disables Join until the input is a valid 16-hex invite code', () => {
+    for (const partial of ['AB', 'ABC123', 'A1B2C3D4E5F6071']) { // incl. the old 6-char shape
+      const { container, unmount } = renderWithApp(<NamePromptModal />, { inviteCodeInput: partial });
+      const joinBtn = container.querySelector('#name-prompt-join-btn') as HTMLButtonElement;
+      expect(joinBtn.disabled).toBe(true);
+      unmount();
+    }
   });
 
   it('leads with the join CTA for a brand-new (empty) household', () => {

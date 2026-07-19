@@ -84,7 +84,9 @@ export async function krogerCartAdd(items: { upc: string; quantity?: number }[])
   const res = await apiFetch('/api/kroger/cart-add', { method: 'POST', body: JSON.stringify({ items, refreshToken }) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    if (res.status === 400) setStoredKrogerToken(null); // expired/invalid — force a reconnect
+    // Wipe the stored token ONLY when the server flags a token-invalid failure (reconnect:true) — a
+    // plain validation 400 (bad UPC, "No valid items") must not destroy a still-valid refresh token.
+    if (data?.reconnect) setStoredKrogerToken(null);
     throw new Error(data?.error || 'Cart update failed.');
   }
   if (data.refreshToken) setStoredKrogerToken(data.refreshToken);

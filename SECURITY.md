@@ -30,7 +30,8 @@ The short version of the security model:
 - **Server-authoritative risk tiers.** Every mutating tool is classified auto / confirm /
   step-up-PIN in the MCP tool layer, server-side — never trusted to the model. Destructive
   operations are confirm-tier by construction (staged in the Approvals queue, applied on approval);
-  the step-up PIN is scrypt-hashed and checked server-side.
+  the step-up PIN is rate-limited + lockout server-side (a 5-fail/10-min lockout plus a per-minute
+  cap); full server-authoritative PIN storage lands with the first real step-up executor.
 - **Household isolation.** On the Supabase path, row-level security scopes every read and write to
   the caller's household (verified in the review: RLS on all tables, no service-role bypass in the
   data path). On the SQLite appliance, every storage-adapter call carries the authenticated
@@ -46,8 +47,10 @@ The current posture was reviewed for **personal, single-household use** (self-ho
 or one family's cloud deploy). Under that threat model the review found **0 critical / 0 high**
 findings. Several knowns escalate to High the moment the app faces multiple untrusted users or the
 public internet — they are deliberately deferred, not unknown: refresh-token-to-user binding, the
-DNS-rebinding residual, server-side invite-join validation, PIN brute-force throttling, and digest
-endpoint ingress gating, among others.
+DNS-rebinding residual, and digest endpoint ingress gating, among others. Two items once on this
+list are now **implemented**: server-side invite-join validation (`join_household_by_code` validates
+and throttles server-side) and PIN brute-force throttling (a 5-fail/10-min lockout plus a per-minute
+cap).
 
 If you intend a **public or multi-tenant deploy**, treat the deferred items above as gating work,
 not suggestions — and open a security advisory first so the maintainer can share the current

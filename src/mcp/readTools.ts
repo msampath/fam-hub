@@ -103,7 +103,14 @@ export function shapeUpcoming(events: CalendarEvent[], today: string, days = 7) 
   let end = today;
   for (let i = 0; i < Math.max(0, days); i++) end = addOneDayUTC(end);
   return events
-    .filter(e => { const d = (e.start || '').slice(0, 10); return d && d >= today && d <= end; })
+    .filter(e => {
+      const d = (e.start || '').slice(0, 10);
+      if (!d) return false;
+      // Compare on the END date (falling back to start) for the lower bound so an in-progress multi-day
+      // event that STARTED before today but is still running is included — the same fix shapeEvents got.
+      const dEnd = (e.end || e.start || '').slice(0, 10);
+      return dEnd >= today && d <= end;
+    })
     .sort(byStart)
     .map(shapeEvent);
 }

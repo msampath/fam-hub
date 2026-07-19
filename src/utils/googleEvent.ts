@@ -24,10 +24,12 @@ export function buildGoogleEventBody(ev: CalendarEvent) {
     // event legitimately has an earlier end time-of-day.
     if (endDate === ev.start && endMin <= startMin) endMin = startMin + 60;
     if (endMin > 23 * 60 + 59) { endDate = addOneDayUTC(endDate); endMin -= 24 * 60; }
-    const endHm = `${String(Math.floor(endMin / 60)).padStart(2, '0')}:${String(endMin % 60).padStart(2, '0')}`;
+    const hm = (min: number) => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
+    // Zero-pad the START time too (from the parsed minutes) — interpolating a raw "9:00" would emit an
+    // invalid RFC3339 dateTime ("...T9:00:00") that Google rejects, while the end was already padded.
     timing = {
-      start: { dateTime: `${ev.start}T${ev.startTime}:00`, timeZone: tz },
-      end: { dateTime: `${endDate}T${endHm}:00`, timeZone: tz },
+      start: { dateTime: `${ev.start}T${hm(startMin)}:00`, timeZone: tz },
+      end: { dateTime: `${endDate}T${hm(endMin)}:00`, timeZone: tz },
     };
   } else {
     timing = { start: { date: ev.start }, end: { date: addOneDayUTC(ev.end || ev.start) } };

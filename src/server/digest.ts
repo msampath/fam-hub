@@ -5,7 +5,7 @@ import { buildProactiveLedger, buildGoalNudges } from '../utils/proactiveBriefin
 import { MORNING_PLANNER_SYSTEM, buildMorningPlannerSchema, MORNING_GENCONFIG, buildMorningFacts, validateMorningProposals, toLedgerEntries } from '../utils/morningAgent';
 import { sanitizeStoreList } from '../constants';
 import { LEDGER_CAP } from '../utils/historyLog';
-import { shouldRunDigestNow } from '../utils/digest';
+import { shouldRunDigestNow, localDateHour } from '../utils/digest';
 import { sendDigestEmail } from '../utils/mailer';
 import { familyDataRow, FAMILY_DATA_CONFLICT } from '../utils/familyData';
 import { buildBriefingWeather } from '../utils/weatherFacts';
@@ -68,8 +68,6 @@ export async function runDailyDigest(): Promise<void> {
   }
   const admin = createClient(SUPABASE_URL, serviceKey, { auth: { persistSession: false } });
   const now = new Date();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
   const { data: prefsRows } = await admin.from('family_data').select('household_id,data').eq('data_key', 'digestprefs');
   for (const row of prefsRows || []) {
     const prefs = Array.isArray(row.data) ? row.data[0] : null;
@@ -78,7 +76,10 @@ export async function runDailyDigest(): Promise<void> {
       ...(prefs?.email ? [prefs.email] : []),
     ].map((e: any) => String(e || '').trim()).filter((e: string) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e))));
     if (!prefs?.enabled || !recipients.length) continue;
-    if (!shouldRunDigestNow(now, Number(prefs.sendHour ?? 7), prefs.lastRunDate || null, today)) continue;
+    // Compute "today" + the hour in THIS household's timezone (the client stamps prefs.timeZone) — on the
+    // UTC Cloud Run deploy the process clock is not the family's, so sendHour=7 must mean 7am THEIR time.
+    const { date: today, hour: localHour } = localDateHour(now, prefs.timeZone);
+    if (!shouldRunDigestNow(localHour, Number(prefs.sendHour ?? 7), prefs.lastRunDate || null, today)) continue;
     // Re-read THIS household's prefs right before writing — narrows the window since the batch read
     // above (taken before every OTHER household in this run was processed) so a user's own edit in the
     // meantime (e.g. disabling the digest) isn't reverted by the stale `enabled`/fields we'd otherwise spread.

@@ -36,10 +36,23 @@ describe('filterUnrequestedHolidayDeletes', () => {
     expect(r.dropped).toHaveLength(1);
   });
 
-  it('KEEPS the delete when the user explicitly asked to remove it', () => {
+  it('KEEPS the delete when the user explicitly asked to remove it (names the event)', () => {
     const r = filterUnrequestedHolidayDeletes([del('Independence Day', '2026-07-04')], EVENTS, 'delete Independence Day', agentRead);
     expect(r.kept).toHaveLength(1);
     expect(r.dropped).toHaveLength(0);
+  });
+
+  it('KEEPS the delete when the verb pairs with a generic event word ("cancel that holiday")', () => {
+    const r = filterUnrequestedHolidayDeletes([del('Independence Day', '2026-07-04')], EVENTS, 'cancel that holiday please', agentRead);
+    expect(r.kept).toHaveLength(1);
+  });
+
+  it('still DROPS a holiday delete when a delete verb is only INCIDENTAL ("clear the driveway and add a picnic")', () => {
+    // "clear" is a delete verb but refers to the driveway, not a calendar item — the guard must not
+    // treat that as permission to remove the July-4 holiday.
+    const r = filterUnrequestedHolidayDeletes([del('Independence Day', '2026-07-04')], EVENTS, 'clear the driveway and add a picnic', agentRead);
+    expect(r.kept).toHaveLength(0);
+    expect(r.dropped).toEqual([{ title: 'Independence Day' }]);
   });
 
   it('KEEPS a delete of a real timed event', () => {

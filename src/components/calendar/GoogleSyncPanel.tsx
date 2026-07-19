@@ -141,8 +141,8 @@ export default function GoogleSyncPanel() {
                             type="text"
                             value={inviteCodeInput}
                             onChange={e => setInviteCodeInput(e.target.value.toUpperCase())}
-                            placeholder="Enter code to join"
-                            maxLength={6}
+                            placeholder="16-character code to join"
+                            maxLength={16}
                             className="flex-1 px-2 py-1 text-xs bg-[#0e1117] text-slate-100 border border-slate-700 rounded-lg font-mono tracking-widest uppercase focus:outline-none focus:ring-1 focus:ring-emerald-400 placeholder:text-slate-500"
                           />
                           <button

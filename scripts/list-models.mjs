@@ -7,5 +7,6 @@ const key = process.env.GEMINI_API_KEY;
 if (!key) { console.error('Set GEMINI_API_KEY first.'); process.exit(1); }
 
 const ai = new GoogleGenAI({ apiKey: key });
-const { models } = await ai.models.list({ config: { pageSize: 200 } });
-for (const m of models) console.log(`${m.name}  ${m.displayName ?? ''}`);
+// ai.models.list() returns an async Pager you iterate — not an object with a `.models` array.
+const pager = await ai.models.list({ config: { pageSize: 200 } });
+for await (const m of pager) console.log(`${m.name}  ${m.displayName ?? ''}`);

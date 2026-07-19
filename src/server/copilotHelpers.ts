@@ -29,7 +29,10 @@ export function dedupeActions(actions: any[]): any[] {
   const out: any[] = [];
   for (const a of actions) {
     const p = a?.payload || {};
-    const key = [a?.type, p.id, p.title, p.start, p.text, p.assignedTo]
+    // Include the SELECTOR fields (matchTitle/matchDate/store) — not just create-shape fields — so two
+    // DISTINCT update/delete actions in one turn (e.g. delete "Dentist" + delete "Soccer", each carried
+    // by matchTitle with no id/title) don't collapse to the same key and silently drop the second.
+    const key = [a?.type, p.id, p.title, p.start, p.text, p.assignedTo, p.matchTitle, p.matchDate, p.store]
       .map(x => String(x ?? '').trim().toLowerCase()).join('|');
     if (seen.has(key)) continue;
     seen.add(key);

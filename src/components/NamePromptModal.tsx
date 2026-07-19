@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { X } from 'lucide-react';
 import { useApp } from '../AppContext';
+import { isValidInviteCode } from '../supabase';
 import { APP_NAME } from '../constants';
 import { useModalA11y } from '../hooks/useModalA11y';
 import { C } from './shell/theme';
@@ -146,21 +147,21 @@ export default function NamePromptModal({ dismissable, onDismiss }: { dismissabl
               type="text"
               value={inviteCodeInput}
               onChange={e => setInviteCodeInput(e.target.value.toUpperCase())}
-              placeholder="6-char code"
-              maxLength={6}
+              placeholder="16-character code"
+              maxLength={16}
               className="flex-1 px-3 py-2 text-sm font-mono tracking-widest rounded-xl focus:outline-none focus:ring-1 focus:ring-emerald-500 placeholder:text-slate-500"
               style={{ background: C.app, border: `1px solid ${C.emerald}55`, color: C.primary }}
             />
             <button
               type="submit"
               id="name-prompt-join-btn"
-              disabled={isJoiningHousehold || inviteCodeInput.trim().length < 6}
+              disabled={isJoiningHousehold || !isValidInviteCode(inviteCodeInput)}
               className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
             >
               {isJoiningHousehold ? 'Joining…' : 'Join'}
             </button>
           </div>
-          <p className="text-[10px] mt-1.5" style={{ color: C.ink }}>The code is shown in your family member's Calendar → Sync Sources → Google Calendar panel.</p>
+          <p className="text-[10px] mt-1.5" style={{ color: C.ink }}>The code is shown in your family member's Manage screen (Copy / Regenerate next to the invite code).</p>
         </form>
 
         <div className="flex items-center gap-2 my-3">

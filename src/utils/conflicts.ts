@@ -44,7 +44,10 @@ export function detectConflicts(events: CalendarEvent[]): ConflictLike[] {
     if (!ev.startTime) continue; // only timed events can clock-clash
     const start = (ev.start || '').split('T')[0];
     if (!start) continue;
-    const end = (ev.end ? ev.end.split('T')[0] : start) || start;
+    const rawEnd = (ev.end ? ev.end.split('T')[0] : start) || start;
+    // A malformed event whose end date precedes its start would make the `day <= end` loop never run,
+    // silently dropping it from conflict detection — treat such an event as single-day (start only).
+    const end = rawEnd >= start ? rawEnd : start;
     let day = start;
     let guard = 0;
     while (day <= end && guard++ < 400) {

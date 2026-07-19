@@ -371,10 +371,8 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   // structured result the rest of the layer guarantees, rather than rejecting the request.
   try {
     // When persisting, validate against the visitor's REAL roster + events (so a chore for "Ava"
-    // resolves and update_event can find its target); otherwise the persistence-free contract ctx. The
-    // loaded collections are handed to persistResult so create_event's append reuses 'events' (no re-read).
+    // resolves and update_event can find its target); otherwise the persistence-free contract ctx.
     let ctx = buildToolCtx(today);
-    let preloaded: Record<string, any[]> | undefined;
     if (persistence) {
       const [familyMembers, events, settings] = await Promise.all([
         persistence.loadCollection('members').catch(() => []),
@@ -384,9 +382,8 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       // Household-defined store lists (Phase-5): validate add_shopping_item stores against THEIR lists.
       const validStores = sanitizeStoreList((settings as any[])[0]?.storeList);
       ctx = buildToolCtx(today, { familyMembers: familyMembers as any, events: events as any, validStores });
-      preloaded = { members: familyMembers, events };
     }
-    const result = await persistResult(tool.run(args, ctx), persistence, preloaded);
+    const result = await persistResult(tool.run(args, ctx), persistence);
     return { content: [{ type: 'text', text: JSON.stringify(result) }], isError: !result.ok };
   } catch (err: any) {
     const failed: McpToolResult = { ok: false, tool: name, tier: 'auto', status: 'rejected', message: `Tool failed: ${safeErrorMsg(err)}` };

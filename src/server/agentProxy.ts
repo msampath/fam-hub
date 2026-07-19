@@ -5,7 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 import { aiErrorResponse } from './gemini';
 import { requireAuth, aiRateLimit } from './middleware';
 import { LOCAL_MODE, SUPABASE_URL, SUPABASE_ANON_KEY } from './config';
-import { storageMode, getSqliteAdapter } from '../storage';
+import { getSqliteAdapter } from '../storage';
 import { SqliteAgentJobStore, SupabaseAgentJobStore, lookupHouseholdId, type AgentJobStore } from '../storage/agentJobs';
 import { fetchCloudRunIdToken } from './fetchUtils';
 

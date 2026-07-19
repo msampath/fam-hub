@@ -38,7 +38,7 @@ const appendBuild = (dataKey: string, items: any[]) => (cur: any[]): any[] =>
 export interface Persistence {
   loadCollection(dataKey: string): Promise<any[]>;       // current blob (for ctx + read-modify-write)
   // Append items; returns the new length. CAS-guarded on the active SQLite appliance path (see SqlitePersistence).
-  append(dataKey: string, items: any[], current?: any[]): Promise<number>;
+  append(dataKey: string, items: any[]): Promise<number>;
   // Compare-and-set read-modify-write: load, apply `transform`, save — retrying on a concurrent write so a
   // move/edit can't clobber another writer's change (the CAS-safe replacement for load-then-replace).
   mutate(dataKey: string, transform: (cur: any[]) => any[]): Promise<void>;
@@ -162,10 +162,10 @@ export class SupabasePersistence implements Persistence {
     return next;
   }
 
-  // `current` (the caller's preloaded blob) is intentionally IGNORED — same reasoning as SqlitePersistence:
-  // under the lock every append must merge into the FRESHEST blob, and a preloaded snapshot is stale by
-  // definition for every call after the first in a parallel burst.
-  async append(dataKey: string, items: any[], _current?: any[]): Promise<number> {
+  // Under the lock every append re-reads and merges into the FRESHEST blob (via casWrite) — a caller's
+  // preloaded snapshot would be stale for every call after the first in a parallel burst, so append
+  // takes none by design.
+  async append(dataKey: string, items: any[]): Promise<number> {
     return this.locked(dataKey, async () => (await this.casWrite(dataKey, appendBuild(dataKey, items))).length);
   }
 
@@ -264,7 +264,7 @@ export class SqlitePersistence implements Persistence {
     return next;
   }
 
-  async append(dataKey: string, items: any[], _current?: any[]): Promise<number> {
+  async append(dataKey: string, items: any[]): Promise<number> {
     return this.locked(dataKey, async () => (await this.casWrite(dataKey, appendBuild(dataKey, items))).length);
   }
 
@@ -307,17 +307,17 @@ export class SqlitePersistence implements Persistence {
 // status to 'applied'. confirm/stepup results (drafts, update_event) are NOT auto-persisted — they stay
 // staged for human approval. No persistence → returns the result unchanged (contract slice). The I/O is
 // injected (Persistence), so the orchestration is unit-testable with a mock.
-// `preloaded` (dataKey → already-loaded blob, from the server's ctx build) lets append skip a redundant
-// read when the target collection was already fetched for validation.
+// NOTE: append does NOT accept a preloaded snapshot — both Persistence impls must re-read the FRESHEST
+// blob under their per-key lock (a preloaded copy is stale the moment another append lands), so passing
+// one would be a correctness hazard, not an optimization.
 export async function persistResult(
   result: McpToolResult,
   persistence: Persistence | null,
-  preloaded?: Record<string, any[]>,
 ): Promise<McpToolResult> {
   if (!persistence || !result.ok || result.status !== 'validated') return result;
   const key = TOOL_COLLECTION[result.tool];
   if (!key) return result;
   const items = Array.isArray(result.artifact) ? result.artifact : [result.artifact];
-  await persistence.append(key, items, preloaded?.[key]);
+  await persistence.append(key, items);
   return { ...result, status: 'applied' };
 }

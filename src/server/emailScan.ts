@@ -128,7 +128,7 @@ emailScanRouter.post('/scan-newsletters', requireAuth, aiRateLimit, async (req, 
     const scan = await fetchInbox(req, buildNewsletterQuery(), 30);
     if (scan.error) return res.status(scan.status || 502).json({ error: scan.error });
     if (!scan.messages.length) return res.json({ newsletters: [], scanned: 0 });
-    let byIndex = new Map<number, { keep?: boolean; title?: string; summary?: string }>();
+    const byIndex = new Map<number, { keep?: boolean; title?: string; summary?: string }>();
     let ran = false;
     try {
       const parsed = await callGeminiJSON(buildNewsletterClassifyPrompt(scan.messages), NEWSLETTER_SYSTEM, NEWSLETTER_CLASSIFY_SCHEMA, '{"items":[]}', undefined, SCAN_GENCONFIG, SCAN_LOCAL_OPTS);

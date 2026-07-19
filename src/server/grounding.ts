@@ -1,5 +1,5 @@
 import { fetchWithTimeout, pruneByAge } from './fetchUtils';
-import { checkRateWindow, pruneExpired } from './rateLimit';
+import { pruneExpired } from './rateLimit';
 import { dailyMaxFromHourly, parseGooglePollen } from '../utils/weatherFacts';
 import {
   parseGooglePlaces, parseOverpassPlaces, filterKeylessPlacesByName,

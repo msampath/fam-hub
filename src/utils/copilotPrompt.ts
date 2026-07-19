@@ -73,7 +73,7 @@ export const COPILOT_HARNESS_SYSTEM = `You are the household's family-planning c
   - "update_event": { matchTitle (the EXACT current title of the event to change, as listed in DATE FACTS), matchStart (its current start date YYYY-MM-DD, to disambiguate), then ONLY the fields that change: start (new YYYY-MM-DD, today or later), end, startTime/endTime, title (new short title), category, members, description }. Use this ONLY to move/reschedule/change an event already listed in DATE FACTS — never invent an event to "update".
   - "add_chore": { title, assignedTo (a family member name, OR keep "both kids"/"all kids"/"everyone" VERBATIM for multi-kid intent — the app expands it to one chore per kid), points, timesPerDay, repeatType ("daily"|"weekly"), scheduleTimeOfDay }
   - "add_shopping_item": { text, store (Costco|Indian Store|Grocery Store|Other) }
-  - "reserve": { title (the venue name — a REAL place, from PLACES FACTS when present), start (YYYY-MM-DD, optional), startTime ("HH:MM", optional) } — propose this ONLY when the parent asks to book/reserve a place. It's a DRAFT: the parent gets a booking link and books it themselves. You NEVER book, pay, or confirm a reservation; never claim it's booked.
+  - "reserve": { title (the venue name — a REAL place, from PLACES FACTS when present), start (YYYY-MM-DD, optional), startTime ("HH:MM", optional) } — propose this ONLY when the parent asks to book/reserve a VENUE (a restaurant, activity, or place they want a booking link for). It's a DRAFT: the parent gets a booking link and books it themselves. You NEVER book, pay, or confirm a reservation; never claim it's booked. NOT for personal appointments: "schedule a dentist/doctor/haircut appointment" or a parent-teacher meeting is the family putting THEIR OWN appointment on the calendar → that is "create_event" (with startTime), NEVER "reserve".
   - "add_to_cart": { text (the item), quantity (optional) } — propose when the parent asks to buy / order / add something. DRAFT only: the parent gets a prefilled Amazon link and checks out in the app. You NEVER purchase, pay, or place an order; never claim it's bought.
   - "move_document": { name (the document's name EXACTLY as shown in a SAVED DOCS line), folder (the destination folder — a new folder name is fine) } — recategorize a saved Library document. Applied immediately (reversible). Use when the parent asks to file/move/recategorize a document.
   - "delete_document": { name (the document's name EXACTLY as shown in a SAVED DOCS line) } — delete a saved Library document. STAGED for the parent's one-tap confirmation (destructive). Use ONLY when the parent explicitly asks to delete/remove a document. Reference documents only by a name shown in SAVED DOCS — never invent one.
@@ -141,9 +141,15 @@ Allowed action types and payload fields:
 Parent's request: "${prompt}"`;
 }
 
+// The legacy default store list — used when a caller doesn't pass the household's own lists (tests,
+// the local-model bench). The real /api/copilot path passes the household's sanitized storeList so the
+// shopping-action `store` enum matches the family's Phase-5 store lists, not these four.
+export const DEFAULT_COPILOT_STORES = ['Costco', 'Indian Store', 'Grocery Store', 'Other'];
+
 // Response schema for the copilot call (reply + optional create-only actions). Kept in the
-// @google/genai Type.* form so the Gemini SDK accepts it verbatim.
-export const COPILOT_SCHEMA = {
+// @google/genai Type.* form so the Gemini SDK accepts it verbatim. A BUILDER so the shopping `store`
+// enum reflects the household's own store lists (Phase-5) instead of a hardcoded four.
+export const buildCopilotSchema = (stores: string[] = DEFAULT_COPILOT_STORES) => ({
   type: Type.OBJECT,
   properties: {
     reply: { type: Type.STRING, description: 'Friendly markdown answer for the parent.' },
@@ -198,7 +204,7 @@ export const COPILOT_SCHEMA = {
               repeatType: { type: Type.STRING, enum: ['daily', 'weekly'] },
               scheduleTimeOfDay: { type: Type.STRING, enum: ['Morning', 'Afternoon', 'Evening', 'Anytime'] },
               text: { type: Type.STRING },
-              store: { type: Type.STRING, enum: ['Costco', 'Indian Store', 'Grocery Store', 'Other'] },
+              store: { type: Type.STRING, enum: stores },
             },
           },
         },
@@ -207,4 +213,7 @@ export const COPILOT_SCHEMA = {
     },
   },
   required: ['reply'],
-};
+});
+
+// Default-store schema instance for consumers that don't thread household stores (tests, bench).
+export const COPILOT_SCHEMA = buildCopilotSchema();

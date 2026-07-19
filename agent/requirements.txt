@@ -7,7 +7,8 @@ mcp>=1.2,<2
 # `adk api_server`; pinned here too so `uvicorn agent.api:app` works without relying on that transitively.
 fastapi>=0.110,<1
 uvicorn[standard]>=0.29,<1
-pytest>=8.0,<10
+# pytest is a TEST-only dep — moved to requirements-dev.txt so it is NOT installed into the production
+# agent runtime image (the Dockerfile installs this file only). CI installs requirements-dev.txt.
 # Local engine tier (CONCIERGE_LOCAL_ENABLED): ADK's LiteLlm wrapper drives Ollama through litellm.
 # Only imported when the local tier is on — but pinned here so the Decision-B gate run is reproducible.
 litellm>=1.40,<2

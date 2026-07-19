@@ -90,7 +90,7 @@ import { filterUnrequestedHolidayDeletes } from './utils/holidayGuard';
 import { resolveDoc, normalizeFolder } from './utils/docActions';
 import { upsertVisit } from './utils/historyFacts';
 import { buildGoogleEventBody, googleEventMarker, findGoogleEventByMarker, summarizePushResult, pushableLocalEvents, isFamilyHubMarked } from './utils/googleEvent';
-import { LOG_CAP, LEDGER_CAP, appendCapped, buildCopilotLogEntry, buildQuickAddLogEntry, buildLedgerEntry } from './utils/historyLog';
+import { LOG_CAP, LEDGER_CAP, appendCapped, buildCopilotLogEntry, buildLedgerEntry } from './utils/historyLog';
 import { TOOL_REGISTRY } from './utils/toolRegistry';
 import { resolveLedgerEntry } from './utils/ledger';
 import { mergeGoalSteps, blockNextGoalStep, advanceGoalStep } from './utils/goals';
@@ -393,9 +393,6 @@ export default function App() {
   } = shopping;
 
   // Natural-language quick-add (global bar) — classifies one note into event/shopping/chore.
-  const [quickAddText, setQuickAddText] = useState('');
-  const [isQuickAdding, setIsQuickAdding] = useState(false);
-  const [quickAddMsg, setQuickAddMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   // (Chores board + add-chore form + choreTimeFilter now live in useChores, destructured above.)
 
@@ -870,7 +867,6 @@ export default function App() {
       homeLabelMigrated.current = true;
       void handleSaveHomeLocation(`${s.homeLat}, ${s.homeLng}`);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings]);
 
 
@@ -927,10 +923,18 @@ export default function App() {
   // applyAgentActions' "await refresh, THEN apply the optimistic goal/drafts" ordering silently
   // breaks (the await returns early and the in-flight refresh clobbers the just-added goal/ledger).
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
-  const refreshHouseholdData = (): Promise<void> => {
+  // `force` = must observe a write that JUST persisted (applyAgentActions after the agent's auto-tier
+  // write). The default coalescing path joins an already-running load — but that load may have STARTED
+  // reading the cloud BEFORE our write landed, so joining it would resync to a pre-write snapshot and the
+  // agent's write would silently not appear. When force + a load is in flight, wait for it to settle, THEN
+  // do a guaranteed-fresh read on top. The finally clears the ref only if it still points at OUR promise,
+  // so a forced refresh replacing an in-flight one doesn't get its ref nulled by the older load's finally.
+  const refreshHouseholdData = (force = false): Promise<void> => {
     if (!householdId) return Promise.resolve();
-    if (refreshInFlightRef.current) return refreshInFlightRef.current; // join the running load
+    const inFlight = refreshInFlightRef.current;
+    if (inFlight && !force) return inFlight; // join the running load (coalesce)
     const p = (async () => {
+      if (inFlight) { try { await inFlight; } catch { /* its own catch already surfaced any error */ } }
       setIsRefreshing(true);
       beginLoad();
       try {
@@ -942,10 +946,12 @@ export default function App() {
       } finally {
         endLoad();
         setIsRefreshing(false);
-        refreshInFlightRef.current = null;
       }
     })();
     refreshInFlightRef.current = p;
+    // Clear the ref when THIS load settles — but only if a later (forced) refresh hasn't already replaced
+    // it, so an older load's cleanup can't null out the newer in-flight promise.
+    void p.finally(() => { if (refreshInFlightRef.current === p) refreshInFlightRef.current = null; });
     return p;
   };
 
@@ -1247,7 +1253,7 @@ export default function App() {
       setAuthChecked(true);
     }, AUTH_RESOLVE_TIMEOUT_MS);
     return () => clearTimeout(t);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   // Dynamic helper: Days of Week starting on Monday
   const DAYS_OF_WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -2156,11 +2162,8 @@ export default function App() {
     syncGoogleCalendars(undefined, undefined, [], true); // pull-only — don't push on restore
   };
 
-  // ── Pantry + AI shopping (recipe→list, pantry→restock) ───────────────────────
-  const VALID_STORES = storeList as readonly ShoppingItem['store'][];
-
   // (appendShoppingItems + pantry/recipe/restock handlers now live in useShopping; exposed via the
-  // `shopping` hook above. appendShoppingItems is destructured for the copilot/quick-add path below.)
+  // `shopping` hook above. appendShoppingItems is destructured for the copilot path below.)
 
   // ── Natural-language quick-add + agentic copilot actions ─────────────────────
   // The validation/build logic lives in utils/aiActions.ts (pure + unit-tested); these
@@ -2179,23 +2182,6 @@ export default function App() {
   // events do, so a repeated quick-add used to stack duplicates. Deduping against the closure
   // `choresList` (this render's value) keeps it deterministic; returns the chores actually added
   // plus a duplicate count so the caller can report both.
-  const addChoresFromPayload = (p: any): { added: Chore[]; duplicates: number } => {
-    const stamp = authorStamp();
-    const candidates = buildChoresFromPayload(p, familyMembers).map(c => ({ ...c, ...stamp }));
-    if (!candidates.length) return { added: [], duplicates: 0 };
-    const seen = new Set(choresList.map(choreDedupeKey));
-    const added: Chore[] = [];
-    let duplicates = 0;
-    for (const c of candidates) {
-      const key = choreDedupeKey(c);
-      if (seen.has(key)) { duplicates++; continue; }
-      seen.add(key); // guard intra-batch dups too
-      added.push(c);
-    }
-    if (added.length) setChoresList(prev => [...prev, ...added]);
-    return { added, duplicates };
-  };
-
   // ── AI starter chore plan (docs/ai-chore-plan-generator.md) ───────────────────────────────────
   // Empty-state modal (GenerateChoresModal): parent gives each kid's age (+ optional interests/gender),
   // ONE endpoint call returns a sanitized plan, the parent reviews a per-kid preview, and the selected
@@ -2243,69 +2229,30 @@ export default function App() {
     return { added: added.length, duplicates };
   };
 
-  // Dispatch a quick-add classification result to the right existing handler.
-  const dispatchQuickAddResult = (result: any): string => {
-    const kind = result?.kind;
-    if (kind === 'event') {
-      if (!addEventFromPayload(result.event, 'qa')) throw new Error("Couldn't read that event — try rephrasing.");
-      return `✓ Added event "${result.event.title}"`;
-    }
-    if (kind === 'shopping') {
-      const n = appendShoppingItems((result.items || []).slice(0, 25)); // cap, like copilot
-      if (!n) throw new Error('No shopping items found in that note.');
-      return `✓ Added ${n} shopping item${n > 1 ? 's' : ''}`;
-    }
-    if (kind === 'chore') {
-      const title = result?.chore?.title;
-      const { added, duplicates } = addChoresFromPayload(result.chore);
-      if (!added.length && !duplicates) throw new Error("Couldn't read that chore — try rephrasing.");
-      if (!added.length) return `↺ "${title}" is already on the chore board — nothing to add.`;
-      const who = added.map(c => c.assignedTo).join(', ');
-      const dupNote = duplicates ? ` (${duplicates} already existed)` : '';
-      return `✓ Added chore "${title}" for ${who}${dupNote}`;
-    }
-    throw new Error("Couldn't classify that — try rephrasing.");
-  };
-
-  const handleQuickAdd = async () => {
-    const text = quickAddText.trim();
-    if (!text) return;
-    setIsQuickAdding(true);
-    setQuickAddMsg(null);
-    try {
-      const res = await apiFetch('/api/parse-quickadd', {
-        method: 'POST',
-        body: JSON.stringify({ text, members: familyMembers.map(m => m.name), stores: VALID_STORES }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(aiErrorMessage(
-          res.status, body,
-          'Quick-add failed.',
-          'Add it manually for now.',
-        ));
-      }
-      const data = await res.json();
-      const summary = dispatchQuickAddResult(data.result || {});
-      setQuickAddMsg({ ok: true, text: summary });
-      // Persist the quick-add prompt (raw text + classified kind + outcome) for audit/RL. The author
-      // stamp records WHO typed it; rolling-capped. Captured before clearing the input field.
-      const qaLogEntry = buildQuickAddLogEntry('qalog-' + uuid(), text, data.result?.kind, summary, authorStamp());
-      setQuickAddLog(prev => appendCapped(prev, qaLogEntry, LOG_CAP));
-      setQuickAddText('');
-    } catch (err: any) {
-      setQuickAddMsg({ ok: false, text: err.message || 'Quick-add failed.' });
-    } finally {
-      setIsQuickAdding(false);
-    }
-  };
-
   // Apply copilot-proposed actions. CREATE actions auto-apply via the existing mutators
   // (validated + clamped). UPDATE actions (which MUTATE an existing event) are NOT applied here —
   // they're staged as a confirm-tier 'pending' ledger entry, reviewed in the Approvals queue
   // (CopilotBar). Unknown/malformed actions are ignored. Returns a summary or ''.
   const applyCopilotActions = (actions: any[]): string => {
     if (!Array.isArray(actions) || !actions.length) return '';
+    // KID MODE: a chat request must not AUTO-execute a destructive action. Kid mode hides Approvals +
+    // Manage, so an auto-tier delete would run with no parent able to intervene — drop those here (the
+    // confirm-tier deletes already stage for a parent's approval, so they stay). This makes CopilotBar's
+    // "a kid's request can only STAGE a draft" guarantee actually true for the auto-tier delete tools.
+    let kidBlocked = 0;
+    if (kidMode) {
+      actions = actions.filter(a => {
+        const t = a?.type;
+        const destructiveAuto = typeof t === 'string'
+          && (t.startsWith('delete_') || t.startsWith('clear_'))
+          && (TOOL_REGISTRY[t]?.applyMode ?? 'confirm') === 'auto';
+        if (destructiveAuto) { kidBlocked++; return false; }
+        return true;
+      });
+      if (!actions.length) {
+        return kidBlocked ? 'A parent needs to approve removing things — ask a grown-up to do that.' : '';
+      }
+    }
     let nEvents = 0, nShop = 0;
     // Cumulative shopping-item budget across ALL add_shopping_item actions in this response, so many
     // small actions can't bypass the per-action cap (25 actions × 25 items would be 625 otherwise).
@@ -2823,31 +2770,45 @@ export default function App() {
     // Goals (A6): set_goal is auto-tier and CLIENT-owned (not server-persisted) — upsert each goal the
     // agent produced into the goals collection (RLS-synced so the scheduler can later nudge it). Handled
     // here (not buildAgentActionResult, which yields ledger rows) since a goal is its own collection.
-    const goals = (Array.isArray(actions) ? actions : [])
+    // KID MODE: mirror the applyCopilotActions filter — the local guard was only half the fix. The concierge
+    // AGENT path used to unconditionally auto-apply delete_goal/delete_meal_plan/delete_pantry_item (a kid's
+    // "delete all our goals" bulk-wiped with no parent gate, since kid mode hides Approvals). Drop destructive
+    // auto-tier tools from the agent's action list here too so the CopilotBar "a kid's request can only STAGE
+    // a draft" guarantee holds regardless of whether the concierge agent is configured.
+    const actionList: AgentAction[] = kidMode
+      ? (Array.isArray(actions) ? actions : []).filter(a => {
+          const t = a?.tool;
+          const destructiveAuto = typeof t === 'string'
+            && (t.startsWith('delete_') || t.startsWith('clear_'))
+            && (TOOL_REGISTRY[t]?.applyMode ?? 'confirm') === 'auto';
+          return !destructiveAuto;
+        })
+      : (Array.isArray(actions) ? actions : []);
+    const goals = actionList
       .filter(a => a?.tool === 'set_goal' && a.artifact)
       .map(a => a.artifact as Goal);
     // delete_goal (CRUD): auto-tier, client-applied — remove the matching goal(s) by id, or clear all.
-    const goalDeletes = (Array.isArray(actions) ? actions : [])
+    const goalDeletes = actionList
       .filter(a => a?.tool === 'delete_goal' && a.artifact)
       .map(a => a.artifact as GoalDelete);
     // Meal plans ride the same client-owned channel as goals: set_meal_plan is auto-tier, the
     // validated MealPlan comes back as the artifact, and the client upserts it (replace-by-week).
-    const plans = (Array.isArray(actions) ? actions : [])
+    const plans = actionList
       .filter(a => a?.tool === 'set_meal_plan' && a.artifact)
       .map(a => a.artifact as MealPlan);
     // delete_meal_plan (CRUD): auto-tier, client-applied — remove plans matching each selector.
-    const planDeletes = (Array.isArray(actions) ? actions : [])
+    const planDeletes = actionList
       .filter(a => a?.tool === 'delete_meal_plan' && a.artifact)
       .map(a => a.artifact as MealPlanDelete);
     // Pantry (client-owned auto, like goals): the agent adds/removes on-hand inventory notes; the client
     // applies the artifact to the pantry collection (RLS-synced). add is a PantryItem; delete is an id/text ref.
-    const pantryAdds = (Array.isArray(actions) ? actions : [])
+    const pantryAdds = actionList
       .filter(a => a?.tool === 'add_pantry_item' && a.artifact)
       .map(a => a.artifact as PantryItem);
-    const pantryDeletes = (Array.isArray(actions) ? actions : [])
+    const pantryDeletes = actionList
       .filter(a => a?.tool === 'delete_pantry_item' && a.artifact)
       .map(a => a.artifact as { id?: string; text?: string });
-    const { appliedCount, ledger, summary } = buildAgentActionResult(actions, () => 'led-' + uuid(), authorStamp());
+    const { appliedCount, ledger, summary } = buildAgentActionResult(actionList, () => 'led-' + uuid(), authorStamp());
     // Tie this turn's staged approvals to the goal it serves (Phase 1: same-turn association) so approving
     // one ADVANCES the goal's plan (the resume hook in resolveLedgerUpdate). Only the EXTERNAL/booking drafts
     // are goal steps — and crucially, only THOSE resolve through the resume hook's branch. A destructive
@@ -2860,7 +2821,7 @@ export default function App() {
     // actionledger. Doing it BEFORE we add this turn's optimistic goal + drafts would clobber them with the
     // stale cloud copy (they haven't persisted yet) — the bug where a trip's goal + booking drafts vanished.
     // So: await the refresh FIRST (pulls the server-applied write), THEN layer the goal + ledger on top.
-    if (appliedCount) await refreshHouseholdData(); // auto-tier writes already persisted server-side → resync local
+    if (appliedCount) await refreshHouseholdData(true); // force a FRESH read: the agent's write just persisted server-side — a coalesced join could resync a pre-write snapshot and drop it
     for (const g of goals) upsertGoal(g);
     for (const d of goalDeletes) { if (d.all) setGoalsList([]); else if (d.id) deleteGoal(d.id); }
     for (const p of plans) upsertMealPlan(p);

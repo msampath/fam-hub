@@ -69,10 +69,10 @@ describe('persistResult', () => {
     expect(out.status).toBe('validated'); // unchanged — validate-only
   });
 
-  it('reuses a preloaded collection (passes it to append, avoiding a re-read)', async () => {
+  it('appends the validated artifact to its target collection (no preloaded snapshot — append re-reads under its lock)', async () => {
     const { p } = mockPersistence();
-    await persistResult(res({ tool: 'create_event', artifact: { id: 'e1' } }), p, { events: [{ id: 'e0' }] });
-    expect(p.append).toHaveBeenCalledWith('events', [{ id: 'e1' }], [{ id: 'e0' }]);
+    await persistResult(res({ tool: 'create_event', artifact: { id: 'e1' } }), p);
+    expect(p.append).toHaveBeenCalledWith('events', [{ id: 'e1' }]);
   });
 });
 
@@ -107,14 +107,15 @@ describe('SupabasePersistence concurrent appends', () => {
     expect(new Set(store.shopping.map((s: any) => s.id)).size).toBe(12); // every distinct item survived
   });
 
-  it('ignores a stale preloaded blob — merges into the freshest state under the lock', async () => {
+  it('concurrent appends both land — each merges into the freshest state under the lock', async () => {
     const { client, store } = mockClient();
     store.shopping = [{ id: 'existing' }];
     const p = new SupabasePersistence(client);
-    // Both calls pass the SAME stale preloaded snapshot (what the pre-lock code trusted).
+    // append re-reads the freshest blob under its per-key lock (it takes no preloaded snapshot), so
+    // two concurrent appends can't clobber each other back to a stale base.
     await Promise.all([
-      p.append('shopping', [{ id: 'a' }], [{ id: 'existing' }]),
-      p.append('shopping', [{ id: 'b' }], [{ id: 'existing' }]),
+      p.append('shopping', [{ id: 'a' }]),
+      p.append('shopping', [{ id: 'b' }]),
     ]);
     expect(store.shopping.map((s: any) => s.id).sort()).toEqual(['a', 'b', 'existing']);
   });

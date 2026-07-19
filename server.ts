@@ -12,10 +12,9 @@ import path from 'path';
 import { readFileSync, existsSync, promises as fsp } from 'node:fs';
 import { randomUUID, timingSafeEqual, createHash } from 'crypto';
 import { Type } from '@google/genai';
-import type { User } from '@supabase/supabase-js';
 // NOTE: `vite` is imported DYNAMICALLY in the dev branch below (not here) so it can be a devDependency and
 // stay out of the production runtime image — the dev middleware never loads in production.
-import { buildCopilotPrompt, COPILOT_SYSTEM, COPILOT_HARNESS_SYSTEM, COPILOT_SCHEMA } from './src/utils/copilotPrompt';
+import { buildCopilotPrompt, COPILOT_SYSTEM, COPILOT_HARNESS_SYSTEM, buildCopilotSchema } from './src/utils/copilotPrompt';
 import { buildHarnessUserPrompt, buildConversationBlock, buildMealsFacts, addDaysISO } from './src/utils/copilotHarness';
 import { buildLocalKnowledgeFactsAsync } from './src/utils/localKnowledge';
 import { verifyActions, buildCriticNote, verifyActionClaims, unbackedClaimCorrection } from './src/utils/copilotCritic';
@@ -42,6 +41,22 @@ const storeRoutingLine = (stores: string[]): string => {
   ].filter(Boolean).join(' ');
   return `Assign each to the most likely store from exactly: ${quoted}.${hints ? ' ' + hints : ''}`;
 };
+
+// The { text, store } items-array Gemini schema all three shopping-AI endpoints share (recipe, restock,
+// meal-plan) — declared ONCE, mirroring the CALENDAR_EVENT_SCHEMA precedent, so the shape and the store
+// enum note can't drift between the three hand-pasted copies they used to be.
+const itemsArraySchema = (stores: string[], description: string, itemDescription: string) => ({
+  type: Type.ARRAY,
+  description,
+  items: {
+    type: Type.OBJECT,
+    properties: {
+      text: { type: Type.STRING, description: itemDescription },
+      store: { type: Type.STRING, description: `One of: ${stores.join(', ')}` },
+    },
+    required: ['text'],
+  },
+});
 import { CHORE_PLAN_STYLE_EXEMPLAR, sanitizeGeneratedChores } from './src/utils/chorePlan';
 import { buildAvailabilityBlock } from './src/utils/availability';
 import { buildLongWeekendBlock } from './src/utils/longWeekend';
@@ -50,7 +65,7 @@ import { buildHistoryFacts } from './src/utils/historyFacts';
 import { buildPlacesFacts, indexedPlaces, parseDistanceConstraint, detectPlacesIntent, isPlacesQuery, flagHiddenGems, filterRecentlyVisited } from './src/utils/placesFacts';
 import { buildEventsFacts, indexedEvents } from './src/utils/eventsFacts';
 import { cleanHTML, callGeminiJSON, CALENDAR_EVENT_SCHEMA, aiErrorResponse } from './src/server/gemini';
-import { fetchWithTimeout } from './src/server/fetchUtils';
+import { fetchWithTimeout, mapWithConcurrency } from './src/server/fetchUtils';
 import { LOCAL_MODE, STORAGE_MODE, IS_PRODUCTION, PORT, SUPABASE_URL, SUPABASE_ANON_KEY } from './src/server/config';
 import { requireAuth, aiRateLimit, preAuthThrottle } from './src/server/middleware';
 import { withinDataFetchQuota, fetchWeatherDaily, fetchAirQualityDaily, fetchPollenDaily, fetchNearbyPlaces, attachTravelTimes, fetchLocalEvents, parseUsZip } from './src/server/grounding';
@@ -65,12 +80,12 @@ import { storageMode, getSqliteAdapter } from './src/storage';
 import { handleDataGet, handleDataSave, handleDataLoadAll } from './src/storage/dataApi';
 import { signSession, newSession, isValidPassphrase } from './src/storage/localAuth';
 import { getOrCreateHouseholdId, getSessionSecret, isHouseholdConfigured, setHouseholdPassphrase, checkHouseholdPassphrase, changeHouseholdPassphrase } from './src/storage/boxConfig';
-// Pure helpers extracted to src/server/ — imported for internal use, re-exported for test consumers.
+// Pure helpers extracted to src/server/ — the ones server.ts still calls are imported; the rest are
+// re-export-only (the `export ... from` lines below need no import) for test consumers.
 import { checkRateWindow, pruneExpired } from './src/server/rateLimit';
-import { parseGeminiJSON, repairTruncatedJson, isTextOnlyContents, contentsToText, isTransientError, isRecoverableError, orderFallbackModels, isLikelyTextModel, resolveFallbackChain, isLocalToken, buildAttemptChain } from './src/server/llmHelpers';
-import { shiftIsoDate, filterUpcomingEvents, dedupeActions, ALLOWED_COPILOT_ACTIONS, sanitizeCopilotActions, sanitizeSuggestions, parseICS } from './src/server/copilotHelpers';
+import { filterUpcomingEvents, dedupeActions, sanitizeCopilotActions, sanitizeSuggestions, parseICS } from './src/server/copilotHelpers';
 import type { GroundingFact } from './src/server/copilotHelpers';
-import { hashStepUpPin, verifyStepUpPin, isValidPin, nextPinLockEntry } from './src/server/stepUpPin';
+import { toLocalDateStr } from './src/utils/dates';
 export { checkRateWindow, pruneExpired, resetPruneTimer } from './src/server/rateLimit';
 export { parseGeminiJSON, repairTruncatedJson, isTextOnlyContents, contentsToText, isTransientError, isRecoverableError, orderFallbackModels, isLikelyTextModel, resolveFallbackChain, isLocalToken, buildAttemptChain } from './src/server/llmHelpers';
 export { shiftIsoDate, filterUpcomingEvents, dedupeActions, ALLOWED_COPILOT_ACTIONS, sanitizeCopilotActions, sanitizeSuggestions, parseICS } from './src/server/copilotHelpers';
@@ -78,12 +93,13 @@ export type { GroundingFact } from './src/server/copilotHelpers';
 export { hashStepUpPin, verifyStepUpPin, isValidPin, nextPinLockEntry } from './src/server/stepUpPin';
 export { parseUsZip } from './src/server/grounding';
 
-// Type req.user (set by requireAuth) via Express declaration merging, so call sites use a typed
-// `req.user: User` instead of an untyped `req.user: any`.
+// Type req.user (set by requireAuth) via Express declaration merging. Only the verified `id` (the JWT
+// `sub`) is ever populated or read — declare exactly that instead of the full Supabase User, so the
+// assignment isn't an `as any`/`as User` lie about fields that were never fetched.
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
-    interface Request { user?: User; householdId?: string } // householdId set by requireAuth (local mode → session; cloud → Supabase)
+    interface Request { user?: { id: string }; householdId?: string } // householdId set by requireAuth (local mode → session; cloud → Supabase)
   }
 }
 
@@ -154,12 +170,21 @@ app.use('/api', preAuthThrottle);
 
 const UPLOAD_ROUTES = new Set([
   '/api/parse-pdf', '/api/extract-pdf-text', '/api/extract-docx-text',
-  '/api/extract-xlsx-text', '/api/vision-scan-pantry', '/api/photos/upload',
+  '/api/extract-xlsx-text', '/api/vision-scan-pantry',
 ]);
 const bigBody = express.json({ limit: '10mb' });
 const smallBody = express.json({ limit: '256kb' });
+// /api/photos/upload enforces a 15 MB DECODED image cap — base64 inflates ~4/3, so its JSON body needs
+// ~21 MB for that cap to be reachable at all (behind the 10mb tier it was dead code: the parser 413'd first).
+const photoBody = express.json({ limit: '21mb' });
+// /api/copilot ships the household grounding corpus (Docs Library text, events, meal plan) and the LAN
+// data API persists whole collections (documents alone can reach 200 docs × 20k chars ≈ 4 MB) — both blow
+// through 256kb on a real household, which hard-broke the copilot / local document saves. They ride the
+// 10mb upload tier; still behind preAuthThrottle, and every prompt/text field is capped before an LLM call.
 app.use((req, res, next) => {
-  (UPLOAD_ROUTES.has(req.path) ? bigBody : smallBody)(req, res, next);
+  const parser = req.path === '/api/photos/upload' ? photoBody
+    : (UPLOAD_ROUTES.has(req.path) || req.path === '/api/copilot' || req.path.startsWith('/api/data') ? bigBody : smallBody);
+  parser(req, res, next);
 });
 
 // ── LAN appliance (LOCAL_MODE): household passphrase auth + SQLite data API ──────
@@ -257,8 +282,18 @@ const isSsrfRejection = (message: unknown): boolean =>
 
 // Copilot helpers (ICS parser, action sanitization, suggestion resolver) → src/server/copilotHelpers.ts
 
-// Ensure server is live and running
-app.get('/api/health', (req, res) => {
+// Liveness + (LAN) storage readiness. On the appliance a box with a broken/unwritable SQLite file used to
+// stay "healthy" while 500ing every data request — probe the adapter so monitoring actually sees that. In
+// cloud mode the browser talks to Supabase directly, so there's no server-side storage to probe.
+app.get('/api/health', (_req, res) => {
+  if (LOCAL_MODE) {
+    try {
+      isHouseholdConfigured(getSqliteAdapter()); // cheap real read through the adapter
+    } catch (e: any) {
+      console.error('health: storage probe failed:', e?.message || e);
+      return res.status(503).json({ status: 'degraded', error: 'Storage unavailable.', time: new Date().toISOString() });
+    }
+  }
   res.json({ status: 'ok', time: new Date().toISOString() });
 });
 
@@ -266,11 +301,57 @@ app.get('/api/health', (req, res) => {
 // ISO dates within ±1yr only — drops an invented/garbled date) and tag each with a source-prefixed id
 // + its category. The only per-caller difference is the id prefix, so each source stays distinguishable.
 function tagExtractedEvents(parsedEvents: unknown, category: string, idPrefix: string) {
-  return validateExtractedEvents(Array.isArray(parsedEvents) ? parsedEvents : [], new Date().toLocaleDateString('en-CA')).map((evt: any) => ({
+  return validateExtractedEvents(Array.isArray(parsedEvents) ? parsedEvents : [], toLocalDateStr(new Date())).map((evt: any) => ({
     ...evt,
     id: idPrefix + randomUUID(),
     category: evt.category || category
   }));
+}
+
+// ONE calendar-scraper prompt for both text sources (a fetched web page vs pasted text) — they were
+// byte-identical apart from the source label, and prompt fixes kept landing in only one copy.
+const CALENDAR_SCRAPE_SYSTEM = 'You are a precise parsing model. Extract school schedules, summer programs, and parent resource/calendar listings into accurate JSON. Ensure exact dates. If years are not explicitly declared, assume 2026. Return a schema-compliant array.';
+function buildCalendarScrapePrompt(sourceLabel: 'website text' | 'copied text', bodyLabel: string, text: string): string {
+  return `You are a calendar scraper. Extract all calendar events, school holidays, upcoming summer camps, parent educational events, or school schedules from the following ${sourceLabel}. Format dates in standard ISO string format YYYY-MM-DD. Categorize each event into one of these types: "School", "Camp", "Sports", "Arts", "Holiday", or "Other".
+Identify description, location, age group (if present, e.g. "Grades K-5", "Pre-K", "Age 8-12", "All Ages") and approximate times if listed.
+
+${bodyLabel} to extract from:
+---
+${text}
+---`;
+}
+
+// Shared page-fetch for the two read-a-URL endpoints (/api/parse-calendar + /api/extract-url-text):
+// SSRF-guarded safeFetch with browserish headers, the declared-size check, and the real-bytes cap were
+// hand-duplicated between them (the exact drift class the ssrfGuard extraction fixed once already).
+// Returns a discriminated result so each route keeps its own error surfacing (throw-and-rewrap vs 4xx/5xx).
+type PageFetch =
+  | { kind: 'ok'; text: string }
+  | { kind: 'ssrf'; message: string }  // safeFetch/assertSafeUrl validation rejection — surface the reason
+  | { kind: 'network' }                // genuine connection failure
+  | { kind: 'http'; status: number }   // upstream answered non-2xx
+  | { kind: 'too-large' };             // declared or real bytes past MAX_EXTRACT_BYTES
+async function fetchPageText(url: string, accept: string): Promise<PageFetch> {
+  let response;
+  try {
+    response = await safeFetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': accept,
+      },
+    });
+  } catch (fetchErr: any) {
+    return isSsrfRejection(fetchErr?.message) ? { kind: 'ssrf', message: String(fetchErr?.message) } : { kind: 'network' };
+  }
+  if (!response.ok) return { kind: 'http', status: response.status };
+  if (Number(response.headers.get('content-length') || 0) > MAX_EXTRACT_BYTES) return { kind: 'too-large' };
+  // content-length is only the DECLARED size — a chunked response omits it, so enforce the cap on real bytes.
+  try {
+    return { kind: 'ok', text: await readTextCapped(response, MAX_EXTRACT_BYTES) };
+  } catch (e: any) {
+    if (e?.message === 'BODY_TOO_LARGE') return { kind: 'too-large' };
+    throw e;
+  }
 }
 
 /**
@@ -285,42 +366,27 @@ app.post('/api/parse-calendar', requireAuth, aiRateLimit, async (req, res) => {
     }
 
     console.log(`Fetching calendar URL: ${url}`);
-    
-    // SSRF guard: safeFetch validates the target (and every redirect hop) against the
-    // private/loopback/link-local blocklist before connecting.
-    let response;
-    try {
-      response = await safeFetch(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml,text/plain,application/ics'
-        }
-      });
-    } catch (fetchErr: any) {
+
+    // SSRF guard: fetchPageText → safeFetch validates the target (and every redirect hop) against the
+    // private/loopback/link-local blocklist before connecting; body size is capped at MAX_EXTRACT_BYTES.
+    const page = await fetchPageText(String(url), 'text/html,application/xhtml+xml,application/xml,text/plain,application/ics');
+    if (page.kind === 'ssrf') {
       // Surface SSRF/validation rejections with their specific message; only wrap genuine network failures.
-      if (isSsrfRejection(fetchErr?.message)) {
-        throw fetchErr;
-      }
+      throw new Error(page.message);
+    }
+    if (page.kind === 'network') {
       throw new Error(`Connection failed when reaching "${url}". Fastest fix: copy the events text from the page and paste it into the "Paste Text" tab, or save the page as a PDF and use the "Upload PDF Calendar" tab.`);
     }
-
-    if (!response.ok) {
-      if (response.status === 403 || response.status === 401 || response.status === 503 || response.status === 429) {
-        throw new Error(`Access restricted (HTTP ${response.status}). The website at "${url}" blocks automated crawlers or uses Cloudflare security. Fastest fix: select the events text on the page, copy it, and paste into the "Paste Text" tab. Or save the page as a PDF and use the "Upload PDF Calendar" tab.`);
+    if (page.kind === 'http') {
+      if (page.status === 403 || page.status === 401 || page.status === 503 || page.status === 429) {
+        throw new Error(`Access restricted (HTTP ${page.status}). The website at "${url}" blocks automated crawlers or uses Cloudflare security. Fastest fix: select the events text on the page, copy it, and paste into the "Paste Text" tab. Or save the page as a PDF and use the "Upload PDF Calendar" tab.`);
       }
-      throw new Error(`Unable to read calendar page from "${url}" (status ${response.status}). Fastest fix: copy the events text from the page and paste it into the "Paste Text" tab. Or save the page as a PDF and use the "Upload PDF Calendar" tab.`);
+      throw new Error(`Unable to read calendar page from "${url}" (status ${page.status}). Fastest fix: copy the events text from the page and paste it into the "Paste Text" tab. Or save the page as a PDF and use the "Upload PDF Calendar" tab.`);
     }
-
-    if (Number(response.headers.get('content-length') || 0) > MAX_EXTRACT_BYTES) {
+    if (page.kind === 'too-large') {
       throw new Error(`That page is too large to read (max 8 MB). Paste the events text or upload a PDF instead.`);
     }
-    // content-length is only the DECLARED size — a chunked response omits it, so enforce the cap on real bytes.
-    let rawText: string;
-    try { rawText = await readTextCapped(response, MAX_EXTRACT_BYTES); }
-    catch (e: any) {
-      if (e?.message === 'BODY_TOO_LARGE') throw new Error(`That page is too large to read (max 8 MB). Paste the events text or upload a PDF instead.`);
-      throw e;
-    }
+    const rawText = page.text;
 
     // Check if it's an iCalendar feed
     if (rawText.includes('BEGIN:VCALENDAR') || rawText.includes('BEGIN:VEVENT')) {
@@ -337,17 +403,9 @@ app.post('/api/parse-calendar', requireAuth, aiRateLimit, async (req, res) => {
       throw new Error('Retrieved webpage text seems too short or empty.');
     }
 
-    const prompt = `You are a calendar scraper. Extract all calendar events, school holidays, upcoming summer camps, parent educational events, or school schedules from the following website text. Format dates in standard ISO string format YYYY-MM-DD. Categorize each event into one of these types: "School", "Camp", "Sports", "Arts", "Holiday", or "Other".
-Identify description, location, age group (if present, e.g. "Grades K-5", "Pre-K", "Age 8-12", "All Ages") and approximate times if listed.
-
-Webpage content to extract from:
----
-${cleanedText}
----`;
-
     const parsedEvents = await callGeminiJSON(
-      prompt,
-      "You are a precise parsing model. Extract school schedules, summer programs, and parent resource/ParentMap calendar listings into accurate JSON. Ensure exact dates. If years are not explicitly declared, assume 2026. Return a schema-compliant array.",
+      buildCalendarScrapePrompt('website text', 'Webpage content', cleanedText),
+      CALENDAR_SCRAPE_SYSTEM,
       CALENDAR_EVENT_SCHEMA,
     );
     // Add unique string IDs. Validator (Phase-3): real ISO dates within ±1yr only — a weak model's
@@ -359,8 +417,10 @@ ${cleanedText}
   } catch (error: any) {
     console.error('Error parsing calendar: ', error);
     // Surface the specific, user-actionable guidance the inner throws build (blocked-crawler / too-large /
-    // connection-failed messages) as a 400 instead of letting aiErrorResponse flatten them to a generic 500. [15]
-    if (typeof error?.message === 'string' && /Fastest fix:|too large to read|Access restricted/i.test(error.message)) {
+    // connection-failed messages) AND SSRF/validation rejections as a 400 instead of letting
+    // aiErrorResponse flatten them to a generic 500. [15]
+    if (typeof error?.message === 'string'
+      && (isSsrfRejection(error.message) || /Fastest fix:|too large to read|Access restricted/i.test(error.message))) {
       return res.status(400).json({ error: error.message });
     }
     return aiErrorResponse(res, error, 'An error occurred while processing the URL');
@@ -531,36 +591,14 @@ app.post('/api/extract-url-text', requireAuth, aiRateLimit, async (req, res) => 
   try {
     const { url } = req.body;
     if (!url) return res.status(400).json({ error: 'A URL is required.' });
-    let response: Awaited<ReturnType<typeof safeFetch>>;
-    try {
-      response = await safeFetch(String(url), {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml,text/plain',
-        },
-      });
-    } catch (fetchErr: any) {
-      // safeFetch throws plain Errors, so we distinguish an SSRF/validation rejection (→ 400, surface the
-      // specific reason) from a genuine network failure (→ 502) by message.
-      if (isSsrfRejection(fetchErr?.message)) {
-        return res.status(400).json({ error: fetchErr.message });
-      }
-      return res.status(502).json({ error: `Could not reach "${url}".` });
-    }
-    if (!response.ok) return res.status(502).json({ error: `Could not read "${url}" (status ${response.status}).` });
-    // Cap by declared size BEFORE buffering the whole body — a length-declared multi-GB page would otherwise
-    // OOM the single-instance server (mirrors the 8 MB cap the doc-upload endpoints enforce).
-    if (Number(response.headers.get('content-length') || 0) > MAX_EXTRACT_BYTES) {
-      return res.status(413).json({ error: 'That page is too large to read (max 8 MB).' });
-    }
-    // content-length is only the DECLARED size — a chunked response omits it, so enforce the cap on real bytes.
-    let raw: string;
-    try { raw = await readTextCapped(response, MAX_EXTRACT_BYTES); }
-    catch (e: any) {
-      if (e?.message === 'BODY_TOO_LARGE') return res.status(413).json({ error: 'That page is too large to read (max 8 MB).' });
-      throw e;
-    }
-    const text = cleanHTML(raw).slice(0, 20000);
+    // Shared SSRF-guarded page fetch (fetchPageText) — this route surfaces each failure directly:
+    // validation rejection → 400 with the specific reason, network → 502, oversized → 413.
+    const page = await fetchPageText(String(url), 'text/html,application/xhtml+xml,application/xml,text/plain');
+    if (page.kind === 'ssrf') return res.status(400).json({ error: page.message });
+    if (page.kind === 'network') return res.status(502).json({ error: `Could not reach "${url}".` });
+    if (page.kind === 'http') return res.status(502).json({ error: `Could not read "${url}" (status ${page.status}).` });
+    if (page.kind === 'too-large') return res.status(413).json({ error: 'That page is too large to read (max 8 MB).' });
+    const text = cleanHTML(page.text).slice(0, 20000);
     if (text.length < 20) return res.status(422).json({ error: 'That page had no readable text to save.' });
     return res.json({ text });
   } catch (error: any) {
@@ -587,17 +625,9 @@ app.post('/api/parse-text', requireAuth, aiRateLimit, async (req, res) => {
 
     console.log(`Sending pasted calendar text of size ${calendarText.length} to Gemini 3.5-flash`);
 
-    const prompt = `You are a calendar scraper. Extract all calendar events, school holidays, upcoming summer camps, parent educational events, or school schedules from the following copied text. Format dates in standard ISO string format YYYY-MM-DD. Categorize each event into one of these types: "School", "Camp", "Sports", "Arts", "Holiday", or "Other".
-Identify description, location, age group (if present, e.g. "Grades K-5", "Pre-K", "Age 8-12", "All Ages") and approximate times if listed.
-
-Copied text to extract from:
----
-${calendarText}
----`;
-
     const parsedEvents = await callGeminiJSON(
-      prompt,
-      "You are a precise parsing model. Extract school schedules, summer programs, and calendar listings from raw text into accurate JSON. Ensure exact dates. If years are not explicitly declared, assume 2026. Return a schema-compliant array.",
+      buildCalendarScrapePrompt('copied text', 'Copied text', calendarText),
+      CALENDAR_SCRAPE_SYSTEM,
       CALENDAR_EVENT_SCHEMA,
     );
     const eventsWithIds = tagExtractedEvents(parsedEvents, category, 'text-');
@@ -637,18 +667,7 @@ ${text}
     const items = await callGeminiJSON(
       prompt,
       "You convert a recipe or dish name into a clean grocery shopping list. Return a schema-compliant JSON array of { text, store }.",
-      {
-        type: Type.ARRAY,
-        description: "Ingredients to buy",
-        items: {
-          type: Type.OBJECT,
-          properties: {
-            text: { type: Type.STRING, description: "Ingredient as a shopping-list item." },
-            store: { type: Type.STRING, description: `One of: ${stores.join(', ')}` }
-          },
-          required: ["text"]
-        }
-      },
+      itemsArraySchema(stores, 'Ingredients to buy', 'Ingredient as a shopping-list item.'),
     );
     return res.json({ items, format: 'recipe' });
   } catch (error: any) {
@@ -675,25 +694,14 @@ app.post('/api/pantry-restock', requireAuth, aiRateLimit, async (req, res) => {
 
 Pantry state:
 ---
-${(pantry as string[]).join('\n')}
+${(pantry as string[]).join('\n').slice(0, 20000)}
 ---
-${alreadyListed ? `Already on the shopping list (don't duplicate these):\n---\n${(recipes as string[]).join('\n')}\n---\n` : ''}`;
+${alreadyListed ? `Already on the shopping list (don't duplicate these):\n---\n${(recipes as string[]).join('\n').slice(0, 20000)}\n---\n` : ''}`;
 
     const items = await callGeminiJSON(
       prompt,
       "You suggest practical grocery restock items from a pantry inventory. Avoid suggesting items already in good supply or already on the list. Return a schema-compliant JSON array of { text, store }.",
-      {
-        type: Type.ARRAY,
-        description: "Items to restock",
-        items: {
-          type: Type.OBJECT,
-          properties: {
-            text: { type: Type.STRING, description: "Restock item as a shopping-list entry." },
-            store: { type: Type.STRING, description: `One of: ${stores.join(', ')}` }
-          },
-          required: ["text"]
-        }
-      },
+      itemsArraySchema(stores, 'Items to restock', 'Restock item as a shopping-list entry.'),
     );
     return res.json({ items, format: 'restock' });
   } catch (error: any) {
@@ -718,7 +726,7 @@ app.post('/api/meal-plan', requireAuth, aiRateLimit, async (req, res) => {
 
 Pantry state:
 ---
-${(pantry as string[]).join('\n')}
+${(pantry as string[]).join('\n').slice(0, 20000)}
 ---`;
     const data = await callGeminiJSON(
       prompt,
@@ -727,18 +735,7 @@ ${(pantry as string[]).join('\n')}
         type: Type.OBJECT,
         properties: {
           meals: { type: Type.ARRAY, description: 'The 3 dinner names.', items: { type: Type.STRING } },
-          items: {
-            type: Type.ARRAY,
-            description: 'Additional groceries to buy (the diff vs pantry).',
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                text: { type: Type.STRING, description: 'Item as a shopping-list entry.' },
-                store: { type: Type.STRING, description: `One of: ${stores.join(', ')}` },
-              },
-              required: ['text'],
-            },
-          },
+          items: itemsArraySchema(stores, 'Additional groceries to buy (the diff vs pantry).', 'Item as a shopping-list entry.'),
         },
         required: ['meals', 'items'],
       },
@@ -824,9 +821,10 @@ app.get('/api/photos/list', requireAuth, async (_req, res) => {
   if (!LOCAL_MODE) return res.json({ photos: [] });
   try {
     const entries = await fsp.readdir(PHOTOS_DIR).catch(() => [] as string[]);
-    const photos: { name: string; createTime: string }[] = [];
-    for (const name of entries.slice(0, 1000)) {
-      if (!PHOTO_EXT.test(name)) continue;
+    const names = entries.filter(n => PHOTO_EXT.test(n)).slice(0, 500); // sane corpus cap for a wall tablet
+    // Stat + sidecar reads run with bounded concurrency instead of strictly serially — 500 photos was
+    // up to ~1000 sequential disk round-trips per screensaver refresh.
+    const photos = (await mapWithConcurrency(names, 16, async (name: string) => {
       try {
         const st = await fsp.stat(path.join(PHOTOS_DIR, name));
         let createTime = st.mtime.toISOString();
@@ -834,10 +832,9 @@ app.get('/api/photos/list', requireAuth, async (_req, res) => {
           const sidecar = JSON.parse(await fsp.readFile(path.join(PHOTOS_DIR, `${name}.json`), 'utf8'));
           if (typeof sidecar?.createTime === 'string' && !Number.isNaN(Date.parse(sidecar.createTime))) createTime = sidecar.createTime;
         } catch { /* no sidecar → mtime */ }
-        photos.push({ name, createTime });
-        if (photos.length >= 500) break; // sane corpus cap for a wall tablet
-      } catch { /* unreadable entry → skip */ }
-    }
+        return { name, createTime };
+      } catch { return null; /* unreadable entry → skip */ }
+    })).filter((p): p is { name: string; createTime: string } => !!p);
     return res.json({ photos });
   } catch (e: any) {
     console.error('photos/list error:', e?.message || e);
@@ -887,7 +884,8 @@ app.post('/api/revise-draft', requireAuth, aiRateLimit, async (req, res) => {
     if (!tool || typeof tool !== 'string' || !feedback || String(feedback).trim().length === 0) {
       return res.status(400).json({ error: 'A draft tool and your requested change are required.' });
     }
-    const prompt = buildRevisePrompt(tool, { summary, before, changes, payload, link }, String(feedback).trim());
+    // Cap the free-text feedback like every sibling prompt input (.slice(0, 20000)).
+    const prompt = buildRevisePrompt(tool, { summary, before, changes, payload, link }, String(feedback).trim().slice(0, 20000));
     const revised = await callGeminiJSON(
       prompt,
       'You revise a staged household-assistant DRAFT per the parent\'s feedback, keeping it the same kind of action and never booking/buying/paying. Return schema-compliant JSON.',
@@ -966,15 +964,20 @@ const QUICKADD_SCHEMA = {
 
 app.post('/api/parse-quickadd', requireAuth, aiRateLimit, async (req, res) => {
   try {
-    const { text, members = [] } = req.body;
-    const stores = sanitizeStoreList(req.body?.stores); // household lists; junk/absent → defaults
-    if (!text || text.trim().length === 0) {
+    // Validate types at the boundary — a non-string `text` (or non-array `members`) used to TypeError
+    // (`.trim()`/`.join()` on the wrong type) into the catch and 500 for what is a malformed-client 400.
+    // Capped like every extracted-text endpoint (.slice(0, 20000)) — free text with no upload backstop.
+    const rawText = req.body?.text;
+    if (typeof rawText !== 'string' || !rawText.trim()) {
       return res.status(400).json({ error: 'Some text is required.' });
     }
-    const today = new Date().toISOString().slice(0, 10);
+    const text = rawText.trim().slice(0, 20000);
+    const members: string[] = (Array.isArray(req.body?.members) ? req.body.members : []).map(String);
+    const stores = sanitizeStoreList(req.body?.stores); // household lists; junk/absent → defaults
+    const today = toLocalDateStr(new Date()); // server-LOCAL (toISOString is UTC → evening rollover)
     const prompt = `Classify the family note below into exactly ONE of: a calendar "event", "shopping" items, or a "chore".
-Known family members: ${(members as string[]).join(', ') || 'none'}.
-Valid shopping stores: ${(stores as string[]).join(', ')}.
+Known family members: ${members.join(', ') || 'none'}.
+Valid shopping stores: ${stores.join(', ')}.
 Today is ${today}; resolve relative dates ("tomorrow", "next monday") to YYYY-MM-DD.
 
 Field rules:
@@ -995,7 +998,7 @@ Note: "${text}"`;
     // used to return RAW and fail silently client-side. Validate deterministically; on issues,
     // ONE corrective re-prompt at low temperature (adopted only if it strictly improves), then
     // coerce whatever remains fixable. Mirrors the /api/copilot critic (bounded, honest).
-    const qaCtx = { members: (members as string[]).filter(Boolean), stores: (stores as string[]).filter(Boolean), today };
+    const qaCtx = { members: members.filter(Boolean), stores: stores.filter(Boolean), today };
     let parsedQA = result as any;
     let qaIssues = verifyQuickAdd(parsedQA, qaCtx);
     if (qaIssues.length) {
@@ -1088,6 +1091,9 @@ app.post('/api/copilot', requireAuth, aiRateLimit, async (req, res) => {
     // route and its critic/retry passes can resend the full prompt up to ~3x, so an uncapped chat
     // message here is the largest token-cost-DoS surface on the owner-funded Gemini key.
     prompt = String(prompt).slice(0, 20000);
+    // Household store lists (Phase-5): build the response schema so the shopping-action `store` enum
+    // is the family's own lists, not the legacy hardcoded four.
+    const copilotSchema = buildCopilotSchema(sanitizeStoreList(home?.storeList));
 
     // Accept either name strings or full member objects (be tolerant of either client shape). Label with
     // age when known ("Leo (8)") so the copilot tailors activities by real age instead of guessing.
@@ -1100,12 +1106,13 @@ app.post('/api/copilot', requireAuth, aiRateLimit, async (req, res) => {
       })
       .filter(Boolean);
 
-    // SERVER-LOCAL calendar date + wall-clock time (the household's timezone on a self-hosted LAN
-    // deploy), NOT UTC — otherwise an evening query rolls to "tomorrow" and drops today's events.
-    // Build the date from local getters (no locale/ICU dependency); the time label is cosmetic.
+    // Prefer the CLIENT's calendar date when it sends one — the browser knows the household's real
+    // timezone, and on the UTC Cloud Run deploy the server's "today" rolls to tomorrow every evening
+    // (the exact Bug-9 class this route already guards against for past dates). Shape-validated only;
+    // fallback = server-LOCAL date (correct on a self-hosted LAN box), never UTC.
     const now = new Date();
-    const pad = (n: number) => String(n).padStart(2, '0');
-    const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    const clientToday = String(req.body?.clientToday || '');
+    const today = /^\d{4}-\d{2}-\d{2}$/.test(clientToday) ? clientToday : toLocalDateStr(now);
     const nowLabel = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }); // "3:15 PM"
     // A weak fallback model can't be trusted to mentally skip past dates, so drop them here —
     // the planner only ever sees today-and-upcoming events (Bug 9: it kept listing past days).
@@ -1264,7 +1271,7 @@ app.post('/api/copilot', requireAuth, aiRateLimit, async (req, res) => {
     const parsed: any = await callGeminiJSON(
       contextPrompt,
       systemPrompt,
-      COPILOT_SCHEMA,
+      copilotSchema,
       '{}',
       meta,
       // Mild temperature only. NOT frequency/presence penalties — verified they return
@@ -1294,7 +1301,7 @@ app.post('/api/copilot', requireAuth, aiRateLimit, async (req, res) => {
         // retry's model when we don't adopt the retry (else telemetry mislabels the kept first answer).
         const retryMeta: any = {};
         const retry: any = await callGeminiJSON(
-          `${contextPrompt}\n\n${buildCriticNote(issues)}`, systemPrompt, COPILOT_SCHEMA, '{}', retryMeta, { temperature: 0.3 },
+          `${contextPrompt}\n\n${buildCriticNote(issues)}`, systemPrompt, copilotSchema, '{}', retryMeta, { temperature: 0.3 },
         );
         // Keep the retry only if it actually reduced the problems (else keep the current answer and stop —
         // a pass that can't improve won't improve on a rerun either).
@@ -1347,7 +1354,9 @@ app.post('/api/google-refresh', requireAuth, async (req, res) => {
     const clientId = process.env.GOOGLE_CLIENT_ID;
     const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
     if (!clientId || !clientSecret) {
-      return res.status(500).json({ error: 'Google client credentials are not configured on the server (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET).' });
+      // 501 (not implemented/configured on this server) — matches /api/camera-summary's convention for
+      // the same "integration not configured" condition, instead of a misleading generic 500.
+      return res.status(501).json({ error: 'Google client credentials are not configured on the server (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET).' });
     }
 
     const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
@@ -1452,9 +1461,10 @@ app.post('/api/camera-summary', requireAuth, (_req, res) =>
 app.post('/api/morning-briefing', requireAuth, aiRateLimit, async (req, res) => {
   try {
     const { events = [], chores = [], goals = [], shopping = [], ledger = [], mealplan = [] } = req.body || {};
-    const now = new Date();
-    const pad = (n: number) => String(n).padStart(2, '0');
-    const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    // Same client-date preference as /api/copilot: the browser knows the household's timezone; the
+    // UTC Cloud Run deploy's server-local date is wrong every evening. Fallback = server-local.
+    const clientToday = String(req.body?.clientToday || '');
+    const today = /^\d{4}-\d{2}-\d{2}$/.test(clientToday) ? clientToday : toLocalDateStr(new Date());
     const evList = Array.isArray(events) ? events : [];
     const chList = Array.isArray(chores) ? chores : [];
     // mealplan = MealPlan[] (the client sends the collection); buildDinnerLines picks the newest
@@ -1488,6 +1498,22 @@ app.post('/api/morning-briefing', requireAuth, aiRateLimit, async (req, res) => 
 // Agent proxy + async job routes → src/server/agentProxy.ts
 app.use('/api/agent', agentProxyRouter);
 
+
+// Centralized error handler (registered LAST in startServer): a route that throws synchronously or forwards
+// an error via next(err) lands here instead of crashing the process or leaking a stack to the client.
+// Client faults keep their own 4xx — the body parsers forward http-errors objects (malformed JSON → 400
+// entity.parse.failed, over-limit body → 413 PayloadTooLargeError) that used to be flattened to a 500.
+// F-06 parity: generic bodies, detail logged server-side. EXPORTED so the vitest supertest harness (which
+// imports the bare `app`, never startServer) can register the SAME handler instead of Express's default.
+export const finalErrorHandler = (err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error('Unhandled request error:', err?.stack || err?.message || err);
+  if (res.headersSent) return;
+  const status = Number(err?.status || err?.statusCode);
+  if (status >= 400 && status < 500) {
+    return res.status(status).json({ error: status === 413 ? 'Request body too large.' : 'Invalid request body.' });
+  }
+  res.status(500).json({ error: 'Something went wrong.' });
+};
 
 // Set up Dev server vs Static serving for client React
 async function startServer() {
@@ -1602,15 +1628,8 @@ async function startServer() {
     }
   });
 
-  // Centralized error handler (must be the LAST middleware): a route that throws synchronously or forwards an
-  // error via next(err) lands here instead of crashing the process or leaking a stack to the client. The
-  // per-route try/catch blocks still handle their own async rejections; this is the backstop. F-06 parity:
-  // generic body, detail logged server-side.
-  app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-    console.error('Unhandled request error:', err?.stack || err?.message || err);
-    if (res.headersSent) return;
-    res.status(500).json({ error: 'Something went wrong.' });
-  });
+  // Centralized error handler (must be the LAST middleware) — see finalErrorHandler above.
+  app.use(finalErrorHandler);
 
   // A stray unhandled promise rejection: log it. In a CONTAINER (appliance Docker / Cloud Run) exit so the
   // orchestrator recycles a process that may be in a bad state (gated by EXIT_ON_UNHANDLED, which the
