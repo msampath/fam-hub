@@ -64,6 +64,8 @@ from google.genai import types  # noqa: E402
 from .concierge.agent import build_root_agent, FALLBACK_MODELS, MODEL  # noqa: E402
 from .concierge.bridge import collect_actions  # noqa: E402
 from .concierge.ratelimit import rate_ok, client_key_from_xff  # noqa: E402
+from .concierge.authheader import extract_bearer  # noqa: E402
+from .concierge.verifier import VERIFIER_ENABLED, VERIFIER_MODEL, verify_local_answer  # noqa: E402
 
 APP_NAME = "concierge"
 
@@ -119,12 +121,10 @@ class ChatIn(BaseModel):
     clientDate: str | None = None       # client's civil YYYY-MM-DD — avoids UTC drift on a UTC container
 
 
-def _extract_bearer(header_value: str | None) -> str | None:
-    """Pull the token out of a `Bearer <token>` header value (case-insensitive scheme). Returns None for
-    anything else — missing header, wrong scheme, or an empty token after the prefix."""
-    if not header_value or not header_value.lower().startswith("bearer "):
-        return None
-    return header_value[7:].strip() or None
+# Pure Bearer-header parsing lives in concierge.authheader so it's unit-testable WITHOUT importing this
+# module (whose key-required boot guard above makes a keyless test self-skip). Re-bound here for the
+# existing call sites + tests that reference api._extract_bearer.
+_extract_bearer = extract_bearer
 
 
 def _visitor_id(jwt: str | None) -> str:
@@ -344,6 +344,18 @@ async def chat(
                 turn_session_id = (await _sessions.create_session(app_name=APP_NAME, user_id=user_id)).id
             try:
                 reply, actions = await _run_turn(model_name, turn_session_id)
+                # Owner-directed accuracy tier (2026-07-19): the small verifier model (qwen, resident on
+                # the OTHER GPU) checks every LOCAL answer — did the reply actually handle the request,
+                # with the tool calls it needs/claims? INSUFFICIENT → advance to the cloud chain, exactly
+                # like a hard local failure. This catches the confident-wrong-answer class the chain's
+                # availability fallback can never see. Fail-open: a dead/erroring verifier changes nothing.
+                if model_name == LOCAL_TOKEN and VERIFIER_ENABLED:
+                    tool_names = [str(a.get("tool") or "") for a in actions if isinstance(a, dict)]
+                    ok, why = await asyncio.to_thread(verify_local_answer, body.message, reply, tool_names)
+                    if not ok:
+                        print(f"[concierge] LOCAL answer rejected by the {VERIFIER_MODEL} verifier ({why}); advancing to the cloud chain", flush=True)
+                        last_err = RuntimeError(f"local answer rejected by verifier: {why}")
+                        break  # exits this model's attempt loop → next chain entry (cloud)
                 # Empty-reply backstop (found via the eval harness — a data-less briefing run ended with a
                 # blank final message 3/3 times): never hand the family an empty bubble. Honest filler, no
                 # invented content; the actions list (if any) still tells the real story.
