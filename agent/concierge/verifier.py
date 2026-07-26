@@ -20,8 +20,25 @@ VERIFIER_ENABLED = os.environ.get("CONCIERGE_VERIFIER_ENABLED", "").strip().lowe
 VERIFIER_MODEL = os.environ.get("CONCIERGE_VERIFIER_MODEL", "qwen2.5:14b")
 VERIFIER_URL = (os.environ.get("LOCAL_LLM_URL") or "http://localhost:11434").rstrip("/")
 VERIFIER_TIMEOUT = float(os.environ.get("CONCIERGE_VERIFIER_TIMEOUT", "30"))
-VERIFIER_NUM_PREDICT = int(os.environ.get("CONCIERGE_VERIFIER_NUM_PREDICT", "200"))
-VERIFIER_THINK = os.environ.get("CONCIERGE_VERIFIER_THINK", "").strip().lower()  # "", "true", "false" — some models burn the whole token budget on <think> reasoning before emitting JSON
+def _env_int(name: str, default: int) -> int:
+    """Defensive env-int parse: a malformed value must degrade to the default, never crash the import
+    chain (api.py imports this module at boot — the fail-open contract extends to config parsing)."""
+    try:
+        return int(os.environ.get(name, "") or default)
+    except ValueError:
+        print(f"[verifier] ignoring malformed {name}={os.environ.get(name)!r}; using {default}", flush=True)
+        return default
+
+
+VERIFIER_NUM_PREDICT = _env_int("CONCIERGE_VERIFIER_NUM_PREDICT", 200)
+# Some models burn the whole token budget on <think> reasoning before emitting JSON — this opt-in knob
+# forces thinking on/off. Only send it when set: Ollama errors if `think` reaches a non-thinking model
+# (e.g. the default qwen2.5:14b verifier — leave this UNSET for it). House truthy/falsy spellings accepted.
+_THINK_RAW = os.environ.get("CONCIERGE_VERIFIER_THINK", "").strip().lower()
+VERIFIER_THINK: bool | None = (
+    True if _THINK_RAW in ("1", "true", "yes", "on") else
+    False if _THINK_RAW in ("0", "false", "no", "off") else None
+)
 
 _SYSTEM = (
     "You are a strict output checker for a family-household assistant. Given the parent's REQUEST, the "
@@ -78,8 +95,8 @@ def verify_local_answer(message: str, reply: str, tool_names: list[str], url: st
             "options": {"temperature": 0, "num_predict": VERIFIER_NUM_PREDICT},
             "keep_alive": "30m",
         }
-        if VERIFIER_THINK in ("true", "false"):
-            payload["think"] = VERIFIER_THINK == "true"
+        if VERIFIER_THINK is not None:
+            payload["think"] = VERIFIER_THINK
         body = json.dumps(payload).encode()
         req = urllib.request.Request(
             f"{(url or VERIFIER_URL)}/api/chat", data=body,
@@ -87,6 +104,12 @@ def verify_local_answer(message: str, reply: str, tool_names: list[str], url: st
         )
         with urllib.request.urlopen(req, timeout=VERIFIER_TIMEOUT) as r:
             data = json.loads(r.read().decode())
-        return parse_verdict(str((data.get("message") or {}).get("content") or ""))
+        ok, reason = parse_verdict(str((data.get("message") or {}).get("content") or ""))
+        if ok and "fail-open" in reason:
+            # An unparseable verdict passes the answer through, but silently-dead verification is the
+            # one failure mode fail-open must never hide — say so in the log every time it happens.
+            print(f"[verifier] fail-open: unparseable verdict from {VERIFIER_MODEL}", flush=True)
+        return ok, reason
     except Exception as err:
+        print(f"[verifier] fail-open: {VERIFIER_MODEL} unavailable ({err!r})", flush=True)
         return True, f"verifier unavailable ({err!r})"

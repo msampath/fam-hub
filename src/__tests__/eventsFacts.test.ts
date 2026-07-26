@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseTicketmasterEvents, buildEventsFacts, indexedEvents } from '../utils/eventsFacts';
+import { parseTicketmasterEvents, buildEventsFacts, indexedEvents, ticketmasterEventsUrl } from '../utils/eventsFacts';
 
 const TODAY = '2026-06-17';
 const END = '2026-06-29'; // exclusive window end
@@ -59,5 +59,19 @@ describe('event URLs + ids', () => {
       { name: 'B', date: '2026-06-22' },
     ]);
     expect(idx.map(x => [x.id, x.event.name])).toEqual([['E1', 'A'], ['E2', 'B']]);
+  });
+});
+
+describe('ticketmasterEventsUrl', () => {
+  // The shared request both grounding.ts and the find_events MCP tool ride — the params and the
+  // ±1-day UTC widening (start/endDateTime are UTC instants; the parser's localDate filter trims
+  // back to the exact civil window) must stay single-sourced here.
+  it('widens the UTC query window ±1 day around the civil window and keeps the shared params', () => {
+    const url = ticketmasterEventsUrl('KEY', 47.61, -122.2, '2026-07-25', '2026-07-27');
+    expect(url).toContain('latlong=47.61,-122.2');
+    expect(url).toContain('radius=50&unit=miles&size=40&sort=date,asc');
+    expect(url).toContain(`startDateTime=${encodeURIComponent('2026-07-24T00:00:00Z')}`);
+    expect(url).toContain(`endDateTime=${encodeURIComponent('2026-07-28T00:00:00Z')}`);
+    expect(url).toContain('apikey=KEY');
   });
 });

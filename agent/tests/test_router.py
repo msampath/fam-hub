@@ -33,8 +33,22 @@ KEEP_LOCAL_CASES = [
 ]
 
 
+MULTILINE_SKIP_CASES = [
+    # The natural way a parent pastes a week plan — keywords land on different lines. Regression
+    # guard for the re.S fix: without DOTALL the lookaheads are line-bound and these silently miss.
+    "here's next week's dinner plan:\nMonday paneer butter masala\nTuesday spaghetti aglio e olio\nWednesday tacos",
+    "delete all of\nAva's chores",
+    "swap something for me:\nThursday's dinner to rajma",
+]
+
+
 def test_all_eight_escalation_shapes_are_skipped():
     for msg in SKIP_CASES:
+        assert should_skip_local(msg) is True, msg
+
+
+def test_multiline_variants_of_skip_shapes_are_skipped():
+    for msg in MULTILINE_SKIP_CASES:
         assert should_skip_local(msg) is True, msg
 
 

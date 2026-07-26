@@ -10,8 +10,8 @@ import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprot
 import { MCP_TOOLS, getTool, buildToolCtx, type McpToolResult } from './conciergeTools';
 import { makePersistence, persistResult } from './persistence';
 import { findPlaces } from '../utils/placesFetch';
-import { parseTicketmasterEvents } from '../utils/eventsFacts';
-import { fetchWithTimeout } from '../server/fetchUtils';
+import { fetchTicketmasterEvents } from '../utils/eventsFacts';
+import { addDaysISO } from '../utils/copilotHarness';
 import { buildHandoffDraft, normHandoffUrl, isLinkObserved } from '../utils/handoff';
 import { READ_TOOL_DEFS, shapeEvents, shapeUpcoming, shapeChores, shapeBills, shapeKnowledgeAsync } from './readTools';
 import { resolveDoc, normalizeFolder } from '../utils/docActions';
@@ -114,7 +114,7 @@ const FIND_EVENTS_TOOL = {
     type: 'object' as const,
     properties: {
       from: { type: 'string', description: 'Window start, YYYY-MM-DD. Default: today.' },
-      to: { type: 'string', description: 'Window end, YYYY-MM-DD inclusive. Default: 7 days after `from`.' },
+      to: { type: 'string', description: 'Window end, YYYY-MM-DD inclusive. Default: 6 days after `from` (a 7-day window).' },
     },
   },
 };
@@ -213,24 +213,34 @@ async function handleReadTool(name: string, args: Record<string, unknown>): Prom
   return { ok: true, tool: name, tier: 'auto', status: 'validated', artifact: items, message: `${items.length} event(s).` };
 }
 
+// Home-location resolution SHARED by the discovery handlers (find_places + find_events): resolve the
+// visitor's home from settings, or say honestly why we can't. NON-coercing finite + range check
+// (mirrors the Express copilot's guard, server.ts validCoords): a null/'' homeLat must be "no home
+// location", never coerce to 0 and silently search the Gulf of Guinea.
+async function resolveHome(tool: string): Promise<{ lat: number; lng: number; homeLabel: string } | McpToolResult> {
+  if (!persistence) {
+    return { ok: false, tool, tier: 'auto', status: 'rejected',
+      message: 'No household is connected, so I can’t look up your home location to search nearby.' };
+  }
+  const settings = await persistence.loadCollection('settings').catch(() => []);
+  const home = (settings as any[])[0] || {};
+  const lat = home.homeLat, lng = home.homeLng;
+  if (!Number.isFinite(lat) || Math.abs(lat) > 90 || !Number.isFinite(lng) || Math.abs(lng) > 180) {
+    return { ok: false, tool, tier: 'auto', status: 'rejected',
+      message: `No home location is set. Ask the parent to set their home town so I can find real nearby ${tool === 'find_events' ? 'events' : 'places'}.` };
+  }
+  return { lat, lng, homeLabel: home.homeLabel || 'home' };
+}
+
 // Discovery handler: resolve the visitor's home from settings, then fetch real venues. Needs persistence
 // (the home location lives in the household's settings) — without it, say so honestly rather than guess.
 async function handleFindPlaces(args: Record<string, unknown>): Promise<McpToolResult> {
   const query = typeof args.query === 'string' ? args.query : '';
   const destination = typeof args.destination === 'string' ? args.destination.trim() : '';
-  if (!persistence) {
-    return { ok: false, tool: 'find_places', tier: 'auto', status: 'rejected',
-      message: 'No household is connected, so I can’t look up your home location to search nearby.' };
-  }
-  const settings = await persistence.loadCollection('settings').catch(() => []);
-  const home = (settings as any[])[0] || {};
-  const lat = Number(home.homeLat), lng = Number(home.homeLng);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-    return { ok: false, tool: 'find_places', tier: 'auto', status: 'rejected',
-      message: 'No home location is set. Ask the parent to set their home town so I can find real nearby places.' };
-  }
+  const homeRes = await resolveHome('find_places');
+  if ('ok' in homeRes) return homeRes;
+  const { lat, lng, homeLabel } = homeRes;
   const { places, destinationResolved, keylessNameMiss } = await findPlaces(lat, lng, query, 6, destination || undefined);
-  const homeLabel = home.homeLabel || 'home';
   // Only claim "around <destination>" when the destination actually GEOCODED. On a geocode miss we fell back
   // to a HOME-area search, so say so plainly (and the agent won't present home venues as the far getaway).
   const missedDestination = !!destination && !destinationResolved;
@@ -253,60 +263,37 @@ async function handleFindPlaces(args: Record<string, unknown>): Promise<McpToolR
 }
 
 // Organized-events handler — the "what's happening" counterpart to handleFindPlaces' "where could we go".
-// Same home-location need as find_places, same Ticketmaster source the Express copilot already grounds
-// with (src/server/grounding.ts fetchLocalEvents) — just fetched directly here since the MCP bundle is a
-// separate process from the Express server. Key-gated: TICKETMASTER_API_KEY absent -> honest empty, never
-// a silent venue substitute.
+// Same home-location resolution (resolveHome), same Ticketmaster request as the Express copilot's
+// grounding — via the SHARED fetchTicketmasterEvents (src/utils/eventsFacts.ts), so the two paths can
+// never drift. Key-gated: TICKETMASTER_API_KEY absent -> honest empty, never a silent venue substitute.
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
 async function handleFindEvents(args: Record<string, unknown>): Promise<McpToolResult> {
+  const reject = (message: string): McpToolResult => ({ ok: false, tool: 'find_events', tier: 'auto', status: 'rejected', message });
   const apiKey = process.env.TICKETMASTER_API_KEY;
   if (!apiKey) {
-    return { ok: false, tool: 'find_events', tier: 'auto', status: 'rejected',
-      message: 'Local event listings aren’t configured (no Ticketmaster key) — tell the family you can find VENUES (find_places) but not dated EVENTS right now.' };
+    return reject('Local event listings aren’t configured (no Ticketmaster key) — tell the family you can find VENUES (find_places) but not dated EVENTS right now.');
   }
-  if (!persistence) {
-    return { ok: false, tool: 'find_events', tier: 'auto', status: 'rejected',
-      message: 'No household is connected, so I can’t look up your home location to search nearby.' };
-  }
-  const settings = await persistence.loadCollection('settings').catch(() => []);
-  const home = (settings as any[])[0] || {};
-  const lat = Number(home.homeLat), lng = Number(home.homeLng);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-    return { ok: false, tool: 'find_events', tier: 'auto', status: 'rejected',
-      message: 'No home location is set. Ask the parent to set their home town so I can find real nearby events.' };
-  }
+  const homeRes = await resolveHome('find_events');
+  if ('ok' in homeRes) return homeRes;
+  const { lat, lng } = homeRes;
   const today = clientToday || new Date().toISOString().slice(0, 10);
-  const from = typeof args.from === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(args.from) ? args.from : today;
-  let to = typeof args.to === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(args.to) ? args.to : '';
-  if (!to) {
-    const d = new Date(`${from}T00:00:00Z`);
-    d.setUTCDate(d.getUTCDate() + 7);
-    to = d.toISOString().slice(0, 10);
-  }
-  // Ticketmaster's endDateTime is EXCLUSIVE, but the tool's `to` is documented as inclusive — push one day.
-  const windowEndExcl = (() => {
-    const d = new Date(`${to}T00:00:00Z`);
-    d.setUTCDate(d.getUTCDate() + 1);
-    return d.toISOString().slice(0, 10);
-  })();
+  const from = typeof args.from === 'string' && ISO_DAY.test(args.from) ? args.from : today;
+  // Inclusive `to`; the default from+6 is a 7-day window, matching the tool description.
+  const to = typeof args.to === 'string' && ISO_DAY.test(args.to) && args.to >= from ? args.to : addDaysISO(from, 6);
+  const windowEndExcl = addDaysISO(to, 1);
   try {
-    const url = `https://app.ticketmaster.com/discovery/v2/events.json?latlong=${lat},${lng}`
-      + `&radius=50&unit=miles&size=40&sort=date,asc`
-      + `&startDateTime=${encodeURIComponent(`${from}T00:00:00Z`)}`
-      + `&endDateTime=${encodeURIComponent(`${windowEndExcl}T00:00:00Z`)}&apikey=${apiKey}`;
-    const r = await fetchWithTimeout(url, 8000);
-    if (!r.ok) {
-      return { ok: false, tool: 'find_events', tier: 'auto', status: 'rejected',
-        message: 'The events lookup failed just now — tell the family you couldn’t reach the events service.' };
-    }
-    const events = parseTicketmasterEvents(await r.json(), from, windowEndExcl);
+    const events = await fetchTicketmasterEvents(apiKey, lat, lng, from, windowEndExcl);
     return {
       ok: true, tool: 'find_events', tier: 'auto', status: 'validated',
       artifact: events,
       message: events.length ? `Found ${events.length} real event(s) from ${from} to ${to}.` : `No organized events found from ${from} to ${to}.`,
     };
   } catch (err: any) {
-    return { ok: false, tool: 'find_events', tier: 'auto', status: 'rejected',
-      message: 'The events lookup failed just now — tell the family you couldn’t reach the events service.' };
+    // stderr is the MCP log channel — a revoked key (401), an outage (5xx), and a timeout must be
+    // distinguishable to the operator, even though the family-facing message stays generic.
+    console.error(`[family-hub-mcp] find_events fetch failed: ${err?.message || err}`);
+    return reject('The events lookup failed just now — tell the family you couldn’t reach the events service.');
   }
 }
 

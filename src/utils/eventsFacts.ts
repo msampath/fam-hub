@@ -4,7 +4,7 @@
 // (Pattern 1 — the fetch lives in server.ts). This file is PURE: the response PARSER + the block
 // FORMATTER. Unit-tested. EVENTS are not places — maps APIs don't provide them, hence a separate
 // source/block.
-import { weekdayOf } from './copilotHarness';
+import { weekdayOf, addDaysISO } from './copilotHarness';
 import { sanitizeForPrompt } from './promptSafety';
 
 export interface LocalEvent {
@@ -42,6 +42,37 @@ export function parseTicketmasterEvents(json: any, today: string, windowEndISO: 
   events.sort((a, b) =>
     (Number(isFamily(b.category)) - Number(isFamily(a.category))) || a.date.localeCompare(b.date));
   return events.slice(0, max);
+}
+
+// The ONE Ticketmaster Discovery request both consumers share — the Express copilot's grounding
+// (src/server/grounding.ts, which adds its cache + silent-[] edge) and the agent's find_events MCP
+// tool (which adds honest rejected messages) — so radius/size/sort/date encoding can never drift
+// between the two paths. The HTTP window is widened ±1 day around the requested civil-local window:
+// start/endDateTime are UTC INSTANTS, so without the widening a west-of-UTC household loses its
+// `to`-day evening events (Sun 7pm PDT starts Mon 02:00Z) and an east-of-UTC one loses early-morning
+// `from`-day events. parseTicketmasterEvents' localDate filter [fromISO, windowEndExclISO) does the
+// precise trim, so callers see exactly the civil window they asked for.
+export function ticketmasterEventsUrl(apiKey: string, lat: number, lng: number, fromISO: string, windowEndExclISO: string): string {
+  return `https://app.ticketmaster.com/discovery/v2/events.json?latlong=${lat},${lng}`
+    + `&radius=50&unit=miles&size=40&sort=date,asc`
+    + `&startDateTime=${encodeURIComponent(`${addDaysISO(fromISO, -1)}T00:00:00Z`)}`
+    + `&endDateTime=${encodeURIComponent(`${addDaysISO(windowEndExclISO, 1)}T00:00:00Z`)}&apikey=${apiKey}`;
+}
+
+// Fetch + parse in one step (8s abort). Throws on HTTP failure/timeout with the status in the message —
+// each caller decides whether that's a silent [] (grounding) or an honest rejection (find_events).
+export async function fetchTicketmasterEvents(
+  apiKey: string, lat: number, lng: number, fromISO: string, windowEndExclISO: string, timeoutMs = 8000,
+): Promise<LocalEvent[]> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const r = await fetch(ticketmasterEventsUrl(apiKey, lat, lng, fromISO, windowEndExclISO), { signal: ctrl.signal });
+    if (!r.ok) throw new Error(`Ticketmaster HTTP ${r.status}`);
+    return parseTicketmasterEvents(await r.json(), fromISO, windowEndExclISO);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // The capped, id-tagged event list ([E1]…[En]) — SHARED by buildEventsFacts and the server's

@@ -749,8 +749,9 @@ ${(pantry as string[]).join('\n').slice(0, 20000)}
 
 /**
  * Vision intake (Pattern #2): a fridge/receipt PHOTO → the grocery items the model SEES, each flagged
- * whether it's already in the family's pantry. Reuses the multimodal pattern from /api/parse-pdf
- * (inlineData image part + a text instruction). The client diffs + confirms before adding — never silent.
+ * whether it's already in the family's pantry. Goes through callVisionJSON (local vision model first
+ * when enabled, Gemini fallback) — image endpoints must use it, NOT callGeminiJSON, whose local slot
+ * is text-only. The client diffs + confirms before adding — never silent.
  * Returns { detected: [{ text, inPantry, store }] }.
  */
 app.post('/api/vision-scan-pantry', requireAuth, aiRateLimit, async (req, res) => {

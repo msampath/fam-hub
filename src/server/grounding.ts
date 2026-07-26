@@ -5,7 +5,7 @@ import {
   parseGooglePlaces, parseOverpassPlaces, filterKeylessPlacesByName,
   GOOGLE_PLACE_TYPES, OVERPASS_TOURISM, OVERPASS_LEISURE, type Place,
 } from '../utils/placesFacts';
-import { parseTicketmasterEvents, type LocalEvent } from '../utils/eventsFacts';
+import { fetchTicketmasterEvents, type LocalEvent } from '../utils/eventsFacts';
 
 // ── Per-user data-fetch quota ─────────────────────────────────────────────────────
 const DATA_FETCH_MAX_PER_HOUR = 60;
@@ -221,13 +221,7 @@ export async function fetchLocalEvents(lat: number, lng: number, today: string, 
   const cached = eventsCache.get(cacheKey);
   if (cached && Date.now() - cached.at < EVENTS_TTL_MS) return cached.events;
   try {
-    const url = `https://app.ticketmaster.com/discovery/v2/events.json?latlong=${lat},${lng}`
-      + `&radius=50&unit=miles&size=40&sort=date,asc`
-      + `&startDateTime=${encodeURIComponent(`${today}T00:00:00Z`)}`
-      + `&endDateTime=${encodeURIComponent(`${windowEndExcl}T00:00:00Z`)}&apikey=${apiKey}`;
-    const r = await fetchWithTimeout(url, 8000);
-    if (!r.ok) return [];
-    const events = parseTicketmasterEvents(await r.json(), today, windowEndExcl);
+    const events = await fetchTicketmasterEvents(apiKey, lat, lng, today, windowEndExcl);
     pruneByAge(eventsCache, EVENTS_TTL_MS, Date.now());
     eventsCache.set(cacheKey, { at: Date.now(), events });
     return events;

@@ -132,9 +132,15 @@ async function callOllamaJSON(
   if (think !== undefined) body.think = think;
   // Keep the model warm so an idle gap doesn't trigger a slow cold reload (→ latency/abort → "all busy").
   if (LOCAL_LLM_KEEP_ALIVE) body.keep_alive = LOCAL_LLM_KEEP_ALIVE;
+  return postOllamaChat(body, LOCAL_LLM_TIMEOUT_MS, emptyFallback, 'Ollama');
+}
 
+// The ONE transport for every local Ollama /api/chat call (text + vision tiers): auth header, abort
+// timeout, error shaping (HTTP status carried on the Error), constrained-JSON parse. Callers own
+// their body (model, messages, format, options) — a transport fix here reaches both tiers at once.
+async function postOllamaChat(body: any, timeoutMs: number, emptyFallback: string, label: string): Promise<any> {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), LOCAL_LLM_TIMEOUT_MS);
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (LOCAL_LLM_API_KEY) headers['Authorization'] = `Bearer ${LOCAL_LLM_API_KEY}`;
   try {
@@ -143,7 +149,7 @@ async function callOllamaJSON(
     });
     if (!res.ok) {
       const t = await res.text().catch(() => '');
-      const e: any = new Error(`Ollama HTTP ${res.status}: ${t.slice(0, 200)}`);
+      const e: any = new Error(`${label} HTTP ${res.status}: ${t.slice(0, 200)}`);
       e.status = res.status;
       throw e;
     }
@@ -165,6 +171,10 @@ async function callOllamaVisionJSON(
   responseSchema: any,
   emptyFallback: string,
 ): Promise<any> {
+  // num_ctx mirrors the text tier: without it a big prompt (the pantry list is uncapped) silently
+  // truncates the FRONT of the context — the system message and the image — at the model's default.
+  const options: Record<string, any> = { num_predict: 2048 };
+  if (LOCAL_LLM_NUM_CTX) options.num_ctx = LOCAL_LLM_NUM_CTX;
   const body: any = {
     model: LOCAL_VISION_MODEL,
     messages: [
@@ -173,33 +183,17 @@ async function callOllamaVisionJSON(
     ],
     format: geminiSchemaToJsonSchema(responseSchema),
     stream: false,
-    options: { num_predict: 2048 },
+    options,
   };
   if (LOCAL_LLM_KEEP_ALIVE) body.keep_alive = LOCAL_LLM_KEEP_ALIVE;
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), LOCAL_VISION_TIMEOUT_MS);
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (LOCAL_LLM_API_KEY) headers['Authorization'] = `Bearer ${LOCAL_LLM_API_KEY}`;
-  try {
-    const res = await fetch(`${LOCAL_LLM_URL}/api/chat`, {
-      method: 'POST', headers, body: JSON.stringify(body), signal: ctrl.signal,
-    });
-    if (!res.ok) {
-      const t = await res.text().catch(() => '');
-      const e: any = new Error(`Ollama vision HTTP ${res.status}: ${t.slice(0, 200)}`);
-      e.status = res.status;
-      throw e;
-    }
-    const data: any = await res.json();
-    return parseGeminiJSON(data?.message?.content || emptyFallback);
-  } finally {
-    clearTimeout(timer);
-  }
+  return postOllamaChat(body, LOCAL_VISION_TIMEOUT_MS, emptyFallback, 'Ollama vision');
 }
 
-// Vision-capable JSON call: local vision model FIRST (when LOCAL_VISION_ENABLED), Gemini on any
-// failure or when disabled — the same local-first/cloud-fallback shape as callGeminiJSON's text
-// tier, but for a single (image + prompt) turn. `meta` reports which model actually answered.
+// Vision-capable JSON call — USE THIS for any endpoint sending an IMAGE (callGeminiJSON's local slot
+// is text-only and silently skips the local tier for image parts). Local vision model FIRST (when
+// LOCAL_VISION_ENABLED), Gemini on any failure or when disabled. NOTE: unlike the text tier's
+// explicit-chain mode, vision has no chain config — local-first is the only routing when enabled.
+// `meta` reports which model actually answered.
 export async function callVisionJSON(
   imageBase64: string,
   mimeType: string,
