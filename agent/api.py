@@ -66,6 +66,7 @@ from .concierge.bridge import collect_actions  # noqa: E402
 from .concierge.ratelimit import rate_ok, client_key_from_xff  # noqa: E402
 from .concierge.authheader import extract_bearer  # noqa: E402
 from .concierge.verifier import VERIFIER_ENABLED, VERIFIER_MODEL, verify_local_answer  # noqa: E402
+from .concierge.router import should_skip_local  # noqa: E402
 
 APP_NAME = "concierge"
 
@@ -88,9 +89,12 @@ LOCAL_MODEL = os.environ.get("CONCIERGE_LOCAL_MODEL", "ollama_chat/gpt-oss:20b")
 LOCAL_TOKEN = "__local__"  # chain sentinel; resolved to a LiteLlm instance at build time
 
 
-def build_model_chain() -> list:
-    """The turn's model chain, in try-order: optional local head → primary (None → MODEL) → fallbacks."""
-    return ([LOCAL_TOKEN] if LOCAL_ENABLED else []) + [None] + FALLBACK_MODELS
+def build_model_chain(message: str = "") -> list:
+    """The turn's model chain, in try-order: optional local head → primary (None → MODEL) → fallbacks.
+    Skips the local head entirely for request shapes that never succeed locally today (router.py) —
+    saves a wasted local attempt + verifier round-trip on a turn that's going to escalate anyway."""
+    include_local = LOCAL_ENABLED and not should_skip_local(message)
+    return ([LOCAL_TOKEN] if include_local else []) + [None] + FALLBACK_MODELS
 
 # Conversation history keyed by (user_id, session_id). The agent graph is rebuilt per request (it carries
 # the visitor's token), but history is agent-independent, so it lives here and survives across turns.
@@ -331,7 +335,7 @@ async def chat(
     # so the goal's id + step statuses ride along regardless of which model/session answers. That's why the goal
     # state is injected as prompt text, not relied on from session memory. (Intentional; do not "fix" by reusing
     # the session on retry — see the corrupted-transcript reason above.)
-    chain = build_model_chain()  # optional local head → primary (None → CONCIERGE_MODEL) → fallbacks
+    chain = build_model_chain(body.message)  # optional local head → primary (None → CONCIERGE_MODEL) → fallbacks
     last_err: Exception | None = None
     first = True
     for model_name in chain:

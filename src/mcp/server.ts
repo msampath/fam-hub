@@ -10,6 +10,8 @@ import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprot
 import { MCP_TOOLS, getTool, buildToolCtx, type McpToolResult } from './conciergeTools';
 import { makePersistence, persistResult } from './persistence';
 import { findPlaces } from '../utils/placesFetch';
+import { parseTicketmasterEvents } from '../utils/eventsFacts';
+import { fetchWithTimeout } from '../server/fetchUtils';
 import { buildHandoffDraft, normHandoffUrl, isLinkObserved } from '../utils/handoff';
 import { READ_TOOL_DEFS, shapeEvents, shapeUpcoming, shapeChores, shapeBills, shapeKnowledgeAsync } from './readTools';
 import { resolveDoc, normalizeFolder } from '../utils/docActions';
@@ -96,6 +98,27 @@ const FIND_PLACES_TOOL = {
   },
 };
 
+// Local-events discovery (Ticketmaster, key-gated) — the ORGANIZED-events counterpart to find_places:
+// find_places answers "where could we go" (venues); this answers "what's happening" (dated events). The
+// fetch mirrors the Express copilot's grounding (src/server/grounding.ts fetchLocalEvents) so both paths
+// see the same events source — pre-fix, the agent path had NO events tool, so even the cloud fallback
+// could only answer "events this weekend?" with a venue list.
+const FIND_EVENTS_TOOL = {
+  name: 'find_events',
+  description: 'Find REAL organized local events (festivals, fairs, shows, concerts, family events), each '
+    + 'with its date, venue, and a real ticket/info URL, within ~50 miles of home. Use this — NOT '
+    + 'find_places — when the family asks what EVENTS are happening ("any events this weekend?", '
+    + '"anything going on nearby?"). Pass the date window the family means (e.g. the actual Sat+Sun dates '
+    + 'for "this weekend"); defaults to the next 7 days.',
+  inputSchema: {
+    type: 'object' as const,
+    properties: {
+      from: { type: 'string', description: 'Window start, YYYY-MM-DD. Default: today.' },
+      to: { type: 'string', description: 'Window end, YYYY-MM-DD inclusive. Default: 7 days after `from`.' },
+    },
+  },
+};
+
 // The client's civil date, threaded from agentClient→api.py→env so MCP tool validators use the
 // family's local date (not the container's UTC clock, which drifts a day at evening local time).
 const _envToday = process.env.CLIENT_TODAY;
@@ -112,7 +135,7 @@ const persistence = makePersistence();
 // Advertise the toolbelt (name + description + JSON-Schema input) to the client — the mutating tools plus
 // the find_places discovery tool.
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: [...MCP_TOOLS, FIND_PLACES_TOOL, ...WEB_TOOL_DEFS, ...READ_TOOL_DEFS, ...DOC_TOOL_DEFS].map(t => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })),
+  tools: [...MCP_TOOLS, FIND_PLACES_TOOL, FIND_EVENTS_TOOL, ...WEB_TOOL_DEFS, ...READ_TOOL_DEFS, ...DOC_TOOL_DEFS].map(t => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })),
 }));
 
 // Library doc tools: resolve the doc by name/id, then move (persist now) or stage a delete for confirmation.
@@ -229,6 +252,64 @@ async function handleFindPlaces(args: Record<string, unknown>): Promise<McpToolR
   };
 }
 
+// Organized-events handler — the "what's happening" counterpart to handleFindPlaces' "where could we go".
+// Same home-location need as find_places, same Ticketmaster source the Express copilot already grounds
+// with (src/server/grounding.ts fetchLocalEvents) — just fetched directly here since the MCP bundle is a
+// separate process from the Express server. Key-gated: TICKETMASTER_API_KEY absent -> honest empty, never
+// a silent venue substitute.
+async function handleFindEvents(args: Record<string, unknown>): Promise<McpToolResult> {
+  const apiKey = process.env.TICKETMASTER_API_KEY;
+  if (!apiKey) {
+    return { ok: false, tool: 'find_events', tier: 'auto', status: 'rejected',
+      message: 'Local event listings aren’t configured (no Ticketmaster key) — tell the family you can find VENUES (find_places) but not dated EVENTS right now.' };
+  }
+  if (!persistence) {
+    return { ok: false, tool: 'find_events', tier: 'auto', status: 'rejected',
+      message: 'No household is connected, so I can’t look up your home location to search nearby.' };
+  }
+  const settings = await persistence.loadCollection('settings').catch(() => []);
+  const home = (settings as any[])[0] || {};
+  const lat = Number(home.homeLat), lng = Number(home.homeLng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return { ok: false, tool: 'find_events', tier: 'auto', status: 'rejected',
+      message: 'No home location is set. Ask the parent to set their home town so I can find real nearby events.' };
+  }
+  const today = clientToday || new Date().toISOString().slice(0, 10);
+  const from = typeof args.from === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(args.from) ? args.from : today;
+  let to = typeof args.to === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(args.to) ? args.to : '';
+  if (!to) {
+    const d = new Date(`${from}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + 7);
+    to = d.toISOString().slice(0, 10);
+  }
+  // Ticketmaster's endDateTime is EXCLUSIVE, but the tool's `to` is documented as inclusive — push one day.
+  const windowEndExcl = (() => {
+    const d = new Date(`${to}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + 1);
+    return d.toISOString().slice(0, 10);
+  })();
+  try {
+    const url = `https://app.ticketmaster.com/discovery/v2/events.json?latlong=${lat},${lng}`
+      + `&radius=50&unit=miles&size=40&sort=date,asc`
+      + `&startDateTime=${encodeURIComponent(`${from}T00:00:00Z`)}`
+      + `&endDateTime=${encodeURIComponent(`${windowEndExcl}T00:00:00Z`)}&apikey=${apiKey}`;
+    const r = await fetchWithTimeout(url, 8000);
+    if (!r.ok) {
+      return { ok: false, tool: 'find_events', tier: 'auto', status: 'rejected',
+        message: 'The events lookup failed just now — tell the family you couldn’t reach the events service.' };
+    }
+    const events = parseTicketmasterEvents(await r.json(), from, windowEndExcl);
+    return {
+      ok: true, tool: 'find_events', tier: 'auto', status: 'validated',
+      artifact: events,
+      message: events.length ? `Found ${events.length} real event(s) from ${from} to ${to}.` : `No organized events found from ${from} to ${to}.`,
+    };
+  } catch (err: any) {
+    return { ok: false, tool: 'find_events', tier: 'auto', status: 'rejected',
+      message: 'The events lookup failed just now — tell the family you couldn’t reach the events service.' };
+  }
+}
+
 // Web-research handler (no persistence needed — pure web grounding). web_search runs the provider chain;
 // fetch_page reads one URL (SSRF-guarded). Both return the SAME structured McpToolResult shape.
 const WEB_TOOL_NAMES = new Set(WEB_TOOL_DEFS.map(t => t.name));
@@ -330,6 +411,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   // through dispatchIO for one uniform error shape: find_places (discovery), web-research (SSRF-guarded),
   // READ tools (visitor-JWT reads), and Library doc move/delete.
   if (name === 'find_places') return dispatchIO(name, () => handleFindPlaces(args));
+  if (name === 'find_events') return dispatchIO(name, () => handleFindEvents(args));
   if (WEB_TOOL_NAMES.has(name)) return dispatchIO(name, () => handleWebTool(name, args));
   if (READ_TOOL_NAMES.has(name)) return dispatchIO(name, () => handleReadTool(name, args));
   if (DOC_TOOL_NAMES.has(name)) return dispatchIO(name, () => handleDocTool(name, args));
@@ -394,7 +476,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error(`[family-hub-mcp] concierge MCP server ready — ${MCP_TOOLS.length + 1 + WEB_TOOL_DEFS.length + READ_TOOL_DEFS.length + DOC_TOOL_DEFS.length} tools over stdio.`); // +1 find_places; WEB_TOOL_DEFS was previously omitted (undercount)
+  console.error(`[family-hub-mcp] concierge MCP server ready — ${MCP_TOOLS.length + 2 + WEB_TOOL_DEFS.length + READ_TOOL_DEFS.length + DOC_TOOL_DEFS.length} tools over stdio.`); // +2 find_places/find_events; WEB_TOOL_DEFS was previously omitted (undercount)
 }
 
 main().catch((err) => {

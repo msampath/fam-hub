@@ -54,7 +54,7 @@ def test_specialist_allowlists_are_scoped_as_expected():
     # Each specialist sees ONLY its slice — a guard against an accidental broad grant.
     assert agent.SPECIALIST_TOOLS["shopping_agent"] == ["add_shopping_item", "add_to_cart", "delete_shopping_item", "add_pantry_item", "delete_pantry_item"]
     assert agent.SPECIALIST_TOOLS["chores_agent"] == ["add_chore", "delete_chore", "clear_chores", "update_chore"]
-    assert agent.SPECIALIST_TOOLS["outings_agent"] == ["find_places", "search_local_knowledge", "web_search", "fetch_page", "prepare_handoff",
+    assert agent.SPECIALIST_TOOLS["outings_agent"] == ["find_places", "find_events", "search_local_knowledge", "web_search", "fetch_page", "prepare_handoff",
                                                        "set_goal", "delete_goal", "suggest_event", "get_events", "create_event", "delete_event", "update_event"]
     assert "add_to_cart" not in agent.SPECIALIST_TOOLS["calendar_agent"]
 
@@ -76,7 +76,7 @@ def test_every_granted_mutator_is_in_bridge_mutating_tools():
     # never reaches the Approvals bar — exactly the prepare_handoff regression (see test_bridge.py). Assert
     # the union of granted writers is a subset of bridge.MUTATING_TOOLS so the next added mutator fails closed.
     readers = {"get_events", "get_chores", "get_upcoming", "get_bills", "search_local_knowledge",
-               "find_places", "web_search", "fetch_page"}
+               "find_places", "find_events", "web_search", "fetch_page"}
     granted = {t for tools in agent.SPECIALIST_TOOLS.values() for t in tools}
     writers = granted - readers
     missing = writers - bridge.MUTATING_TOOLS

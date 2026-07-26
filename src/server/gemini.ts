@@ -91,6 +91,12 @@ const LOCAL_LLM_KEEP_ALIVE = process.env.LOCAL_LLM_KEEP_ALIVE || '';
 // setting LOCAL_LLM_API_KEY or reusing an existing OLLAMA_API_KEY.
 const LOCAL_LLM_API_KEY = process.env.LOCAL_LLM_API_KEY || process.env.OLLAMA_API_KEY || '';
 
+// ── Local VISION model (Ollama) — separate model/flag from the text tier above; a text-only
+// model (gpt-oss, qwen) cannot see images. Reuses LOCAL_LLM_URL/API_KEY (same Ollama server).
+const LOCAL_VISION_ENABLED = truthy(process.env.LOCAL_VISION_ENABLED);
+const LOCAL_VISION_MODEL = process.env.LOCAL_VISION_MODEL || 'moondream';
+const LOCAL_VISION_TIMEOUT_MS = Number(process.env.LOCAL_VISION_TIMEOUT_MS) || 60000;
+
 // Call the local Ollama model via its /api/chat endpoint with constrained JSON output. The
 // canonical @google/genai response schema is converted to plain JSON Schema for Ollama's `format`.
 // Reuses parseGeminiJSON so a truncated/garbage local response is tagged malformedResponse, the
@@ -146,6 +152,75 @@ async function callOllamaJSON(
   } finally {
     clearTimeout(timer);
   }
+}
+
+// Call a local Ollama VISION model's /api/chat with the image in `images` (Ollama's multimodal
+// field — a base64 string, no data: prefix) + constrained JSON output, same `format`/parse
+// contract as callOllamaJSON. Bounded by its own timeout (vision models run slower per token
+// on Pascal-class cards than the text tier's tuned timeout).
+async function callOllamaVisionJSON(
+  imageBase64: string,
+  textPrompt: string,
+  systemInstruction: string,
+  responseSchema: any,
+  emptyFallback: string,
+): Promise<any> {
+  const body: any = {
+    model: LOCAL_VISION_MODEL,
+    messages: [
+      { role: 'system', content: systemInstruction },
+      { role: 'user', content: textPrompt, images: [imageBase64] },
+    ],
+    format: geminiSchemaToJsonSchema(responseSchema),
+    stream: false,
+    options: { num_predict: 2048 },
+  };
+  if (LOCAL_LLM_KEEP_ALIVE) body.keep_alive = LOCAL_LLM_KEEP_ALIVE;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), LOCAL_VISION_TIMEOUT_MS);
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (LOCAL_LLM_API_KEY) headers['Authorization'] = `Bearer ${LOCAL_LLM_API_KEY}`;
+  try {
+    const res = await fetch(`${LOCAL_LLM_URL}/api/chat`, {
+      method: 'POST', headers, body: JSON.stringify(body), signal: ctrl.signal,
+    });
+    if (!res.ok) {
+      const t = await res.text().catch(() => '');
+      const e: any = new Error(`Ollama vision HTTP ${res.status}: ${t.slice(0, 200)}`);
+      e.status = res.status;
+      throw e;
+    }
+    const data: any = await res.json();
+    return parseGeminiJSON(data?.message?.content || emptyFallback);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Vision-capable JSON call: local vision model FIRST (when LOCAL_VISION_ENABLED), Gemini on any
+// failure or when disabled — the same local-first/cloud-fallback shape as callGeminiJSON's text
+// tier, but for a single (image + prompt) turn. `meta` reports which model actually answered.
+export async function callVisionJSON(
+  imageBase64: string,
+  mimeType: string,
+  textPrompt: string,
+  systemInstruction: string,
+  responseSchema: any,
+  emptyFallback: string = '{}',
+  meta?: { model?: string; usedFallback?: boolean },
+): Promise<any> {
+  if (LOCAL_VISION_ENABLED) {
+    try {
+      const data = await callOllamaVisionJSON(imageBase64, textPrompt, systemInstruction, responseSchema, emptyFallback);
+      if (meta) { meta.model = `ollama:${LOCAL_VISION_MODEL}`; meta.usedFallback = false; }
+      return data;
+    } catch (err: any) {
+      console.warn(`Local vision model "${LOCAL_VISION_MODEL}" unavailable (${err?.message || err}); falling back to Gemini.`);
+    }
+  }
+  const imagePart = { inlineData: { mimeType, data: imageBase64 } };
+  const textPart = { text: textPrompt };
+  return callGeminiJSON({ parts: [imagePart, textPart] }, systemInstruction, responseSchema, emptyFallback, meta);
 }
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));

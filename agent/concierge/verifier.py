@@ -20,6 +20,8 @@ VERIFIER_ENABLED = os.environ.get("CONCIERGE_VERIFIER_ENABLED", "").strip().lowe
 VERIFIER_MODEL = os.environ.get("CONCIERGE_VERIFIER_MODEL", "qwen2.5:14b")
 VERIFIER_URL = (os.environ.get("LOCAL_LLM_URL") or "http://localhost:11434").rstrip("/")
 VERIFIER_TIMEOUT = float(os.environ.get("CONCIERGE_VERIFIER_TIMEOUT", "30"))
+VERIFIER_NUM_PREDICT = int(os.environ.get("CONCIERGE_VERIFIER_NUM_PREDICT", "200"))
+VERIFIER_THINK = os.environ.get("CONCIERGE_VERIFIER_THINK", "").strip().lower()  # "", "true", "false" — some models burn the whole token budget on <think> reasoning before emitting JSON
 
 _SYSTEM = (
     "You are a strict output checker for a family-household assistant. Given the parent's REQUEST, the "
@@ -65,7 +67,7 @@ def verify_local_answer(message: str, reply: str, tool_names: list[str], url: st
     """One constrained-JSON verdict call to the verifier model. SYNCHRONOUS (call via asyncio.to_thread).
     Returns (sufficient, reason); every failure path returns (True, ...) — fail-open."""
     try:
-        body = json.dumps({
+        payload = {
             "model": VERIFIER_MODEL,
             "messages": [
                 {"role": "system", "content": _SYSTEM},
@@ -73,9 +75,12 @@ def verify_local_answer(message: str, reply: str, tool_names: list[str], url: st
             ],
             "format": _SCHEMA,
             "stream": False,
-            "options": {"temperature": 0, "num_predict": 200},
+            "options": {"temperature": 0, "num_predict": VERIFIER_NUM_PREDICT},
             "keep_alive": "30m",
-        }).encode()
+        }
+        if VERIFIER_THINK in ("true", "false"):
+            payload["think"] = VERIFIER_THINK == "true"
+        body = json.dumps(payload).encode()
         req = urllib.request.Request(
             f"{(url or VERIFIER_URL)}/api/chat", data=body,
             headers={"Content-Type": "application/json"}, method="POST",

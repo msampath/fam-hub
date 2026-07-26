@@ -64,7 +64,7 @@ import { buildWeatherFacts, isPlanningQuery } from './src/utils/weatherFacts';
 import { buildHistoryFacts } from './src/utils/historyFacts';
 import { buildPlacesFacts, indexedPlaces, parseDistanceConstraint, detectPlacesIntent, isPlacesQuery, flagHiddenGems, filterRecentlyVisited } from './src/utils/placesFacts';
 import { buildEventsFacts, indexedEvents } from './src/utils/eventsFacts';
-import { cleanHTML, callGeminiJSON, CALENDAR_EVENT_SCHEMA, aiErrorResponse } from './src/server/gemini';
+import { cleanHTML, callGeminiJSON, callVisionJSON, CALENDAR_EVENT_SCHEMA, aiErrorResponse } from './src/server/gemini';
 import { fetchWithTimeout, mapWithConcurrency } from './src/server/fetchUtils';
 import { LOCAL_MODE, STORAGE_MODE, IS_PRODUCTION, PORT, SUPABASE_URL, SUPABASE_ANON_KEY } from './src/server/config';
 import { requireAuth, aiRateLimit, preAuthThrottle } from './src/server/middleware';
@@ -761,12 +761,11 @@ app.post('/api/vision-scan-pantry', requireAuth, aiRateLimit, async (req, res) =
     const mt = typeof mimeType === 'string' && /^image\//.test(mimeType) ? mimeType : 'image/jpeg';
     const have = (Array.isArray(pantry) ? pantry : []).map((p: any) => String(p)).filter(Boolean).join(', ');
     const stores = sanitizeStoreList(req.body?.stores);
-    const imagePart = { inlineData: { mimeType: mt, data: cleanBase64 } };
-    const textPart = {
-      text: `This photo shows either the inside of a fridge/cupboard or a grocery receipt. List the distinct GROCERY items you can identify. For each, set "inPantry": true if it already appears in the family's current pantry list below (else false). ${storeRoutingLine(stores)} Ignore non-grocery clutter. Do not invent items you cannot see.\n\nCurrent pantry: ${have || '(empty)'}`,
-    };
-    const data = await callGeminiJSON(
-      { parts: [imagePart, textPart] },
+    const promptText = `This photo shows either the inside of a fridge/cupboard or a grocery receipt. List the distinct GROCERY items you can identify. For each, set "inPantry": true if it already appears in the family's current pantry list below (else false). ${storeRoutingLine(stores)} Ignore non-grocery clutter. Do not invent items you cannot see.\n\nCurrent pantry: ${have || '(empty)'}`;
+    const data = await callVisionJSON(
+      cleanBase64,
+      mt,
+      promptText,
       'You are a precise grocery-vision model. Identify only items actually visible in the photo and return schema-compliant JSON { detected: [{ text, inPantry, store }] }.',
       {
         type: Type.OBJECT,
