@@ -3,7 +3,15 @@
 // or a date years away — and an invalid import is worse than a smaller one (Phase-3 treatment:
 // validator tightening, no critic pass). Pure + tested; server.ts wraps each endpoint's results.
 
+// $-anchored (via the reserialize below): '2026-05-05 around 3pm' must not pass with trailing garbage.
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})(T(\d{2}):(\d{2}))?/;
+
+// The canonical stored form of a validated start: exactly the parsed date(+time), no trailing text.
+function reserializeISO(s: string): string | null {
+  const m = ISO_DATE.exec(s);
+  if (!m || !parseISO(s)) return null;
+  return m[4] ? `${m[1]}-${m[2]}-${m[3]}T${m[5]}:${m[6]}` : `${m[1]}-${m[2]}-${m[3]}`;
+}
 
 // Real calendar date (round-trip check kills 2026-02-31) with an optional valid HH:mm.
 function parseISO(s: string): { y: number; m: number; d: number } | null {
@@ -36,9 +44,12 @@ export function validateExtractedEvents<T extends { title?: unknown; start?: unk
   for (const evt of Array.isArray(events) ? events : []) {
     if (!evt || typeof evt !== 'object') continue;
     const title = String(evt.title ?? '').trim();
-    const start = String(evt.start ?? '').trim();
-    const startDay = dayNumber(start);
-    if (!title || startDay === null) continue;
+    const rawStart = String(evt.start ?? '').trim();
+    // Store the RE-SERIALIZED parse, not the raw string — '2026-05-05 around 3pm' previously flowed
+    // through verbatim (the regex has no end anchor), half-defeating this validator's purpose.
+    const start = reserializeISO(rawStart);
+    const startDay = start ? dayNumber(start) : null;
+    if (!title || !start || startDay === null) continue;
     if (today !== null && Math.abs(startDay - today) > EXTRACTION_WINDOW_DAYS) continue;
     const cleaned: T = { ...evt, title: title.slice(0, 200), start };
     const end = String(evt.end ?? '').trim();

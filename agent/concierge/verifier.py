@@ -1,7 +1,7 @@
 """Small-model verifier for the LOCAL agent head (owner-directed design, 2026-07-19).
 
 qwen2.5 (the Express copilot's model, resident on the other GPU) CHECKS every answer the local
-gpt-oss head produces before it is returned: did the reply actually handle the request, with the
+CONCIERGE_LOCAL_MODEL head produces before it is returned: did the reply actually handle the request, with the
 tool calls it needs/claims? An INSUFFICIENT verdict makes api.py advance the turn to the cloud
 chain — this is the accuracy fallback the plain chain cannot provide (the chain only catches HARD
 failures; a confident wrong answer would otherwise return as-is).
@@ -19,18 +19,22 @@ import urllib.request
 VERIFIER_ENABLED = os.environ.get("CONCIERGE_VERIFIER_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
 VERIFIER_MODEL = os.environ.get("CONCIERGE_VERIFIER_MODEL", "qwen2.5:14b")
 VERIFIER_URL = (os.environ.get("LOCAL_LLM_URL") or "http://localhost:11434").rstrip("/")
-VERIFIER_TIMEOUT = float(os.environ.get("CONCIERGE_VERIFIER_TIMEOUT", "30"))
-def _env_int(name: str, default: int) -> int:
-    """Defensive env-int parse: a malformed value must degrade to the default, never crash the import
+# Bearer auth for hosted/authenticated Ollama — same env pair the Express tier honors (gemini.ts).
+VERIFIER_API_KEY = os.environ.get("LOCAL_LLM_API_KEY") or os.environ.get("OLLAMA_API_KEY") or ""
+
+
+def _env_num(name: str, default, cast):
+    """Defensive env parse: a malformed value must degrade to the default, never crash the import
     chain (api.py imports this module at boot — the fail-open contract extends to config parsing)."""
     try:
-        return int(os.environ.get(name, "") or default)
+        return cast(os.environ.get(name, "") or default)
     except ValueError:
         print(f"[verifier] ignoring malformed {name}={os.environ.get(name)!r}; using {default}", flush=True)
-        return default
+        return cast(default)
 
 
-VERIFIER_NUM_PREDICT = _env_int("CONCIERGE_VERIFIER_NUM_PREDICT", 200)
+VERIFIER_TIMEOUT = _env_num("CONCIERGE_VERIFIER_TIMEOUT", 30.0, float)
+VERIFIER_NUM_PREDICT = _env_num("CONCIERGE_VERIFIER_NUM_PREDICT", 200, int)
 # Some models burn the whole token budget on <think> reasoning before emitting JSON — this opt-in knob
 # forces thinking on/off. Only send it when set: Ollama errors if `think` reaches a non-thinking model
 # (e.g. the default qwen2.5:14b verifier — leave this UNSET for it). House truthy/falsy spellings accepted.
@@ -98,9 +102,12 @@ def verify_local_answer(message: str, reply: str, tool_names: list[str], url: st
         if VERIFIER_THINK is not None:
             payload["think"] = VERIFIER_THINK
         body = json.dumps(payload).encode()
+        headers = {"Content-Type": "application/json"}
+        if VERIFIER_API_KEY:
+            headers["Authorization"] = f"Bearer {VERIFIER_API_KEY}"
         req = urllib.request.Request(
             f"{(url or VERIFIER_URL)}/api/chat", data=body,
-            headers={"Content-Type": "application/json"}, method="POST",
+            headers=headers, method="POST",
         )
         with urllib.request.urlopen(req, timeout=VERIFIER_TIMEOUT) as r:
             data = json.loads(r.read().decode())

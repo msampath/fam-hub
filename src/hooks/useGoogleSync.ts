@@ -23,6 +23,7 @@ export function useGoogleSync({
   pushEventToGoogleCalendars: (ev: CalendarEvent, calendarIds: string[]) => Promise<string>;
 }) {
   const autoPushInFlightRef = useRef(false);
+  const pushFailuresRef = useRef(new Map<string, number>()); // per-event consecutive push failures
   useEffect(() => {
     if (!email || autoPushInFlightRef.current) return;
     const targets = selectPushTargets(connectedCalendars, googleCalendarsList, email);
@@ -42,13 +43,25 @@ export function useGoogleSync({
         if (!token) return;
         const done = new Set(pushed);
         for (const ev of toPush) {
-          try { await pushEventToGoogleCalendars(ev, targets); done.add(ev.id); } catch { /* push logs its own errors */ }
+          // Give up on an event after 3 consecutive failures — a permanently-failing push otherwise
+          // re-attempts on every effect re-run (each events change) forever, spamming the API.
+          if ((pushFailuresRef.current.get(ev.id) || 0) >= 3) continue;
+          try {
+            await pushEventToGoogleCalendars(ev, targets);
+            done.add(ev.id);
+            pushFailuresRef.current.delete(ev.id);
+          } catch {
+            pushFailuresRef.current.set(ev.id, (pushFailuresRef.current.get(ev.id) || 0) + 1);
+          }
         }
         try { localStorage.setItem(key, JSON.stringify([...done].slice(-1000))); } catch { /* non-fatal */ }
       } finally {
         autoPushInFlightRef.current = false;
       }
     })();
+    // getGoogleToken/pushEventToGoogleCalendars are stable enough here (re-runs are driven by the
+    // data deps); documented omission, matching the auto-pull effect below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [email, connectedCalendars, googleCalendarsList, events]);
 
   const autoPullDoneRef = useRef(false);

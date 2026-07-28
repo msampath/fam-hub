@@ -18,6 +18,12 @@ services:
                                         # runtime-injected (empty here) → the app boots in local SQLite mode.
     ports:
       - "4894:4894"
+    # .env passthrough: integration keys documented in .env.example (Kroger, Maps, Ticketmaster, vision,
+    # verifier, RAG...) reach the CONTAINERS too — the fixed allow-list below only covered the core set,
+    # so docs like kroger-setup.md ("put the two vars in your .env") silently did nothing on the appliance.
+    env_file:
+      - path: .env
+        required: false
     environment:
       NODE_ENV: production
       STORAGE: sqlite                   # → LOCAL_MODE: local household auth + the SQLite data API.
@@ -60,6 +66,12 @@ services:
       context: .
       dockerfile: Dockerfile
     # No host port: only the web container talks to it (AGENT_BASE_URL above).
+    # .env passthrough: integration keys documented in .env.example (Kroger, Maps, Ticketmaster, vision,
+    # verifier, RAG...) reach the CONTAINERS too — the fixed allow-list below only covered the core set,
+    # so docs like kroger-setup.md ("put the two vars in your .env") silently did nothing on the appliance.
+    env_file:
+      - path: .env
+        required: false
     environment:
       PORT: 8080
       STORAGE: sqlite                   # the MCP child writes auto-tier results to the SAME SQLite box (load-bearing — see web above)

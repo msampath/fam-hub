@@ -22,6 +22,24 @@ export interface SaveResult {
   conflict?: boolean;      // true when expectedVersion no longer matched (caller should refresh + retry)
 }
 
+// Async retry around adapter.save for SQLITE_BUSY: node:sqlite waits synchronously (busy_timeout blocks
+// the event loop), so the in-process wait is kept SHORT (500ms pragma) and genuinely-contended writes
+// retry here with an event-loop-yielding sleep instead. Non-BUSY errors rethrow immediately; the write
+// path is a single-row upsert, so contention windows are milliseconds.
+export async function retrySave(
+  adapter: StorageAdapter, householdId: string, key: string, data: any[], expectedVersion?: string | null,
+  attempts = 3,
+): Promise<SaveResult> {
+  for (let i = 0; ; i++) {
+    try {
+      return await adapter.save(householdId, key, data, expectedVersion);
+    } catch (e: any) {
+      if (i >= attempts - 1 || !/SQLITE_BUSY/i.test(String(e?.message ?? e))) throw e;
+      await new Promise(r => setTimeout(r, 100 * (i + 1)));
+    }
+  }
+}
+
 export interface StorageAdapter {
   /** Load a household's collection blob (empty array + null version when absent). */
   load(householdId: string, key: string): Promise<StoredBlob>;

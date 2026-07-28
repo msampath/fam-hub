@@ -31,7 +31,6 @@ import type {
   Category,
   CalendarEvent,
   WebSource,
-  ShoppingItem,
   PantryItem,
   Chore,
   XpBankEntry,
@@ -218,7 +217,6 @@ export default function App() {
   
   // Google Calendar integration states
   const [googleUser, setGoogleUser] = useState<User | null>(null);
-  const [googleToken, setGoogleToken] = useState<string | null>(null);
   // Per-record authorship stamp (best-effort) for the audit trail + RL dataset — spread into a new
   // event/chore/shopping item / log entry at its create site. Exposed via AppContext for components.
   const authorStamp = (): Authored => ({
@@ -257,7 +255,7 @@ export default function App() {
   const devicePrefs = useDevicePrefs();
   const {
     idleTimeoutMs, setIdleTimeoutMs, signOutMs, setSignOutMs,
-    remindersEnabled, setRemindersEnabled, reminderTime, setReminderTime,
+    remindersEnabled, reminderTime, setReminderTime,
     reminderLeadMinutes, setReminderLeadMinutes, handleToggleReminders,
     autoScanEnabled, setAutoScanEnabled,
     kidMode, setKidMode,
@@ -272,6 +270,8 @@ export default function App() {
   // usePersistedCollection(), so it runs last in the commit. beginLoad()/endLoad()/suppressSync keep
   // their names here (destructured) so the rest of App is unchanged.
   const echoGuard = useEchoWriteGuard();
+  // Ledger entries currently mid-resolve (async appliers) — blocks double-tap re-dispatch (see resolveLedgerUpdate).
+  const resolvingLedgerIdsRef = useRef<Set<string>>(new Set());
   const { suppressSync, beginLoad, endLoad } = echoGuard;
   // Generation token: a fired watchdog / a new sign-in / sign-out bumps this so a stale in-flight
   // bootstrap can't commit its results into a reset or superseded UI.
@@ -362,7 +362,6 @@ export default function App() {
   });
   const [isFetchingCalendars, setIsFetchingCalendars] = useState(false);
   const [calendarSyncLogs, setCalendarSyncLogs] = useState<string[]>([]);
-  const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [pdfCategory, setPdfCategory] = useState<Category>('School');
   const [dragActive, setDragActive] = useState(false);
 
@@ -372,7 +371,6 @@ export default function App() {
   const [textSourceName, setTextSourceName] = useState('');
 
   // Main navigation tabs state
-  const [activeMainTab, setActiveMainTab] = useState<'calendar' | 'shopping' | 'chores' | 'inbox'>('calendar');
 
   // Household-defined store lists (Phase-5): sanitized once here, threaded everywhere (hook, context,
   // AI prompt bodies, the copilot apply path). Never empty — defaults to SHOP_STORES.
@@ -384,8 +382,8 @@ export default function App() {
   const {
     shoppingList, setShoppingList,
     pantryList, setPantryList,
-    isParsingRecipe, setIsParsingRecipe,
-    isSuggestingRestock, setIsSuggestingRestock, shoppingAiError, setShoppingAiError,
+    isParsingRecipe,
+    isSuggestingRestock, shoppingAiError, setShoppingAiError,
     isPlanningMeals, mealPlan, handlePlanMeals,
     isScanningPantry, pantryScan, handleScanPantryPhoto, confirmPantryScan, dismissPantryScan,
     appendShoppingItems, handleAddPantryItem, handleDeletePantryItem, handleParseRecipe, handleSuggestRestock,
@@ -493,7 +491,6 @@ export default function App() {
       };
 
       setSources(prev => [sourceEntry, ...prev]);
-      setPdfFile(null);
       setParserStep('');
 
       // Push Copilot Notification
@@ -841,7 +838,7 @@ export default function App() {
       }
       setSettings(prev => [{ ...(prev[0] || {}), homeLabel: data.label, homeLat: data.lat, homeLng: data.lng }]);
       return { ok: true, label: data.label };
-    } catch (err: any) {
+    } catch {
       return { ok: false, error: 'Could not reach the location service.' };
     }
   };
@@ -939,7 +936,10 @@ export default function App() {
       beginLoad();
       try {
         const cloud = await loadHouseholdData(householdId);
-        COLLECTIONS.forEach(c => c.set(cloud[c.dataKey] ?? []));
+        // Unconditional set — unlike bootstrap's has-data guard: a REFRESH must propagate real deletions
+    // (an emptied collection stays empty). suppressSync brackets this, so a raced/empty read is
+    // display-only and self-heals on the next refresh (never echo-written back to the cloud).
+    COLLECTIONS.forEach(c => c.set(cloud[c.dataKey] ?? []));
         reconcileChoreResets(householdId, cloud.chores ?? [], cloud.xpbank ?? [], cloud.choreweek?.[0]?.week, cloud.choreweek?.[0]?.day);
       } catch (err: any) {
         setErrorStatus('Could not refresh your data: ' + (err?.message || String(err)));
@@ -1094,9 +1094,7 @@ export default function App() {
         const wantDemoSeed = (user as any).is_anonymous === true || demoSeedPendingRef.current;
         demoSeedPendingRef.current = false;
         if (wantDemoSeed && !existingMembers.length && !hasOtherData) {
-          const now = new Date();
-          const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-          const seed = buildDemoSeed(todayStr, user.id);
+          const seed = buildDemoSeed(toLocalDateStr(new Date()), user.id);
           COLLECTIONS.forEach(c => { if (seed[c.dataKey]) c.set(seed[c.dataKey]); });
           Object.entries(seed).forEach(([k, v]) => saveHouseholdData(hid, k, v));
         } else {
@@ -1188,7 +1186,6 @@ export default function App() {
       const user = session?.user ?? null;
       setGoogleUser(user);
       const token = session?.provider_token ?? null;
-      setGoogleToken(token);
 
       // Stash the Google refresh token when present (only right after OAuth) so
       // calendar sync keeps working after a page reload.
@@ -1275,8 +1272,11 @@ export default function App() {
       if (!evt.start) continue;
       const start = evt.start.split('T')[0];
       const end = evt.end ? evt.end.split('T')[0] : start;
+      // Clamp: a malformed end-before-start event otherwise indexes onto ZERO days (invisible on the
+      // board while still alive in state/conflicts) — treat it as single-day, matching the Google pull.
+      const endClamped = end < start ? start : end;
       let d = start;
-      for (let guard = 0; d <= end && guard < 400; guard++) {
+      for (let guard = 0; d <= endClamped && guard < 400; guard++) {
         const arr = m.get(d); if (arr) arr.push(evt); else m.set(d, [evt]);
         d = nextISO(d);
       }
@@ -1344,7 +1344,7 @@ export default function App() {
         const dayOfWeek = dateObj.getDay(); // 0 is Sunday, 6 is Saturday
         if (dayOfWeek === 0 || dayOfWeek === 6) {
           const dayEvents = getEventsForDate(cell.dateStr);
-          if (dayEvents.length === 0) {
+          if (dayEvents.filter(e => e.freeBusy !== 'free').length === 0) {
             count++;
           }
         }
@@ -1780,8 +1780,11 @@ export default function App() {
             // (idempotent re-pull), without touching any other events.
             pulledConnIds.add(conn.id);
             
-            const imported: CalendarEvent[] = items.map((item: any) => {
-              const startVal = item.start.date || (item.start.dateTime ? item.start.dateTime.slice(0, 10) : '2026-06-15');
+            const imported: CalendarEvent[] = items.map((item: any): CalendarEvent | null => {
+              // Skip items with no parsable start instead of fabricating a date (the old hardcoded fallback
+        // planted phantom events on a past sprint day; an absent start object also threw the whole pull).
+        if (!item?.start?.date && !item?.start?.dateTime) return null;
+        const startVal = item.start.date || item.start.dateTime.slice(0, 10);
               // Google all-day end.date is EXCLUSIVE (the day after the last day) — convert it
               // to an inclusive end so it matches manual events + the inclusive conflict/agenda
               // logic (otherwise a 1-day all-day event spans 2 days and fakes a conflict).
@@ -1790,7 +1793,14 @@ export default function App() {
                 endVal = shiftDateStr(item.end.date, -1);
                 if (endVal < startVal) endVal = startVal;
               } else {
-                endVal = item.end?.dateTime ? item.end.dateTime.slice(0, 10) : startVal;
+                // Google represents an event ending AT midnight with end.dateTime = next-day T00:00 — same
+          // exclusive-end class as all-day ends; shift back a day so the event doesn't paint a day it
+          // never occupies (clamped to startVal below as before).
+          const endDt = item.end?.dateTime || '';
+          endVal = endDt
+            ? (/T00:00/.test(endDt.slice(10, 16)) ? shiftDateStr(endDt.slice(0, 10), -1) : endDt.slice(0, 10))
+            : startVal;
+                if (endVal < startVal) endVal = startVal;
               }
               // Capture wall-clock HH:MM for timed (dateTime) events; all-day (date) events have none.
               // Validate the slice (defense-in-depth) so only well-formed HH:MM is ever stored.
@@ -1834,8 +1844,8 @@ export default function App() {
                 endTime,
                 recurringEventId: item.recurringEventId // set when this is an instance of a recurring series
               };
-            });
-            
+            }).filter((e: CalendarEvent | null): e is CalendarEvent => e !== null);
+
             // Drop blocklisted (locally-deleted) events BEFORE the concat/merge so a
             // hidden event can't be re-imported (and can't be id-promoted by the merge).
             const visibleImported = filterHiddenEvents(imported, hiddenIds);
@@ -2411,6 +2421,12 @@ export default function App() {
   };
   // The Approvals queue (CopilotBar) calls these to resolve a staged confirm-tier entry.
   const resolveLedgerUpdate = (id: string, approve: boolean, stepUpVerified = false) => {
+    // In-flight guard: an async applier (kroger_cart_write's network round-trip) leaves the entry
+    // 'pending' in state until its .then marks it — a second Approve tap in that window re-dispatched
+    // the cart add (duplicate items). Refs, not state: the guard must be synchronous.
+    if (resolvingLedgerIdsRef.current.has(id)) return;
+    resolvingLedgerIdsRef.current.add(id);
+    setTimeout(() => resolvingLedgerIdsRef.current.delete(id), 30_000); // safety valve if an applier never resolves
     // The LEDGER entry (persisted) is the durable source of the staged change, so approval works after a
     // reload or on another device.
     const entry = actionLedger.find(le => le.id === id && le.status === 'pending');
@@ -2738,6 +2754,9 @@ export default function App() {
     setIsSyncingSources(true);
     try {
       for (const src of sources) {
+        // PDF/pasted-text imports are pseudo-sources (their `url` is a label like 'Scanned PDF booklet',
+        // not fetchable) — re-syncing them always failed and repainted healthy imports as errors.
+        if (src.id.startsWith('pdf-') || src.id.startsWith('text-')) continue;
         try {
           const res = await apiFetch('/api/parse-calendar', { method: 'POST', body: JSON.stringify({ url: src.url, category: src.category }) });
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -2912,9 +2931,9 @@ export default function App() {
     return true;
   };
 
-  // Local copilot turn (/api/copilot — local gpt-oss harness with FACTS grounding + staged suggestions).
+  // Local copilot turn (/api/copilot — the LOCAL_LLM_MODEL harness with FACTS grounding + staged suggestions).
   // `degraded` = the cloud agent was the intended engine but was unreachable, so this LOCAL answer is a
-  // labeled fallback ('fallback' source → "⚠ offline — limited" badge), never mistaken for the cloud agent.
+  // labeled fallback ('fallback' source → "⚠ limited mode" badge), never mistaken for the cloud agent.
   const runLocalCopilotTurn = async (query: string, opts?: { degraded?: boolean }): Promise<void> => {
     const src: 'local' | 'fallback' = opts?.degraded ? 'fallback' : 'local';
     try {
@@ -2933,7 +2952,9 @@ export default function App() {
           visitLog: visitLog, // per-place "last visited" log for HISTORY FACTS grounding (planning queries)
           mealplan: mealPlans, // the weekly dinner plans → the MEALS facts block ("what's for dinner?" answers locally)
           // Docs Library text for LOCAL KNOWLEDGE FACTS grounding; the server keyword-retrieves + caps it.
-          documents: libraryDocs.map(d => ({ name: d.name, folder: d.folder, text: d.text, createdAt: d.createdAt })),
+          // text sliced: the harness injects ~600 chars/doc, so shipping each doc's FULL text paid a
+          // multi-MB upload per turn for nothing. 4k/doc keeps retrieval quality with a bounded payload.
+          documents: libraryDocs.map(d => ({ name: d.name, folder: d.folder, text: (d.text || '').slice(0, 4000), createdAt: d.createdAt })),
           // Short conversation memory: prior transcript turns (current `prompt` excluded) so the model
           // can resolve "that"/"extend it". Last 8 here; the server sanitizes + caps to the last few.
           // Strip suggestions — only role+text matter for memory (keeps the payload lean).
@@ -2999,7 +3020,7 @@ export default function App() {
         // The concierge's full (tool-using) engine is unreachable. This is an action/planning turn (quick Q&A
         // routes to the fast path), and the tool-LESS quick path can't actually plan or act — so DON'T fabricate
         // a degraded answer (the old "July 3/4" fake). Say so honestly + offer Retry. NOTE: runLocalCopilotTurn's
-        // `degraded` path is intentionally KEPT (not called here) for when a LOCAL tool-using engine (gpt-oss)
+        // `degraded` path is intentionally KEPT (not called here) for when a LOCAL tool-using engine
         // comes online.
         setCopilotMessages(prev => [...prev, {
           role: 'assistant' as const,

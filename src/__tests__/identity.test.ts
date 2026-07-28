@@ -25,6 +25,15 @@ describe('matchOwnProfileIndex', () => {
     expect(matchOwnProfileIndex(members, undefined, undefined)).toBe(-1);
     expect(matchOwnProfileIndex(null as any, 'u-dad', undefined)).toBe(-1);
   });
+  it('a later exact-userId match beats an earlier row matching only by (shared) email', () => {
+    // Two profiles share a family email; only the second carries the signed-in user's userId.
+    // A single OR-pass would return row 0 on the email match — healMemberLink would rewrite the wrong profile.
+    const shared = [
+      mk({ name: 'A', email: 'shared@x.com' }),
+      mk({ name: 'B', userId: 'u1', email: 'shared@x.com' }),
+    ];
+    expect(matchOwnProfileIndex(shared, 'u1', 'shared@x.com')).toBe(1);
+  });
 });
 
 describe('healMemberLink', () => {

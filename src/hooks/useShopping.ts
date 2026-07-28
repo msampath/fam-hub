@@ -8,6 +8,17 @@ import { aiErrorMessage } from '../utils/aiErrors';
 import { fileToScanPayload } from '../utils/imagePrep';
 import { diffDetectedVsPantry, type PantryDiff } from '../utils/visionPantry';
 import { SHOP_STORES } from '../constants';
+
+// One POST-and-parse for the four AI endpoints below (was four copies of the same 4-line block —
+// only the two message strings differ per call).
+async function postAi(path: string, payload: unknown, failMsg: string, hint: string): Promise<any> {
+  const res = await apiFetch(path, { method: 'POST', body: JSON.stringify(payload) });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(aiErrorMessage(res.status, body, failMsg, hint));
+  }
+  return res.json();
+}
 import type { ShoppingItem, PantryItem, Authored } from '../types';
 
 export type ShopStore = ShoppingItem['store'];
@@ -118,19 +129,17 @@ export function useShopping({ authorStamp, storeList, boundLists }: UseShoppingD
     setIsParsingRecipe(true);
     setShoppingAiError(null);
     try {
-      const res = await apiFetch('/api/parse-recipe', { method: 'POST', body: JSON.stringify({ text: text.trim(), stores: VALID_STORES }) });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(aiErrorMessage(res.status, body, 'Could not extract ingredients from that recipe.', 'Add the items to your list manually for now.'));
-      }
-      const data = await res.json();
+      const data = await postAi('/api/parse-recipe', { text: text.trim(), stores: VALID_STORES },
+        'Could not extract ingredients from that recipe.', 'Add the items to your list manually for now.');
       const rawItems = data.items || [];
       // Only "no ingredients found" when the model genuinely returned none — added===0 alone doesn't
       // mean that: it's also what mergeShoppingItems reports when every extracted ingredient was
       // already active on the list, which is a successful parse, not a failure.
       if (rawItems.length === 0) throw new Error('No ingredients found — try a more detailed recipe or a clearer dish name.');
-      appendShoppingItems(rawItems);
-      const offer = offerFor(rawItems);
+      const added = appendShoppingItems(rawItems);
+      // Offer the Kroger send only when something NEW landed (same gate as handlePlanMeals): with
+      // added===0 every ingredient was already listed, so there's nothing new to send.
+      const offer = added > 0 ? offerFor(rawItems) : null;
       if (offer) setKrogerOffer(offer);
       return true;
     } catch (err: any) {
@@ -150,15 +159,9 @@ export function useShopping({ authorStamp, storeList, boundLists }: UseShoppingD
     setIsSuggestingRestock(true);
     setShoppingAiError(null);
     try {
-      const res = await apiFetch('/api/pantry-restock', {
-        method: 'POST',
-        body: JSON.stringify({ pantry: pantryList.map(p => p.text), recipes: shoppingList.map(s => s.text), stores: VALID_STORES }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(aiErrorMessage(res.status, body, 'Could not suggest a restock list.', 'Add items to your list manually for now.'));
-      }
-      const data = await res.json();
+      const data = await postAi('/api/pantry-restock',
+        { pantry: pantryList.map(p => p.text), recipes: shoppingList.map(s => s.text), stores: VALID_STORES },
+        'Could not suggest a restock list.', 'Add items to your list manually for now.');
       const added = appendShoppingItems(data.items || []);
       if (added === 0) throw new Error('Nothing to restock — your pantry looks well stocked.');
     } catch (err: any) {
@@ -178,12 +181,8 @@ export function useShopping({ authorStamp, storeList, boundLists }: UseShoppingD
     setShoppingAiError(null);
     setMealPlan([]);
     try {
-      const res = await apiFetch('/api/meal-plan', { method: 'POST', body: JSON.stringify({ pantry: pantryList.map(p => p.text), stores: VALID_STORES }) });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(aiErrorMessage(res.status, body, 'Could not plan meals from your pantry.', 'Add items to your list manually for now.'));
-      }
-      const data = await res.json();
+      const data = await postAi('/api/meal-plan', { pantry: pantryList.map(p => p.text), stores: VALID_STORES },
+        'Could not plan meals from your pantry.', 'Add items to your list manually for now.');
       const added = appendShoppingItems(data.items || []);
       setMealPlan(Array.isArray(data.meals) ? data.meals.slice(0, 3) : []);
       const offer = added > 0 ? offerFor(data.items || []) : null;
@@ -202,15 +201,9 @@ export function useShopping({ authorStamp, storeList, boundLists }: UseShoppingD
     setPantryScan(null);
     try {
       const payload = await fileToScanPayload(file);
-      const res = await apiFetch('/api/vision-scan-pantry', {
-        method: 'POST',
-        body: JSON.stringify({ ...payload, pantry: pantryList.map(p => p.text), stores: VALID_STORES }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(aiErrorMessage(res.status, body, 'Could not read that photo.', 'Try a clearer, closer shot.'));
-      }
-      const data = await res.json();
+      const data = await postAi('/api/vision-scan-pantry',
+        { ...payload, pantry: pantryList.map(p => p.text), stores: VALID_STORES },
+        'Could not read that photo.', 'Try a clearer, closer shot.');
       const diff = diffDetectedVsPantry(data.detected || [], pantryList);
       if (!diff.newItems.length && !diff.known.length) throw new Error('No grocery items spotted — try a clearer photo.');
       setPantryScan(diff);

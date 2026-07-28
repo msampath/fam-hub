@@ -70,11 +70,17 @@ export function effectiveBindings(settings?: {
     if (Object.keys(out).length) return out;
   }
   if (settings?.storeBindings && Object.keys(settings.storeBindings).length) return settings.storeBindings;
-  if (settings?.krogerStoreId) {
-    const legacy = (settings.krogerStoreName || 'Kroger').replace(/^[A-Z0-9]{2,8}\s+(?=\S)/, '');
-    return { 'Grocery Store': { locationId: settings.krogerStoreId, name: legacy } };
-  }
+  const legacy = legacyConnection(settings);
+  if (legacy) return { 'Grocery Store': legacy };
   return {};
+}
+
+// The one-release legacy-shape shim (krogerStoreId/Name from before two-level connections), in ONE
+// place so both readers change/delete together when it sunsets.
+function legacyConnection(settings?: { krogerStoreId?: string; krogerStoreName?: string } | null): { locationId: string; name: string } | null {
+  if (!settings?.krogerStoreId) return null;
+  const name = (settings.krogerStoreName || 'Kroger').replace(/^[A-Z0-9]{2,8}\s+(?=\S)/, '');
+  return { locationId: settings.krogerStoreId, name };
 }
 
 // The connection's step-2 location, read through the same fallback chain (the panel shows this even
@@ -86,11 +92,7 @@ export function effectiveKrogerConnection(settings?: {
   if (settings?.krogerConnection?.locationId) return settings.krogerConnection;
   const first = Object.values(settings?.storeBindings || {})[0];
   if (first?.locationId) return first;
-  if (settings?.krogerStoreId) {
-    const legacy = (settings.krogerStoreName || 'Kroger').replace(/^[A-Z0-9]{2,8}\s+(?=\S)/, '');
-    return { locationId: settings.krogerStoreId, name: legacy };
-  }
-  return null;
+  return legacyConnection(settings);
 }
 
 // ── Search terms ─────────────────────────────────────────────────────────────────────────────────

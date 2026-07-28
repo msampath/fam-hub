@@ -155,7 +155,9 @@ export function parseICS(text: string, category: string = 'School'): any[] {
 
   const unfoldedLines: string[] = [];
   for (const line of lines) {
-    if (line.startsWith(' ') && unfoldedLines.length > 0) {
+    // RFC 5545 §3.1: a folded continuation starts with SPACE or HTAB — space-only handling orphaned
+    // tab-folded property tails (truncated SUMMARY, broken DTSTART) from producers that fold with tabs.
+    if ((line.startsWith(' ') || line.startsWith('\t')) && unfoldedLines.length > 0) {
       unfoldedLines[unfoldedLines.length - 1] += line.substring(1);
     } else if (line) {
       unfoldedLines.push(line);
@@ -182,7 +184,7 @@ export function parseICS(text: string, category: string = 'School'): any[] {
             description: currentEvent.description || '',
             location: currentEvent.location || '',
             category: category,
-            ageGroup: 'All age'
+            ageGroup: 'All ages'
           });
         }
         currentEvent = null;

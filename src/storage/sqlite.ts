@@ -22,7 +22,10 @@ export class SqliteAdapter implements StorageAdapter {
     // spawns several at once) as SEPARATE processes, each opening its own handle to this shared file; WAL
     // still allows only ONE writer at a time, so two BEGIN IMMEDIATE writes can collide. Without this, that
     // collision surfaces as a thrown error → /api/data 500 or a silent agent write failure.
-    this.db.exec('PRAGMA busy_timeout = 5000;');
+    // 500ms, not 5s: node:sqlite is fully SYNCHRONOUS, so a busy-wait here blocks the whole event loop
+    // for its duration — the wait must stay short, with the ASYNC retry in retrySave() (StorageAdapter)
+    // yielding between attempts for genuinely contended writes.
+    this.db.exec('PRAGMA busy_timeout = 500;');
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS family_data (
         household_id TEXT NOT NULL,

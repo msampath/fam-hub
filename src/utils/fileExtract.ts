@@ -14,9 +14,11 @@ const readAsDataUrl = (file: File) => read(file, 'dataURL');
 
 export async function extractFileText(file: File): Promise<string> {
   const kind = fileKind(file.name, file.type);
-  if (kind === 'text') return (await read(file, 'text')).trim();
   if (kind === 'unknown') throw new Error('Unsupported file — use PDF, Word (.docx), Excel (.xlsx) or a text file.');
+  // Size cap covers EVERY accepted kind (the text early-return used to precede it, so a huge .txt/.csv
+  // was read wholesale into browser memory as one string).
   if (file.size > 7 * 1024 * 1024) throw new Error('That file is too large (max ~7 MB). Try a shorter document or paste the text instead.');
+  if (kind === 'text') return (await read(file, 'text')).trim();
   const ep = EXTRACT_ENDPOINT[kind];
   const dataUrl = await readAsDataUrl(file);
   const res = await apiFetch(ep.path, { method: 'POST', body: JSON.stringify({ [ep.field]: dataUrl }) });

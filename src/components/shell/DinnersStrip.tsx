@@ -14,12 +14,16 @@ export default function DinnersStrip() {
   const { mealPlans, copilotName, deleteMealPlan, kidMode } = useApp();
   // Newest week's plans — a week can carry SEPARATE plans per meal (dinner + lunch coexist; the
   // dinner-only refusal of "plan next week's lunches" was a live bug). Breakfast → lunch → dinner.
-  const sorted = [...mealPlans].sort((a, b) => (b.weekStart || '').localeCompare(a.weekStart || ''));
+  const today = toLocalDateStr(new Date());
+  // Prefer the week that covers TODAY (mirrors buildMealsFacts — planning a LATER week must not
+  // replace the current week under the "This week's meals" label); fall back to newest otherwise.
+  const current = mealPlans.filter(p => (p.days || []).some(d => d?.date === today));
+  const pool = current.length ? current : mealPlans;
+  const sorted = [...pool].sort((a, b) => (b.weekStart || '').localeCompare(a.weekStart || ''));
   const week = sorted[0]?.weekStart;
   const plans = sorted
     .filter(p => p.weekStart === week)
     .sort((a, b) => MEAL_ORDER[a.meal || 'dinner'] - MEAL_ORDER[b.meal || 'dinner']);
-  const today = toLocalDateStr(new Date());
 
   return (
     <div className="rounded-[18px] p-4" style={{ border: `2px solid ${C.elevated}`, boxShadow: brutShadow(C.elevated, 4), background: C.card }}>

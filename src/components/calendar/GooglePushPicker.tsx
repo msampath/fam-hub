@@ -19,10 +19,17 @@ export default function GooglePushPicker() {
   // default to the primary calendar pre-checked so the common case is one tap.
   const [trackedId, setTrackedId] = useState<string | null>(null);
   const evId = googlePushEvent?.id ?? null;
+  // Track the primary too: when the calendar list loads AFTER the picker opened (primaryId undefined
+  // at open), the untouched selection re-seeds to the primary instead of staying empty.
+  const [trackedPrimary, setTrackedPrimary] = useState<string | null>(null);
   if (evId !== trackedId) {
     setTrackedId(evId);
+    setTrackedPrimary(primaryId ?? null);
     setSelected(new Set(evId && primaryId ? [primaryId] : []));
     setResult(null);
+  } else if (evId && primaryId && trackedPrimary === null) {
+    setTrackedPrimary(primaryId);
+    setSelected(prev => (prev.size === 0 ? new Set([primaryId]) : prev));
   }
 
   if (!googlePushEvent) return null;

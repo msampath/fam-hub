@@ -14,6 +14,12 @@ services:
     image: ghcr.io/${IMAGE_OWNER:-msampath}/fam-hub-web:${IMAGE_TAG:-latest}
     ports:
       - "4894:4894"
+    # .env passthrough: integration keys documented in .env.example (Kroger, Maps, Ticketmaster, vision,
+    # verifier, RAG...) reach the CONTAINERS too — the fixed allow-list below only covered the core set,
+    # so docs like kroger-setup.md ("put the two vars in your .env") silently did nothing on the appliance.
+    env_file:
+      - path: .env
+        required: false
     environment:
       NODE_ENV: production
       # Backend switch. Defaults to sqlite (the appliance). install.sh writes STORAGE=supabase + the two
@@ -53,6 +59,12 @@ services:
 
   agent:
     image: ghcr.io/${IMAGE_OWNER:-msampath}/fam-hub-agent:${IMAGE_TAG:-latest}
+    # .env passthrough: integration keys documented in .env.example (Kroger, Maps, Ticketmaster, vision,
+    # verifier, RAG...) reach the CONTAINERS too — the fixed allow-list below only covered the core set,
+    # so docs like kroger-setup.md ("put the two vars in your .env") silently did nothing on the appliance.
+    env_file:
+      - path: .env
+        required: false
     environment:
       PORT: 8080
       STORAGE: ${STORAGE:-sqlite}         # mirror web. Default sqlite; STORAGE=supabase (from .env) → cloud.

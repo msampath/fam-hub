@@ -14,6 +14,7 @@ import type { McpToolResult } from './conciergeTools';
 import { familyDataRow, FAMILY_DATA_CONFLICT } from '../utils/familyData';
 import { mergeShoppingItems } from '../utils/shoppingMerge';
 import { getSqliteAdapter, type SqliteAdapter } from '../storage';
+import { retrySave } from '../storage/StorageAdapter';
 import { getOrCreateHouseholdId } from '../storage/boxConfig';
 import {
   normalizeWebUrl, webUrlHash, isCacheFresh, packCachedPage, unpackCachedPage,
@@ -106,8 +107,17 @@ export class SupabasePersistence implements Persistence {
     return hid;
   }
 
+  // Read memo, turn-scoped (the MCP child is a per-request process): a multi-read-tool turn
+  // (briefing = events + chores + upcoming) was re-downloading the same JSONB blobs — worst for the
+  // multi-MB documents collection. casWrite bypasses it (fresh version reads) and invalidates on write.
+  private readCache = new Map<string, any[]>();
+
   async loadCollection(dataKey: string): Promise<any[]> {
-    return (await this.loadWithVersion(dataKey)).data;
+    const hit = this.readCache.get(dataKey);
+    if (hit) return hit;
+    const { data } = await this.loadWithVersion(dataKey);
+    this.readCache.set(dataKey, data);
+    return data;
   }
 
   // Versioned read for the CAS write path: the row's updated_at is the compare token (same contract as
@@ -130,6 +140,7 @@ export class SupabasePersistence implements Persistence {
   // equality token, not a clock; the server-set trigger upgrade is staged in the post-capstone migration.
   private async casWrite(dataKey: string, build: (cur: any[]) => any[]): Promise<any[]> {
     const hid = await this.householdId();
+    this.readCache.delete(dataKey); // writes must never see (or leave behind) a stale read memo
     for (let attempt = 0; attempt < 4; attempt++) {
       const { data: cur, version } = await this.loadWithVersion(dataKey);
       const next = build(cur);
@@ -143,14 +154,21 @@ export class SupabasePersistence implements Persistence {
           if (error.code === '23505') continue;
           throw new Error(`write "${dataKey}" failed: ` + error.message);
         }
+        this.readCache.delete(dataKey);
         return next;
       }
+      // Version token: the column is timestamptz, so SQLite's ".uuid" suffix isn't legal here — random
+      // MICROsecond digits shrink the same-millisecond collision window (two MCP children writing the
+      // same key in one ms would otherwise mint identical tokens and let a stale CAS falsely succeed).
+      // Projects with the §7 server-set trigger (folded into schema.sql) overwrite this value anyway;
+      // this guards the pre-§7 demo project.
+      const token = new Date().toISOString().replace('Z', `${String(Math.floor(Math.random() * 1000)).padStart(3, '0')}Z`);
       const { data: rows, error } = await this.client.from('family_data')
-        .update({ data: next, updated_at: new Date().toISOString() })
+        .update({ data: next, updated_at: token })
         .eq('household_id', hid).eq('data_key', dataKey).eq('updated_at', version)
         .select('updated_at');
       if (error) throw new Error(`write "${dataKey}" failed: ` + error.message);
-      if (rows && rows.length) return next; // CAS landed
+      if (rows && rows.length) { this.readCache.delete(dataKey); return next; } // CAS landed
       // 0 rows matched → a concurrent writer was ahead; loop re-reads and re-applies.
     }
     const { data: cur } = await this.loadWithVersion(dataKey);
@@ -159,6 +177,7 @@ export class SupabasePersistence implements Persistence {
       familyDataRow(hid, dataKey, next), { onConflict: FAMILY_DATA_CONFLICT },
     );
     if (error) throw new Error(`write "${dataKey}" failed: ` + error.message);
+    this.readCache.delete(dataKey);
     return next;
   }
 
@@ -253,14 +272,14 @@ export class SqlitePersistence implements Persistence {
     for (let attempt = 0; attempt < 4; attempt++) {
       const { data, version } = await this.adapter.load(hid, dataKey);
       const next = build(data);
-      const res = await this.adapter.save(hid, dataKey, next, version);
+      const res = await retrySave(this.adapter, hid, dataKey, next, version);
       if (res.ok) return next;
     }
     // Exhausted CAS retries (4 concurrent writers — vanishingly rare on a single-tenant box): re-apply to the
     // latest and force, so the write LANDS rather than dropping (build() ran on fresh data, so no lost update).
     const { data } = await this.adapter.load(hid, dataKey);
     const next = build(data);
-    await this.adapter.save(hid, dataKey, next);
+    await retrySave(this.adapter, hid, dataKey, next);
     return next;
   }
 
@@ -274,7 +293,7 @@ export class SqlitePersistence implements Persistence {
 
   // Forced wholesale overwrite (kept for compatibility + tests; prod read-modify-writes go through mutate()).
   async replace(dataKey: string, items: any[]): Promise<void> {
-    await this.adapter.save(this.householdId(), dataKey, items);
+    await retrySave(this.adapter, this.householdId(), dataKey, items);
   }
 
   // Web cache read — same fail-soft contract as the Supabase impl: fresh hits only, every error is a miss.

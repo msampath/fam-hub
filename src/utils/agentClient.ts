@@ -140,7 +140,7 @@ export async function askConciergeAgentAsync(jwt: string | null, sessionId: stri
     if (!r.ok) throw new Error(`The agent job could not be checked (${r.status}). Try again in a moment.`);
     const job: any = await r.json().catch(() => ({} as any));
     if (job?.status === 'done') return normAgentReply(job, sessionId);
-    // The worker stores the honest failure text in `reply` when status='error' (see server.ts).
+    // The worker stores the honest failure text in `reply` when status='error' (see src/server/agentProxy.ts).
     if (job?.status === 'error') throw new Error(String(job?.reply || 'The agent could not answer that. Try again in a moment.'));
     // queued / running → keep polling.
   }

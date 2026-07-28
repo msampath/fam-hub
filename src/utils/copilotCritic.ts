@@ -78,7 +78,10 @@ const CLAIM_FAMILIES: { re: RegExp; action: string; label: string }[] = [
   { re: claim('added|put', 'shopping|list'), action: 'add_shopping_item', label: 'adding a shopping item' },
   { re: claim('added|created|assigned|set up', 'chores?'), action: 'add_chore', label: 'adding a chore' },
   { re: claim('added|created|scheduled|put|booked', 'calendar|appointments?|events?'), action: 'create_event', label: 'creating a calendar event' },
-  { re: claim('scheduled|booked', 'for|at|on'), action: 'create_event', label: 'scheduling something' },
+  // Object constrained to calendar-ish nouns: the old catch-all 'for|at|on' matched the honest chore
+  // reply "I've scheduled a daily chore for Leo" and then demanded a create_event the turn didn't need
+  // (worse, the honesty backstop would append "nothing was actually added" over a REAL staged chore).
+  { re: claim('scheduled|booked', 'events?|appointments?|meetings?|calendar|reservations?'), action: 'create_event', label: 'scheduling something' },
 ];
 
 // Returns critic issues for every completed-action claim the reply makes that actions[] doesn't back.

@@ -92,7 +92,11 @@ export function isLikelyTextModel(name: string): boolean {
 }
 
 export function resolveFallbackChain(manual: string[], discovered: string[], primary: string): string[] {
-  const chain = manual.length ? manual : discovered;
+  // AUTO-DISCOVERED chains exclude pro-tier models: during a sustained flash outage the legacy auto
+  // mode walks the whole discovered list, and a silent hop to pro bills the self-hoster's key at pro
+  // rates with only a console.warn. An EXPLICIT (manual) chain is the operator's own choice — kept as-is.
+  const discoveredSafe = discovered.filter(n => !n.toLowerCase().includes('pro'));
+  const chain = manual.length ? manual : discoveredSafe;
   return chain.filter(m => m && m !== primary);
 }
 

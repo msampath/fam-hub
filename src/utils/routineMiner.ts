@@ -71,7 +71,7 @@ export function mineShoppingRoutines(
  */
 export function buildRoutineDrafts(
   routines: Routine[] | undefined,
-  today: string,                       // YYYY-MM-DD (server-local)
+  today: string,                       // YYYY-MM-DD in the HOUSEHOLD's timezone (digest.ts: localDateHour)
   pendingLedger: LedgerEntry[],
   shoppingTexts: string[],
   makeId: () => string,

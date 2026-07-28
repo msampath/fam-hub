@@ -43,13 +43,28 @@ export default function CopilotBar({ onOpenManage }: CopilotBarProps) {
   // set — verify it before unlocking. The PIN reuses the existing server-side scrypt verify; no new server
   // surface. KAGGLE_EVAL: Security — the kid-safe device lock and its step-up unlock.
   const holdTimerRef = useRef<number | null>(null);
+  // Kid-exit PIN entry: a MASKED inline form (same treatment as the Approvals step-up gate below) —
+  // window.prompt showed the PIN in clear text on the shared wall tablet, with a child watching by
+  // definition, for the same secret the Approvals gate masks.
+  const [exitPinOpen, setExitPinOpen] = useState(false);
+  const [exitPin, setExitPin] = useState('');
+  const [exitPinError, setExitPinError] = useState(false);
+  const submitExitPin = async () => {
+    const ok = exitPin && (await verifyStepUpPin(exitPin));
+    setExitPin('');
+    if (!ok) { setExitPinError(true); return; }
+    setExitPinOpen(false);
+    setExitPinError(false);
+    setKidMode(false);
+  };
   const startExitHold = () => {
     if (holdTimerRef.current != null) return;
-    holdTimerRef.current = window.setTimeout(async () => {
+    holdTimerRef.current = window.setTimeout(() => {
       holdTimerRef.current = null;
       if (hasStepUpPin) {
-        const pin = window.prompt('Parent PIN to exit kid mode:') || '';
-        if (!pin || !(await verifyStepUpPin(pin))) return;
+        setExitPinError(false);
+        setExitPinOpen(true);
+        return;
       }
       setKidMode(false);
     }, 3000);
@@ -335,6 +350,30 @@ export default function CopilotBar({ onOpenManage }: CopilotBarProps) {
         )}
       </div>
 
+      {/* Kid-exit PIN — masked inline form (never window.prompt: the PIN must not render in clear
+          text on the shared tablet). Same visual treatment as the Approvals step-up gate. */}
+      {exitPinOpen && (
+        <form
+          onSubmit={ev => { ev.preventDefault(); void submitExitPin(); }}
+          className="absolute right-2 top-14 z-20 flex items-center gap-1.5 rounded-[13px] p-2"
+          style={{ border: `2px solid ${C.elevated}`, background: C.card }}
+        >
+          <input
+            type="password"
+            inputMode="numeric"
+            autoFocus
+            value={exitPin}
+            onChange={ev => { setExitPin(ev.target.value); setExitPinError(false); }}
+            placeholder="Parent PIN"
+            aria-label="Parent PIN to exit kid mode"
+            className="w-28 rounded-[8px] px-2 py-1.5 text-sm outline-none"
+            style={{ border: `2px solid ${exitPinError ? C.red : C.elevated}`, background: C.pill, color: C.primary }}
+          />
+          <button type="submit" className="rounded-[8px] px-2.5 py-1.5 text-xs font-extrabold" style={{ background: C.primary, color: C.shell }}>Unlock</button>
+          <button type="button" onClick={() => { setExitPinOpen(false); setExitPin(''); setExitPinError(false); }} className="rounded-[8px] px-2 py-1.5 text-xs font-bold" style={{ color: C.muted }}>✕</button>
+        </form>
+      )}
+
       {importOpen && <ImportDrawer onClose={() => setImportOpen(false)} />}
 
       {/* ONE surface: a single scrollable chat window. Actions + Approvals live behind the two badges above. */}
@@ -390,7 +429,7 @@ export default function CopilotBar({ onOpenManage }: CopilotBarProps) {
                 )}
                 {/* Per-turn escalate — GREYED for now (owner): the concierge defaults to its full (cloud)
                     engine, so manual escalate is redundant. KEPT (disabled) as the hook for when the LOCAL
-                    tool-using engine (gpt-oss) comes online — escalateTurn stays wired for that revival. */}
+                    tool-using engine comes online — escalateTurn stays wired for that revival. */}
                 {m.role === 'assistant' && m.source === 'local' && AGENT_ON && (
                   <button
                     type="button"

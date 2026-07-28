@@ -68,7 +68,7 @@ also run the eval harness — model decisions here ride eval numbers, not vibes:
 
 ```bash
 npm run eval          # Gemini baseline — validates the harness + your change against the cloud model
-npm run eval:local    # local Ollama (gpt-oss:20b) — the Decision A numbers
+npm run eval:local    # local Ollama (LOCAL_LLM_MODEL, default qwen2.5:14b) — the Decision A numbers
 ```
 
 The runner replays golden prompts through the real `/api/copilot` pipeline against a throwaway
@@ -78,8 +78,9 @@ go/no-go gates:
 - **Decision A — quick path.** May a local model serve the Express quick path? **Currently PASS**
   (local 18/18 vs the Gemini baseline's 13/18, scope+safety perfect). Don't regress it.
 - **Decision B — agent path.** A local model never serves the ADK agent path unless it hits
-  **≥90% valid tool calls + 0 destructive misfires** (`agent/evals/run_eval.py`). Not yet passed —
-  local agent serving ships dark until it is.
+  **≥90% valid tool calls + 0 destructive misfires** (`agent/evals/run_eval.py`). **PASSED 2026-07-25**
+  with the `ministral-3:8b` head + `qwen2.5:14b` verifier (25/25, 0 misfires) — re-run the gate before
+  swapping either model, and re-derive `agent/concierge/router.py`'s skip list when the head changes.
 
 ## Code style
 

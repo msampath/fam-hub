@@ -4,7 +4,7 @@
 // invented venues (Pattern 1 — same as WEATHER/DATE FACTS; agentic search proved unreliable).
 // This file is PURE: the response PARSERS + the block FORMATTER.
 // The network fetch + travel-time merge live in server.ts (mirroring fetchWeatherDaily). Unit-tested.
-import { sanitizeForPrompt } from './promptSafety';
+import { sanitizeForPrompt, safeHomeLabel } from './promptSafety';
 import { shiftDateStr } from './dates';
 
 export interface Place {
@@ -231,7 +231,7 @@ export function indexedPlaces(places: Place[], maxItems = 10): Array<{ id: strin
 export function buildPlacesFacts(homeLabel: string, places: Place[], maxItems = 10, opts?: { withinMiles?: number; withinMinutes?: number }): string {
   const indexed = indexedPlaces(places, maxItems);
   if (!indexed.length) return '';
-  const safeLabel = (String(homeLabel || '').replace(/[\r\n]+/g, ' ').trim() || 'home').slice(0, 80);
+  const safeLabel = safeHomeLabel(homeLabel);
   const scope = typeof opts?.withinMiles === 'number'
     ? `within ~${opts.withinMiles} miles of ${safeLabel} (closest first)`
     : typeof opts?.withinMinutes === 'number'

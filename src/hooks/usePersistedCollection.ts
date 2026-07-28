@@ -25,6 +25,12 @@ export function safeParseArray<T>(raw: string | null): T[] {
 //     suppression releases (writing the merged latest value). No echo, no lost write.
 const SAVE_DEBOUNCE_MS = 800;
 
+// Collections whose serialized blob can reach multi-MB (the docs corpus is sized at up to ~4 MB): their
+// synchronous localStorage stringify+write is DEBOUNCED on the same timer as the cloud save instead of
+// running on every value identity change (each mutation AND each cloud-pull echo paid it on the main
+// thread). Everything else keeps the immediate write (crash-safety for small collections is free).
+const LARGE_LOCAL_KEYS = new Set(['famplan_documents', 'famplan_copilotlog']);
+
 export function usePersistedCollection(
   localKey: string,
   dataKey: string,
@@ -39,21 +45,37 @@ export function usePersistedCollection(
   const target = useRef({ householdId, dataKey });
   target.current = { householdId, dataKey };
 
+  const localDirty = useRef(false); // a large-key localStorage write is pending (debounced)
+  const writeLocal = (v: any) => { try { localStorage.setItem(localKey, JSON.stringify(v)); } catch { /* quota — cloud copy still lands */ } };
+
   useEffect(() => {
-    localStorage.setItem(localKey, JSON.stringify(value)); // local cache: always immediate
+    if (LARGE_LOCAL_KEYS.has(localKey)) {
+      localDirty.current = true; // written by the debounce timer / flush below
+    } else {
+      writeLocal(value); // local cache: always immediate
+    }
 
     if (!householdId) {
-      // Signed out / pre-load: nowhere to write — drop any pending cloud save.
+      // Signed out / pre-load: nowhere to write — drop any pending cloud save (but never a pending
+      // LOCAL write for a large key: flush it now so the cache can't go stale on sign-out).
       if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+      if (localDirty.current) { writeLocal(value); localDirty.current = false; }
       return;
     }
     // Echo-guard: a value change while a load is suppressing writes is the PULLED data, not a local edit — do
     // not schedule a write for it. Do NOT clear a save already pending from a real edit (it must survive the
-    // pull and fire after release, persisting the merged latest value).
-    if (suppressSync.current > 0) return;
+    // pull and fire after release, persisting the merged latest value). Large keys still cache the pulled
+    // value locally (debounced) — that's the read cache, not a cloud write.
+    if (suppressSync.current > 0) {
+      if (localDirty.current && !timer.current) {
+        timer.current = setTimeout(() => { timer.current = null; if (localDirty.current) { writeLocal(latest.current); localDirty.current = false; } }, SAVE_DEBOUNCE_MS);
+      }
+      return;
+    }
 
     if (timer.current) clearTimeout(timer.current); // coalesce: a newer edit reschedules
     const fire = () => {
+      if (localDirty.current) { writeLocal(latest.current); localDirty.current = false; }
       if (suppressSync.current > 0) { timer.current = setTimeout(fire, SAVE_DEBOUNCE_MS); return; } // load in flight → retry, don't drop
       timer.current = null;
       const t = target.current;
@@ -63,8 +85,9 @@ export function usePersistedCollection(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value, householdId]);
 
-  // Flush a pending save on unmount (best-effort; localStorage already holds it).
+  // Flush a pending save on unmount (best-effort; localStorage already holds it for small keys).
   useEffect(() => () => {
+    if (localDirty.current) { writeLocal(latest.current); localDirty.current = false; }
     if (!timer.current) return;
     clearTimeout(timer.current);
     timer.current = null;

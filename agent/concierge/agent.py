@@ -58,7 +58,12 @@ ROUTER_MODEL = os.environ.get("CONCIERGE_ROUTER_MODEL", "").strip()
 # session-connect timeout — which surfaces as "Failed to create MCP session … TimeoutError" and an EMPTY
 # toolbelt (the agent then only has transfer_to_agent and "hallucinates" create_event). Give it headroom.
 # Env-overridable because cold-start time varies by machine / first-run vs warm (and Cloud Run cold starts).
-MCP_STARTUP_TIMEOUT = float(os.environ.get("MCP_STARTUP_TIMEOUT", "30"))
+try:
+    MCP_STARTUP_TIMEOUT = float(os.environ.get("MCP_STARTUP_TIMEOUT", "30"))
+except ValueError:
+    # A malformed tuning value degrades to the default instead of crash-looping the boot import.
+    print(f"[concierge] ignoring malformed MCP_STARTUP_TIMEOUT={os.environ.get('MCP_STARTUP_TIMEOUT')!r}; using 30", flush=True)
+    MCP_STARTUP_TIMEOUT = 30.0
 
 
 def _mcp(tool_names: list[str], access_token: str | None = None, client_today: str | None = None) -> MCPToolset:

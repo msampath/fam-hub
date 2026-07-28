@@ -9,7 +9,12 @@ a shared counter — Wave 4); this bounds a single instance's blast radius. `AGE
 """
 import os
 
-RATE_MAX = int(os.environ.get("AGENT_RATE_LIMIT_PER_MIN", "20"))
+try:
+    RATE_MAX = int(os.environ.get("AGENT_RATE_LIMIT_PER_MIN", "20"))
+except ValueError:
+    # A typo'd tuning value must degrade to the default, never crash-loop the container at import.
+    print(f"[ratelimit] ignoring malformed AGENT_RATE_LIMIT_PER_MIN={os.environ.get('AGENT_RATE_LIMIT_PER_MIN')!r}; using 20", flush=True)
+    RATE_MAX = 20
 WINDOW_S = 60.0
 _hits: dict[str, tuple[int, float]] = {}
 
@@ -25,6 +30,12 @@ def rate_ok(key: str, now: float, max_per_window: int | None = None) -> bool:
         if len(_hits) > 512:  # keep the map from growing unbounded under an IP flood
             for k, (_, r) in list(_hits.items()):
                 if now >= r:
+                    _hits.pop(k, None)
+            if len(_hits) > 512:
+                # Nothing expired (a flood inside one 60s window mints only future reset_at values) —
+                # evict the soonest-to-expire entries so the cap actually holds instead of scanning O(n)
+                # per insert while the map grows for the rest of the window.
+                for k, _ in sorted(_hits.items(), key=lambda kv: kv[1][1])[: len(_hits) - 512]:
                     _hits.pop(k, None)
         return True
     if count >= limit:

@@ -5,13 +5,14 @@
 // "plan a visit" URL instead of improvising. It reuses the PURE parsers/constants from placesFacts.ts;
 // only the HTTP orchestration lives here.
 //
-// NOTE (dedup follow-up): server.ts has near-identical `fetchNearbyPlaces`/`attachTravelTimes` for the
-// copilot path. They're kept separate for now so adding the agent's discovery can't touch the working
-// copilot; a later cleanup can point server.ts at this module.
+// This module is THE implementation for both paths: src/server/grounding.ts re-exports
+// fetchNearbyPlaces/attachTravelTimes for the copilot, and the MCP find_places tool calls findPlaces —
+// the former near-identical twin in grounding.ts is gone (it had already drifted on cache pruning).
 import {
   parseGooglePlaces, parseOverpassPlaces, filterKeylessPlacesByName,
   GOOGLE_PLACE_TYPES, OVERPASS_TOURISM, OVERPASS_LEISURE, type Place,
 } from './placesFacts';
+import { fetchWithTimeout, pruneByAge } from '../server/fetchUtils';
 
 const PLACES_RADIUS_M = Number(process.env.PLACES_RADIUS_M) || 40000; // ~25 mi
 // A getaway is searched AROUND the destination (not home), so use a wider circle — venues (lodging,
@@ -19,16 +20,6 @@ const PLACES_RADIUS_M = Number(process.env.PLACES_RADIUS_M) || 40000; // ~25 mi
 const DEST_RADIUS_M = Number(process.env.PLACES_DEST_RADIUS_M) || 60000; // ~37 mi
 const PLACES_TTL_MS = 24 * 3600_000; // venues barely change day-to-day
 const placesCache = new Map<string, { at: number; places: Place[] }>();
-
-async function fetchWithTimeout(url: string, timeoutMs = 8000, init?: any) {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...(init || {}), signal: ctrl.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-}
 
 // Real nearby venues. With GOOGLE_MAPS_API_KEY: Google Places (New) — Text Search for a specific query
 // (e.g. "zoo"), else Nearby Search over family types. Without a key: keyless OSM Overpass. Best-effort:
@@ -102,7 +93,7 @@ export async function fetchNearbyPlaces(
       });
       if (r.ok) places = parseOverpassPlaces(await r.json());
     }
-    if (places.length) placesCache.set(cacheKey, { at: Date.now(), places });
+    if (places.length) { pruneByAge(placesCache, PLACES_TTL_MS, Date.now()); placesCache.set(cacheKey, { at: Date.now(), places }); }
     return places;
   } catch (err: any) {
     console.warn('Places fetch failed (proceeding without):', err?.message || err);

@@ -11,9 +11,11 @@ export function matchOwnProfileIndex(
 ): number {
   const list = Array.isArray(members) ? members : [];
   const emailLc = (email || '').trim().toLowerCase();
-  return list.findIndex(m =>
-    (!!userId && m.userId === userId) ||
-    (!!emailLc && !!m.email && m.email.trim().toLowerCase() === emailLc));
+  // TWO passes, not one OR: an earlier row matching only by (shared family) email must never beat a
+  // later row matching by exact auth userId — healMemberLink would then rewrite the wrong profile.
+  const byId = list.findIndex(m => !!userId && m.userId === userId);
+  if (byId >= 0) return byId;
+  return list.findIndex(m => !!emailLc && !!m.email && m.email.trim().toLowerCase() === emailLc);
 }
 
 // Re-link the matched profile to the current account: set userId + backfill email when either is

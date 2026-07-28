@@ -130,6 +130,12 @@ describe('buildEventFromPayload', () => {
     const ev = buildEventFromPayload({ title: 'x'.repeat(5000) }, 'qa', FAM, '2026-06-16')!;
     expect(ev.title.length).toBe(200);
   });
+  it('gates a non-ISO start ("tomorrow") to today and drops a non-ISO end — never stored verbatim', () => {
+    const ev = buildEventFromPayload({ title: 'Zoo', start: 'tomorrow', end: 'next Friday' }, 'qa', FAM, '2026-06-16')!;
+    expect(ev.start).toBe('2026-06-16');                // today, NOT 'tomorrow'
+    expect(ev.start).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(ev.end).toBeUndefined();                     // unparseable end dropped, not stored as 'next Frida'
+  });
   it('carries a provided description (clamped) and defaults to empty', () => {
     expect(buildEventFromPayload({ title: 'Zoo', description: 'bring sunscreen' }, 'cop-sug', FAM, '2026-06-16')!.description).toBe('bring sunscreen');
     expect(buildEventFromPayload({ title: 'Zoo', description: 'y'.repeat(3000) }, 'cop-sug', FAM, '2026-06-16')!.description!.length).toBe(2000);

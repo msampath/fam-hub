@@ -36,12 +36,14 @@ function usePhotoRotation(enabled: boolean): string | null {
     if (!enabled) return;
     let alive = true;
     let timer: ReturnType<typeof setInterval> | undefined;
+    let showSeq = 0; // a stale (slower) fetch must not revoke/replace a NEWER photo that already landed
     const show = async (p: PhotoMeta) => {
+      const seq = ++showSeq;
       try {
         const res = await apiFetch(`/api/photos/file/${encodeURIComponent(p.name)}`);
         if (!res.ok || !alive) return;
         const url = URL.createObjectURL(await res.blob());
-        if (!alive) { URL.revokeObjectURL(url); return; }
+        if (!alive || seq !== showSeq) { URL.revokeObjectURL(url); return; }
         if (urlRef.current) URL.revokeObjectURL(urlRef.current);
         urlRef.current = url;
         setPhotoUrl(url);

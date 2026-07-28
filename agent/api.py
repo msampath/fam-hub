@@ -49,9 +49,13 @@ if not os.environ.get("GOOGLE_API_KEY") and os.environ.get("GEMINI_API_KEY"):
 os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "FALSE")
 
 # Fail boot LOUDLY on a key-less deploy (parity with the Express server's FATAL-exit), instead of passing the
-# readiness probe and 502-ing every /chat. Skip when Vertex auth is used (it doesn't need an API key).
-if os.environ.get("GOOGLE_GENAI_USE_VERTEXAI", "FALSE").upper() != "TRUE" and not os.environ.get("GOOGLE_API_KEY"):
-    raise SystemExit("[concierge] FATAL: no GOOGLE_API_KEY / GEMINI_API_KEY set — the agent cannot call Gemini. Set one in agent/.env or the environment before starting.")
+# readiness probe and 502-ing every /chat. Skip when Vertex auth is used (it doesn't need an API key) OR when
+# the LOCAL head is enabled (parity with server.ts's LOCAL_LLM_ENABLED escape hatch): a local-configured agent
+# can serve turns keyless — cloud escalations just fail over to the 502 path until a key is added.
+_LOCAL_HEAD_ENABLED = os.environ.get("CONCIERGE_LOCAL_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+if (os.environ.get("GOOGLE_GENAI_USE_VERTEXAI", "FALSE").upper() != "TRUE"
+        and not os.environ.get("GOOGLE_API_KEY") and not _LOCAL_HEAD_ENABLED):
+    raise SystemExit("[concierge] FATAL: no GOOGLE_API_KEY / GEMINI_API_KEY set — the agent cannot call Gemini. Set one in agent/.env or the environment (or enable CONCIERGE_LOCAL_ENABLED) before starting.")
 
 import time  # noqa: E402
 from fastapi import FastAPI, Header, HTTPException, Request  # noqa: E402
@@ -76,16 +80,28 @@ APP_NAME = "concierge"
 # *transient* spikes — it cannot fix a SUSTAINED Gemini capacity outage (the only real cure there is a model
 # with quota). Env-overridable so latency vs. resilience can be tuned per deployment.
 RETRYABLE_MARKERS = ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "OVERLOADED")
-MAX_ATTEMPTS_PER_MODEL = max(1, int(os.environ.get("CONCIERGE_MAX_ATTEMPTS", "2")))
-RETRY_BACKOFF_BASE = float(os.environ.get("CONCIERGE_RETRY_BACKOFF", "0.6"))  # seconds; linear per attempt
+
+
+def _env_num(name: str, default, cast):
+    """Defensive env parse (same contract as verifier._env_int): a malformed value degrades to the
+    default with a log line — a typo in a tuning knob must never crash-loop the service at import."""
+    try:
+        return cast(os.environ.get(name, "") or default)
+    except ValueError:
+        print(f"[concierge] ignoring malformed {name}={os.environ.get(name)!r}; using {default}", flush=True)
+        return cast(default)
+
+
+MAX_ATTEMPTS_PER_MODEL = max(1, _env_num("CONCIERGE_MAX_ATTEMPTS", 2, int))
+RETRY_BACKOFF_BASE = _env_num("CONCIERGE_RETRY_BACKOFF", 0.6, float)  # seconds; linear per attempt
 
 # Local engine tier (Phase-4, Decision-B gated): CONCIERGE_LOCAL_ENABLED=1 inserts the local Ollama
 # model (via ADK's LiteLLM wrapper) at the HEAD of the model chain. Gate before enabling anywhere real:
 # `python agent/evals/run_eval.py` must show >=90% valid tool calls AND 0 destructive misfires on the
 # local head. ANY local failure (refused connection, bad output, timeout) advances to the Gemini chain —
 # the local tier can only ever ADD availability, never block a turn.
-LOCAL_ENABLED = os.environ.get("CONCIERGE_LOCAL_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
-LOCAL_MODEL = os.environ.get("CONCIERGE_LOCAL_MODEL", "ollama_chat/gpt-oss:20b")
+LOCAL_ENABLED = _LOCAL_HEAD_ENABLED
+LOCAL_MODEL = os.environ.get("CONCIERGE_LOCAL_MODEL", "ollama_chat/ministral-3:8b")  # 2026-07-25 bake-off winner
 LOCAL_TOKEN = "__local__"  # chain sentinel; resolved to a LiteLlm instance at build time
 
 
@@ -129,6 +145,12 @@ class ChatIn(BaseModel):
 # module (whose key-required boot guard above makes a keyless test self-skip). Re-bound here for the
 # existing call sites + tests that reference api._extract_bearer.
 _extract_bearer = extract_bearer
+
+
+def _clamp(v: object, n: int) -> str:
+    """Whitespace-collapse + length-clamp for household-supplied prompt injections (goals, meals,
+    stores, copilot name). One definition for the four call sites in chat()."""
+    return " ".join(str(v).split())[:n]
 
 
 def _visitor_id(jwt: str | None) -> str:
@@ -215,10 +237,19 @@ async def chat(
             today = now.date()
     else:
         today = now.date()
-    _h12 = now.hour % 12 or 12
-    time_label = f"{_h12}:{now.minute:02d} {'AM' if now.hour < 12 else 'PM'}"
-    context = f"(Context: now is {now.strftime('%A')}, {today.isoformat()}, {time_label} local time. " \
-              f"Resolve any relative or year-less dates from this; 'tomorrow' is the next calendar day."
+    # Weekday comes from `today` (the client's civil date when supplied), NEVER the container clock —
+    # on a UTC deploy a US evening request would otherwise say "now is Monday" for the family's Sunday,
+    # and the model resolves 'tomorrow'/'next Saturday' from this anchor. The clock time is only
+    # trustworthy when the container's date agrees with the family's date, so omit it when they differ.
+    weekday = today.strftime("%A")
+    if today == now.date():
+        _h12 = now.hour % 12 or 12
+        time_label = f"{_h12}:{now.minute:02d} {'AM' if now.hour < 12 else 'PM'}"
+        context = f"(Context: now is {weekday}, {today.isoformat()}, {time_label} local time. " \
+                  f"Resolve any relative or year-less dates from this; 'tomorrow' is the next calendar day."
+    else:
+        context = f"(Context: today is {weekday}, {today.isoformat()}. " \
+                  f"Resolve any relative or year-less dates from this; 'tomorrow' is the next calendar day."
     if body.family:
         # Use the REAL ages; never guess. DIETARY (when present) is BINDING for any food/meal/shopping
         # suggestion — a vegetarian/lacto-vegetarian household never gets meat, poultry, or fish.
@@ -228,7 +259,7 @@ async def chat(
     if body.stores:
         # Household-defined store lists (Phase-5): clamp count+length; the shopping specialist routes
         # items to THESE names instead of the default Costco/Indian Store/Grocery Store/Other set.
-        safe_stores = [" ".join(str(s).split())[:24] for s in body.stores[:8] if str(s).strip()]
+        safe_stores = [_clamp(s, 24) for s in body.stores[:8] if str(s).strip()]
         if safe_stores:
             context += f" The family's shopping store lists are exactly: {', '.join(safe_stores)}. Use these names for any store list."
     context += ")"
@@ -249,20 +280,18 @@ async def chat(
     if body.goals:
         # Collapse whitespace/newlines in the injected fields so a goal title with a newline can't break the
         # block's one-line-per-goal structure (a thin guard — goals are the household's own, not web content).
-        def _clean(v: object, n: int) -> str:
-            return " ".join(str(v).split())[:n]
         lines = []
         for g in body.goals[:5]:
             if not isinstance(g, dict):
                 continue
             steps = g.get("steps") or []
             step_str = "; ".join(
-                f"{_clean(s.get('title', ''), 80)} [{_clean(s.get('status', 'pending'), 12)}]"
+                f"{_clamp(s.get('title', ''), 80)} [{_clamp(s.get('status', 'pending'), 12)}]"
                 for s in steps if isinstance(s, dict) and s.get("title")
             )
-            gid = _clean(g.get("id", ""), 64)
-            text = _clean(g.get("text", ""), 160)
-            status = _clean(g.get("status", "active"), 16)
+            gid = _clamp(g.get("id", ""), 64)
+            text = _clamp(g.get("text", ""), 160)
+            status = _clamp(g.get("status", "active"), 16)
             lines.append(f'- id={gid} "{text}" (status: {status})' + (f" — steps: {step_str}" if step_str else ""))
         if lines:
             goals_block = (
@@ -275,15 +304,13 @@ async def chat(
     # lunch to rajma") must re-issue set_meal_plan with the FULL updated week FOR THAT MEAL.
     meals_block = ""
     if body.mealplan:
-        def _mclean(v: object, n: int) -> str:
-            return " ".join(str(v).split())[:n]
         mlines = []
         for d in body.mealplan[:14]:
             if not isinstance(d, dict) or not d.get("date") or not d.get("dish"):
                 continue
-            meal = _mclean(d.get("meal") or "dinner", 10)
-            note = f" ({_mclean(d.get('note'), 60)})" if d.get("note") else ""
-            mlines.append(f"- {_mclean(d.get('date'), 10)} [{meal}]: {_mclean(d.get('dish'), 80)}{note}")
+            meal = _clamp(d.get("meal") or "dinner", 10)
+            note = f" ({_clamp(d.get('note'), 60)})" if d.get("note") else ""
+            mlines.append(f"- {_clamp(d.get('date'), 10)} [{meal}]: {_clamp(d.get('dish'), 80)}{note}")
         if mlines:
             meals_block = (
                 "CURRENT MEAL PLAN (this week, authoritative; [meal] labels each line). To change ANY day, "
@@ -295,7 +322,7 @@ async def chat(
     # Clamped + whitespace-collapsed (it's a household setting, not web content — thin guard only).
     name_block = ""
     if body.copilotName:
-        safe_name = " ".join(str(body.copilotName).split())[:24]
+        safe_name = _clamp(body.copilotName, 24)
         if safe_name and safe_name.lower() != "copilot":
             name_block = f'(The family named you "{safe_name}" — refer to yourself by that name.)\n\n'
     grounded = f"{context}\n\n{name_block}{goals_block}{meals_block}{convo}{message}"
@@ -306,7 +333,11 @@ async def chat(
         if model_name == LOCAL_TOKEN:
             # Lazy import: `litellm` is only required when the local tier is enabled.
             from google.adk.models.lite_llm import LiteLlm
-            model_arg: object | None = LiteLlm(model=LOCAL_MODEL)
+            # api_base honors LOCAL_LLM_URL like every other Ollama consumer (verifier.py, gemini.ts) —
+            # without it litellm defaults to localhost:11434 and a remote-GPU topology silently
+            # fail-opens every turn to the cloud chain.
+            _base = (os.environ.get("LOCAL_LLM_URL") or "").rstrip("/")
+            model_arg: object | None = LiteLlm(model=LOCAL_MODEL, api_base=_base or None)
         else:
             model_arg = model_name
         agent = build_root_agent(access_token=jwt, model=model_arg, client_today=client_today)
@@ -338,6 +369,19 @@ async def chat(
     chain = build_model_chain(body.message)  # optional local head → primary (None → CONCIERGE_MODEL) → fallbacks
     last_err: Exception | None = None
     first = True
+    extra_session_ids: list[str] = []  # retry/fallback sessions created this request — deleted when abandoned
+
+    async def _drop_abandoned(keep_id: str | None) -> None:
+        """The in-memory session store has no TTL, so every retry's fresh session would leak for the
+        process lifetime — delete the ones the returned turn didn't use (best-effort)."""
+        for sid in extra_session_ids:
+            if sid == keep_id:
+                continue
+            try:
+                await _sessions.delete_session(app_name=APP_NAME, user_id=user_id, session_id=sid)
+            except Exception:
+                pass
+
     for model_name in chain:
         label = LOCAL_MODEL if model_name == LOCAL_TOKEN else (model_name or "primary")
         for attempt in range(MAX_ATTEMPTS_PER_MODEL):
@@ -346,6 +390,7 @@ async def chat(
                 first = False
             else:
                 turn_session_id = (await _sessions.create_session(app_name=APP_NAME, user_id=user_id)).id
+                extra_session_ids.append(turn_session_id)
             try:
                 reply, actions = await _run_turn(model_name, turn_session_id)
                 # Owner-directed accuracy tier (2026-07-19): the small verifier model (qwen, resident on
@@ -372,6 +417,7 @@ async def chat(
                     print(f"[concierge] answered on LOCAL model {resolved_model!r}", flush=True)
                 elif model_name is not None:
                     print(f"[concierge] answered on fallback model {resolved_model!r}", flush=True)
+                await _drop_abandoned(turn_session_id)
                 return {"reply": reply, "sessionId": turn_session_id, "actions": actions, "model": resolved_model}
             except Exception as err:
                 last_err = err
@@ -382,6 +428,7 @@ async def chat(
                     break
                 if not any(s in repr(err).upper() for s in RETRYABLE_MARKERS):
                     traceback.print_exc()  # real cause to the log; generic client message (F-06 parity)
+                    await _drop_abandoned(None)
                     raise HTTPException(status_code=502, detail="The agent could not complete that request.")
                 print(f"[concierge] {label} attempt {attempt + 1}/{MAX_ATTEMPTS_PER_MODEL} transient failure ({err!r})", flush=True)
                 if attempt + 1 < MAX_ATTEMPTS_PER_MODEL:
@@ -391,4 +438,5 @@ async def chat(
     # The whole chain 503'd (sustained Gemini outage) — surface a 502 so the client degrades to the local copilot.
     if last_err is not None:
         print(f"[concierge] model chain exhausted on transient errors; last: {last_err!r}", flush=True)
+    await _drop_abandoned(None)
     raise HTTPException(status_code=502, detail="The agent could not complete that request.")

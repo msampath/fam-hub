@@ -15,6 +15,12 @@ const AGENT_BASE_URL = (process.env.AGENT_BASE_URL || 'http://127.0.0.1:8080').r
 // when running ON Cloud Run — see fetchCloudRunIdToken); the visitor's OWN Supabase JWT moves to
 // X-Visitor-Authorization so agent/api.py can still read it for per-visitor session partitioning +
 // RLS-scoped MCP persistence, without it being consumed/overwritten by the IAM layer.
+// An agent turn legitimately runs minutes (local model + verifier + MCP fan-out), but without a ceiling
+// a stalled upstream holds the Express request (and, on request-billed Cloud Run, the instance) until
+// undici's ~300s defaults — digest.ts aborts the same upstream at 45s. 240s covers the slowest observed
+// eval turns with headroom.
+const AGENT_CHAT_TIMEOUT_MS = Number(process.env.AGENT_CHAT_TIMEOUT_MS) || 240_000;
+
 async function forwardAgentChat(authHeader: string, body: unknown): Promise<{ status: number; text: string }> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -22,12 +28,19 @@ async function forwardAgentChat(authHeader: string, body: unknown): Promise<{ st
   };
   const idToken = await fetchCloudRunIdToken(AGENT_BASE_URL);
   if (idToken) headers.Authorization = `Bearer ${idToken}`;
-  const upstream = await fetch(`${AGENT_BASE_URL}/chat`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body ?? {}),
-  });
-  return { status: upstream.status, text: await upstream.text() };
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), AGENT_CHAT_TIMEOUT_MS);
+  try {
+    const upstream = await fetch(`${AGENT_BASE_URL}/chat`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body ?? {}),
+      signal: ctrl.signal,
+    });
+    return { status: upstream.status, text: await upstream.text() };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function agentJobStoreFor(req: Request): Promise<AgentJobStore | null> {

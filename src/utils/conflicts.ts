@@ -60,6 +60,21 @@ export function detectConflicts(events: CalendarEvent[]): ConflictLike[] {
     }
   }
 
+  // A family-wide timed event ("Family dinner 6pm" — members empty or the Everyone/Family alias)
+  // involves EVERY member, so merge it into each member's bucket for that day: without this it only
+  // lived under the literal 'Family' key and could never clash with "Ava soccer 6pm" — exactly the
+  // double-booking class this detector exists for. (Two family-wide events still clash under 'Family'.)
+  const isFamilyWide = (k: string) => /^(family|everyone)$/i.test(k);
+  for (const date of Object.keys(byDayMember)) {
+    const dayMap = byDayMember[date];
+    const familyEvents = Object.keys(dayMap).filter(isFamilyWide).flatMap(k => dayMap[k]);
+    if (!familyEvents.length) continue;
+    for (const member of Object.keys(dayMap)) {
+      if (isFamilyWide(member)) continue;
+      for (const fe of familyEvents) if (!dayMap[member].includes(fe)) dayMap[member].push(fe);
+    }
+  }
+
   const out: ConflictLike[] = [];
   for (const date of Object.keys(byDayMember)) {
     for (const member of Object.keys(byDayMember[date])) {

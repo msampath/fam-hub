@@ -116,8 +116,10 @@ def test_router_override_is_ignored_on_an_explicit_model_attempt():
 
 
 def test_local_head_leads_the_chain_only_when_enabled(monkeypatch):
+    # The boot guard only checks key PRESENCE, so a dummy satisfies it keyless (CI runs this now —
+    # the chain-order invariant previously had zero CI coverage because this test self-skipped).
     if not _HAS_KEY:
-        pytest.skip("importing agent.api needs a Gemini key (boot guard)")
+        monkeypatch.setenv("GOOGLE_API_KEY", "test-key-structural-only")
     from agent import api  # agent/api.py — a real package-relative import (repo root is on sys.path)
     monkeypatch.setattr(api, "LOCAL_ENABLED", True)
     chain = api.build_model_chain()

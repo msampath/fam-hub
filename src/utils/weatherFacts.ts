@@ -3,6 +3,7 @@
 // letting a weak local model search/guess the weather (agentic search proved unreliable).
 // The model only reads it to choose indoor vs outdoor. Pure/testable.
 import { weekdayOf } from './copilotHarness';
+import { safeHomeLabel } from './promptSafety';
 
 // WMO weather-interpretation codes → a short label + whether it's "wet" (rain/snow/storm/fog →
 // prefer indoor). https://open-meteo.com/en/docs
@@ -135,7 +136,7 @@ export function buildWeatherFacts(
   if (!lines.length) return '';
   // Sanitize the (client-supplied) label before it lands in the prompt: strip newlines and cap
   // length so it can't break out of the WEATHER FACTS block / inject instructions.
-  const safeLabel = (String(homeLabel || '').replace(/[\r\n]+/g, ' ').trim() || 'home').slice(0, 80);
+  const safeLabel = safeHomeLabel(homeLabel);
   return [
     `WEATHER FACTS (authoritative forecast for ${safeLabel}; use to pick indoor vs outdoor AND for kid-safety tips (sun, air quality, pollen) — do NOT guess):`,
     ...lines,

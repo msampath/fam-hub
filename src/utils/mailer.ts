@@ -13,13 +13,15 @@ export interface Mailer {
 
 const validRecipient = (to: string) => !!to && /.+@.+\..+/.test(to);
 
-// Resend adapter — the production channel. `fetchImpl` injectable for tests.
-export function resendMailer(fetchImpl: typeof fetch = fetch): Mailer {
+// Resend adapter — the production channel. `env` + `fetchImpl` injectable for tests (previously the
+// adapter read process.env directly, so makeMailer's env parameter selected the adapter but couldn't
+// actually configure it — the advertised injection seam was half-wired).
+export function resendMailer(env: Record<string, string | undefined> = process.env, fetchImpl: typeof fetch = fetch): Mailer {
   return {
     name: 'resend',
     async send(to, subject, text) {
-      const key = process.env.RESEND_API_KEY;
-      const from = process.env.DIGEST_FROM_EMAIL || 'Family-Hub <onboarding@resend.dev>';
+      const key = env.RESEND_API_KEY;
+      const from = env.DIGEST_FROM_EMAIL || 'Family-Hub <onboarding@resend.dev>';
       if (!key) return { ok: false, skipped: true }; // not configured → no send (documented production step)
       if (!validRecipient(to)) return { ok: false, error: 'invalid recipient' };
       try {
@@ -64,7 +66,7 @@ export function makeMailer(env: Record<string, string | undefined> = process.env
   const mode = (env.MAILER || '').trim().toLowerCase();
   if (mode === 'console') return consoleMailer();
   if (mode === 'off') return offMailer;
-  if (mode === 'resend' || env.RESEND_API_KEY) return resendMailer(fetchImpl);
+  if (mode === 'resend' || env.RESEND_API_KEY) return resendMailer(env, fetchImpl);
   return offMailer;
 }
 

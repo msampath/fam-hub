@@ -13,7 +13,7 @@ import { buildMemberSections, buildRichNudges } from '../utils/personalDigest';
 import { buildRoutineDrafts } from '../utils/routineMiner';
 import { callGeminiJSON } from './gemini';
 import { fetchWeatherDaily, fetchAirQualityDaily } from './grounding';
-import { SUPABASE_URL } from './config';
+import { SUPABASE_URL, LOCAL_MODE } from './config';
 import { fetchCloudRunIdToken } from './fetchUtils';
 import type { CalendarEvent, Chore, FamilyMember, LedgerEntry, Goal, ShoppingItem } from '../types';
 
@@ -70,6 +70,8 @@ export async function runDailyDigest(): Promise<void> {
   const now = new Date();
   const { data: prefsRows } = await admin.from('family_data').select('household_id,data').eq('data_key', 'digestprefs');
   for (const row of prefsRows || []) {
+    // One household's uncaught throw must not abort the rest of the run — isolate each iteration.
+    try {
     const prefs = Array.isArray(row.data) ? row.data[0] : null;
     const recipients = Array.from(new Set([
       ...(Array.isArray(prefs?.emails) ? prefs.emails : []),
@@ -155,6 +157,9 @@ export async function runDailyDigest(): Promise<void> {
       const sent = await sendDigestEmail(to, `Your Family-Hub briefing — ${today}`, body);
       if (!sent.ok && !sent.skipped) console.warn(`[digest] send to ${to} FAILED: ${sent.error} — if this is 'resend 403', verify a domain in Resend and set DIGEST_FROM_EMAIL to it (the shared onboarding@resend.dev sender only delivers to the Resend account owner).`);
     }
+    } catch (e: any) {
+      console.error(`[digest] household ${row.household_id} failed (continuing with the rest):`, e?.message || e);
+    }
   }
 }
 
@@ -165,6 +170,13 @@ export function startDigestScheduler(): void {
     return;
   }
   if (process.env.DIGEST_SCHEDULER_ENABLED !== 'true') return;
+  if (LOCAL_MODE) {
+    // The digest reads households via a Supabase service-role client — there is no SQLite path, so on
+    // the LAN appliance the 5-minutely tick would only log a "needs SUPABASE_SERVICE_ROLE_KEY" line
+    // naming a key that cannot exist on this box. Refuse once, clearly, instead.
+    console.log('[digest] disabled in LOCAL_MODE (email digests are a cloud/Supabase-mode feature).');
+    return;
+  }
   console.log('[digest] in-process scheduler enabled (every 5 min). For multi-instance, set DIGEST_TRIGGER_SECRET + Cloud Scheduler.');
   const timer = setInterval(() => {
     if (_digestRunning) return;

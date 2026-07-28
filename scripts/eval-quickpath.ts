@@ -15,7 +15,10 @@ import { mkdirSync, writeFileSync, rmSync, readdirSync, readFileSync } from 'nod
 import { QUICKPATH_GOLDENS, scoreGolden, summarize, decisionA, type GoldenScore, type EvalSummary } from '../src/utils/evalScorers';
 
 const LOCAL = process.argv.includes('--local');
-const MODE = LOCAL ? 'local(gpt-oss:20b)' : 'gemini-baseline';
+// Label the summary/artifacts with the model ACTUALLY served (LOCAL_LLM_MODEL) — a hardcoded name
+// mislabeled every eval artifact after a model swap, corrupting Decision-A traceability.
+const LOCAL_MODEL_NAME = process.env.LOCAL_LLM_MODEL || 'gpt-oss:20b';
+const MODE = LOCAL ? `local(${LOCAL_MODEL_NAME})` : 'gemini-baseline';
 const PORT = 4899;
 const BASE = `http://localhost:${PORT}`;
 const DB = 'eval-results/eval-tmp.db';
@@ -62,7 +65,7 @@ async function main() {
     COPILOT_HARNESS_ENABLED: 'true',
     COPILOT_MODEL: process.env.EVAL_COPILOT_MODEL || 'gemini-2.5-flash', // pin to the prod serving model for comparability
     LOCAL_LLM_ENABLED: LOCAL ? 'true' : 'false',
-    ...(LOCAL ? { LOCAL_LLM_MODEL: process.env.LOCAL_LLM_MODEL || 'gpt-oss:20b', LOCAL_LLM_THINK: process.env.LOCAL_LLM_THINK || 'low', LOCAL_LLM_KEEP_ALIVE: '30m' } : {}),
+    ...(LOCAL ? { LOCAL_LLM_MODEL: LOCAL_MODEL_NAME, LOCAL_LLM_THINK: process.env.LOCAL_LLM_THINK || 'low', LOCAL_LLM_KEEP_ALIVE: '30m' } : {}),
   };
   // Force legacy AUTO mode (local-first when enabled → Gemini rescue). Must be an EMPTY STRING, not
   // deleted: the server's dotenv load restores a deleted var from .env (override=false only protects

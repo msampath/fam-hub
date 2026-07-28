@@ -93,13 +93,15 @@ export function selectorSatisfied(type: string, payload: any): boolean {
   if (!spec) return false;
   const p = payload ?? {};
   const has = (k: string) => typeof p[k] === 'string' && p[k].trim().length > 0;
+  // `id` goes through has() like every other field — a truthy non-string ({}/0.1) previously passed
+  // the required-reference gate and then matched nothing downstream.
   switch (spec.selector) {
     case 'none':           return true;
-    case 'idOrTitle':      return !!(p.id || has('title'));
-    case 'idOrMatchTitle': return !!(p.id || has('matchTitle'));
-    case 'idOrText':       return !!(p.id || has('text'));
-    case 'idOrName':       return !!(p.id || has('name'));
-    case 'idOrAll':        return !!(p.id || p.all === true);
+    case 'idOrTitle':      return !!(has('id') || has('title'));
+    case 'idOrMatchTitle': return !!(has('id') || has('matchTitle'));
+    case 'idOrText':       return !!(has('id') || has('text'));
+    case 'idOrName':       return !!(has('id') || has('name'));
+    case 'idOrAll':        return !!(has('id') || p.all === true);
     case 'goalText':       return has('text');
     case 'days':           return Array.isArray(p.days) && p.days.length > 0;
     case 'mealSelector':   return !!(has('meal') || has('weekStart') || p.all === true);

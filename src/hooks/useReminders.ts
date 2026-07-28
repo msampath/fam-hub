@@ -7,8 +7,12 @@ function showReminderNotification(content: ReminderContent, tag: string) {
   const opts = { body: content.body, tag, icon: '/icon.svg', badge: '/icon.svg', renotify: true } as NotificationOptions;
   try {
     if ('serviceWorker' in navigator && navigator.serviceWorker?.ready) {
-      navigator.serviceWorker.ready
-        .then(reg => reg.showNotification(content.title, opts))
+      // serviceWorker.ready never REJECTS — when registration failed it pends forever, so neither the
+      // .then nor the .catch fallback would ever run and reminders were recorded fired but never shown.
+      // Race a short timeout and fall back to a plain Notification when no registration materializes.
+      const timeout = new Promise<null>(resolve => setTimeout(() => resolve(null), 3000));
+      Promise.race([navigator.serviceWorker.ready, timeout])
+        .then(reg => { if (reg) return reg.showNotification(content.title, opts); try { new Notification(content.title, opts); } catch { /* ignore */ } })
         .catch(() => { try { new Notification(content.title, opts); } catch { /* ignore */ } });
     } else {
       new Notification(content.title, opts);

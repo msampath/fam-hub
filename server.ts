@@ -4,8 +4,9 @@
 // point it's declared, in file order, regardless of where esbuild/tsx places it in the bundle — so this
 // one line, first, guarantees the order for `npm run dev`, `npm start` (the esbuild bundle), AND vitest.
 import 'dotenv/config';
+import './src/server/nodeVersionCheck';
 import express from 'express';
-import type { Request, Response, NextFunction } from 'express';
+import type { Request, Response } from 'express';
 import compression from 'compression';
 import helmet from 'helmet';
 import path from 'path';
@@ -76,7 +77,7 @@ import mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
 import { hasUsableText } from './src/utils/pdfText';
 // Single-click LAN appliance: local SQLite storage + local household auth (no Supabase). See src/storage/.
-import { storageMode, getSqliteAdapter } from './src/storage';
+import { getSqliteAdapter } from './src/storage';
 import { handleDataGet, handleDataSave, handleDataLoadAll } from './src/storage/dataApi';
 import { signSession, newSession, isValidPassphrase } from './src/storage/localAuth';
 import { getOrCreateHouseholdId, getSessionSecret, isHouseholdConfigured, setHouseholdPassphrase, checkHouseholdPassphrase, changeHouseholdPassphrase } from './src/storage/boxConfig';
@@ -182,8 +183,11 @@ const photoBody = express.json({ limit: '21mb' });
 // through 256kb on a real household, which hard-broke the copilot / local document saves. They ride the
 // 10mb upload tier; still behind preAuthThrottle, and every prompt/text field is capped before an LLM call.
 app.use((req, res, next) => {
-  const parser = req.path === '/api/photos/upload' ? photoBody
-    : (UPLOAD_ROUTES.has(req.path) || req.path === '/api/copilot' || req.path.startsWith('/api/data') ? bigBody : smallBody);
+  // Express routes case-insensitively and tolerates trailing slashes, so normalize before the exact-path
+  // compare — else /API/copilot or /api/copilot/ reaches its handler on the 256kb tier and 413s.
+  const p = req.path.toLowerCase().replace(/\/+$/, '');
+  const parser = p === '/api/photos/upload' ? photoBody
+    : (UPLOAD_ROUTES.has(p) || p === '/api/copilot' || p.startsWith('/api/data') ? bigBody : smallBody);
   parser(req, res, next);
 });
 
@@ -269,7 +273,7 @@ app.get('/api/data', requireAuth, async (req: Request, res: Response) => {
 // ── SSRF guard: ONE shared implementation (src/utils/ssrfGuard.ts). Imported for local use here AND
 // re-exported so the SSRF tests + callers keep importing from server.ts, while webResearch.ts imports the
 // SAME module — no more hand-duplicated drift (a NAT64/IPv4-compat fix once landed in only one copy). ──────
-import { isBlockedIp, assertSafeUrl, safeFetch } from './src/utils/ssrfGuard';
+import { isBlockedIp, assertSafeUrl, safeFetch, readTextCapped } from './src/utils/ssrfGuard';
 export { isBlockedIp, assertSafeUrl, safeFetch };
 
 // Distinguishes an SSRF/validation rejection (thrown by safeFetch/assertSafeUrl) from a genuine network
@@ -429,19 +433,20 @@ app.post('/api/parse-calendar', requireAuth, aiRateLimit, async (req, res) => {
 
 /**
  * Endpoint to parse a given PDF file payload.
- * Passes the PDF as inlineData directly into Gemini 3.5 for high-fidelity native document extraction.
+ * Passes the PDF as inlineData directly into Gemini for high-fidelity native document extraction.
  */
 app.post('/api/parse-pdf', requireAuth, aiRateLimit, async (req, res) => {
   try {
     const { pdfBase64, category = 'School' } = req.body;
-    if (!pdfBase64) {
-      return res.status(400).json({ error: 'PDF data (base64) is required.' });
-    }
+    if (!pdfBase64) return res.status(400).json({ error: 'PDF data (base64) is required.' });
+    // decodeUpload gives PDFs the same 413 size contract as docx/xlsx (they were previously bounded
+    // only by the body parser — always cloud-billed with no size gate) and String()-coerces a
+    // malformed non-string body to a 4xx instead of a 500.
+    const pdfBuffer = decodeUpload(pdfBase64, res);
+    if (!pdfBuffer) return;
+    const cleanBase64 = pdfBuffer.toString('base64');
 
-    // Strip inline MIME prefixes if present
-    const cleanBase64 = pdfBase64.replace(/^data:application\/pdf;base64,/, '');
-    
-    console.log(`Sending uploaded PDF of size ${cleanBase64.length} chars to Gemini 3.5-flash`);
+    console.log(`Sending uploaded PDF of size ${cleanBase64.length} chars to Gemini`);
 
     const pdfPart = {
       inlineData: {
@@ -477,8 +482,11 @@ app.post('/api/extract-pdf-text', requireAuth, aiRateLimit, async (req, res) => 
   try {
     const { pdfBase64 } = req.body;
     if (!pdfBase64) return res.status(400).json({ error: 'PDF data (base64) is required.' });
-    const cleanBase64 = String(pdfBase64).replace(/^data:application\/pdf;base64,/, '');
-    const buffer = Buffer.from(cleanBase64, 'base64');
+    // Same 8 MB decoded cap as docx/xlsx (decodeUpload) — PDFs were bounded only by the body parser,
+    // and the OCR fallback below is always cloud-billed.
+    const buffer = decodeUpload(pdfBase64, res);
+    if (!buffer) return;
+    const cleanBase64 = buffer.toString('base64');
 
     // 1) Local text-layer extraction (no AI, no quota). Covers the common case (digital PDFs).
     let layerText = '';
@@ -520,26 +528,8 @@ app.post('/api/extract-pdf-text', requireAuth, aiRateLimit, async (req, res) => 
 // decompression bomb OOMing the single-instance server (the patched sheetjs/mammoth + aiRateLimit do the rest).
 const MAX_EXTRACT_BYTES = 8 * 1024 * 1024;
 
-// Read a fetch Response body as UTF-8 text but ABORT once cumulative bytes exceed `max`. The content-length
-// header check alone is bypassable by a chunked (no-length) response, which would otherwise let `response.text()`
-// buffer the entire body into memory and OOM the single-instance server. Throws 'BODY_TOO_LARGE' past the cap.
-async function readTextCapped(response: any, max: number): Promise<string> {
-  const body = response?.body;
-  if (!body || typeof body.getReader !== 'function') return String(await response.text()).slice(0, max);
-  const reader = body.getReader();
-  const chunks: Buffer[] = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (value) {
-      total += value.byteLength;
-      if (total > max) { try { await reader.cancel(); } catch { /* ignore */ } throw new Error('BODY_TOO_LARGE'); }
-      chunks.push(Buffer.from(value));
-    }
-  }
-  return Buffer.concat(chunks).toString('utf8');
-}
+// readTextCapped (the capped body reader) now lives in src/utils/ssrfGuard.ts — ONE implementation
+// shared with webResearch's fetchPage, imported above.
 
 // Shared base64-upload decode for the doc endpoints: presence (400) → strip data-URI → decode → size cap (413).
 // Returns the Buffer, or null AFTER writing the error response (the caller just `return`s).
@@ -609,7 +599,7 @@ app.post('/api/extract-url-text', requireAuth, aiRateLimit, async (req, res) => 
 
 /**
  * Endpoint to parse raw text copied from emails, newsletters, or webpages.
- * Directly queries Gemini 3.5-flash to extract events.
+ * Directly queries Gemini to extract events.
  */
 app.post('/api/parse-text', requireAuth, aiRateLimit, async (req, res) => {
   try {
@@ -623,7 +613,7 @@ app.post('/api/parse-text', requireAuth, aiRateLimit, async (req, res) => {
     // unbounded prompt straight onto the owner-funded Gemini key.
     calendarText = calendarText.slice(0, 20000);
 
-    console.log(`Sending pasted calendar text of size ${calendarText.length} to Gemini 3.5-flash`);
+    console.log(`Sending pasted calendar text of size ${calendarText.length} to Gemini`);
 
     const parsedEvents = await callGeminiJSON(
       buildCalendarScrapePrompt('copied text', 'Copied text', calendarText),
@@ -760,7 +750,8 @@ app.post('/api/vision-scan-pantry', requireAuth, aiRateLimit, async (req, res) =
     if (!imageBase64) return res.status(400).json({ error: 'An image is required.' });
     const cleanBase64 = String(imageBase64).replace(/^data:[^;]+;base64,/, '');
     const mt = typeof mimeType === 'string' && /^image\//.test(mimeType) ? mimeType : 'image/jpeg';
-    const have = (Array.isArray(pantry) ? pantry : []).map((p: any) => String(p)).filter(Boolean).join(', ');
+    // Same 20000-char token-cost cap as the parse-text route — the pantry list is client-supplied.
+    const have = (Array.isArray(pantry) ? pantry : []).map((p: any) => String(p)).filter(Boolean).join(', ').slice(0, 20000);
     const stores = sanitizeStoreList(req.body?.stores);
     const promptText = `This photo shows either the inside of a fridge/cupboard or a grocery receipt. List the distinct GROCERY items you can identify. For each, set "inPantry": true if it already appears in the family's current pantry list below (else false). ${storeRoutingLine(stores)} Ignore non-grocery clutter. Do not invent items you cannot see.\n\nCurrent pantry: ${have || '(empty)'}`;
     const data = await callVisionJSON(
@@ -864,6 +855,10 @@ app.post('/api/photos/upload', requireAuth, async (req, res) => {
     await fsp.writeFile(p, buf);
     if (typeof createTime === 'string' && !Number.isNaN(Date.parse(createTime))) {
       await fsp.writeFile(`${p}.json`, JSON.stringify({ createTime }));
+    } else {
+      // Re-upload without createTime: drop any stale sidecar so /photos/list falls back to mtime
+      // instead of reporting the OLD capture time for the NEW image.
+      await fsp.unlink(`${p}.json`).catch(() => {});
     }
     return res.json({ ok: true, name: path.basename(p) });
   } catch (e: any) {
@@ -1265,7 +1260,11 @@ app.post('/api/copilot', requireAuth, aiRateLimit, async (req, res) => {
     const copilotNickname = String(home?.copilotName || '').split(/\s+/).join(' ').trim().slice(0, 24);
     const nameLine = copilotNickname && copilotNickname.toLowerCase() !== 'copilot'
       ? `\nThe family named you "${copilotNickname}" — refer to yourself by that name.` : '';
-    const systemPrompt = (useHarness ? COPILOT_HARNESS_SYSTEM : COPILOT_SYSTEM) + nameLine;
+    // STORE LISTS: the system prompt's add_shopping_item guidance points at this per-household line
+    // (the response schema already enum-locks to these names — the instruction now matches it).
+    const householdStores = sanitizeStoreList(home?.storeList);
+    const storesLine = `\nSTORE LISTS: the family's shopping lists are exactly: ${householdStores.join(' | ')}. Route every add_shopping_item "store" to one of these names.`;
+    const systemPrompt = (useHarness ? COPILOT_HARNESS_SYSTEM : COPILOT_SYSTEM) + nameLine + storesLine;
 
     const meta: { model?: string; usedFallback?: boolean } = {};
     const parsed: any = await callGeminiJSON(
@@ -1300,9 +1299,12 @@ app.post('/api/copilot', requireAuth, aiRateLimit, async (req, res) => {
         // Use a THROWAWAY meta for the critic retry so the reported model/usedFallback isn't overwritten by the
         // retry's model when we don't adopt the retry (else telemetry mislabels the kept first answer).
         const retryMeta: any = {};
+        // .catch(() => null): a thrown retry (chain exhausted under quota pressure — exactly when a
+        // retry is most likely) must NOT discard the good first answer via the outer catch; null keeps
+        // it and the >= check below exits the loop (same contract as the quick-add critic's retry).
         const retry: any = await callGeminiJSON(
           `${contextPrompt}\n\n${buildCriticNote(issues)}`, systemPrompt, copilotSchema, '{}', retryMeta, { temperature: 0.3 },
-        );
+        ).catch(() => null);
         // Keep the retry only if it actually reduced the problems (else keep the current answer and stop —
         // a pass that can't improve won't improve on a rerun either).
         const retryIssues = retry ? allIssues(retry) : issues;
@@ -1525,13 +1527,21 @@ async function startServer() {
     // Supabase, so demanding them would block the box from booting — skip them when LOCAL_MODE.
     ['SUPABASE_URL (or VITE_SUPABASE_URL)', LOCAL_MODE || !!SUPABASE_URL],
     ['SUPABASE_ANON_KEY (or VITE_SUPABASE_ANON_KEY)', LOCAL_MODE || !!SUPABASE_ANON_KEY],
-    ['GEMINI_API_KEY', !!process.env.GEMINI_API_KEY || localLlm], // optional only if a local model is the primary
+    // GEMINI_API_KEY is optional when a local model is primary — AND on the LAN appliance, where the
+    // keyless install (install.sh "[Enter to skip]") promises the box still serves calendar/chores/
+    // shopping with AI offline. Failing fast there crash-looped the container the installer had just
+    // declared running; the AI endpoints already degrade to honest 503s (aiErrorResponse).
+    ['GEMINI_API_KEY', !!process.env.GEMINI_API_KEY || localLlm || LOCAL_MODE],
   ];
   const missing = required.filter(([, ok]) => !ok).map(([name]) => name);
   if (missing.length) {
     console.error(`FATAL: missing required environment variable(s): ${missing.join(', ')}. `
       + `Set them in .env (see .env.example) and restart.`);
     process.exit(1);
+  }
+  if (LOCAL_MODE && !process.env.GEMINI_API_KEY && !localLlm) {
+    console.warn('WARNING: no GEMINI_API_KEY and no local model configured — the AI copilot stays offline '
+      + '(calendar/chores/shopping still work). Add GEMINI_API_KEY or LOCAL_LLM_ENABLED to .env to enable it.');
   }
 
   // Announce the resolved storage backend at boot. storageMode() auto-detects Supabase whenever
@@ -1669,5 +1679,10 @@ async function startServer() {
 // Daily-digest scheduler + runner → src/server/digest.ts
 
 if (!process.env.VITEST) {
-  startServer();
+  // A rejection here (vite import failure, missing dist) fires before the unhandledRejection handler
+  // inside startServer registers — catch it so early boot failures die with a FATAL line, not a raw dump.
+  startServer().catch((e) => {
+    console.error('FATAL: server failed to start:', e?.message || e);
+    process.exit(1);
+  });
 }

@@ -20,14 +20,24 @@ describe('routeTurn', () => {
 
   it('keeps read / Q&A local (the local copilot grounds these — no need to spend the cloud agent)', () => {
     for (const m of [
-      'what bills are due this month?',   // read → local (cost discipline)
-      'what are my chores today?',        // read → local
+      "what's on our calendar this week?", // read → local (events ARE in the /api/copilot body)
       "what's happening this weekend?",   // local copilot has PLACES/EVENTS grounding
       'what is the capital of France?',
       'how do I use this app?',
       'explain how XP works',
     ]) {
       expect(routeTurn(m, reachable)).toBe('local');
+    }
+  });
+
+  it('routes read-only chores/shopping/bills questions to the AGENT — the local path has no data for those domains (get_chores/get_bills live behind MCP)', () => {
+    for (const m of [
+      'what bills are due this month?',
+      'what are my chores today?',
+      'what chores does Max have today?',
+      "what's on the shopping list?",
+    ]) {
+      expect(routeTurn(m, reachable)).toBe('agent');
     }
   });
 

@@ -8,6 +8,9 @@ import { fallbackStore } from '../constants';
 import { parseLocalDate, toLocalDateStr } from './dates';
 
 const VALID_CATEGORIES: Category[] = ['School', 'Camp', 'Sports', 'Arts', 'Holiday', 'Other'];
+// The date trust boundary for event payloads: accept only ISO-day-shaped starts/ends (a weak model's
+// 'tomorrow' / 'next Friday' text otherwise flows verbatim into stored events).
+const ISO_DAY_RE = /^\d{4}-\d{2}-\d{2}/;
 
 // Resolve an AI-suggested assignee to a real member name. Prefer a real Kid (the chore
 // board only renders Kid columns), else first Kid, else first member, else 'Family'.
@@ -84,8 +87,10 @@ export function buildEventFromPayload(
   return {
     id: `${idPrefix}-${uuid()}`,
     title: String(p.title).slice(0, 200), // cap so a misbehaving/attacked model can't store a huge title
-    start: (p.start ? String(p.start) : todayStr).slice(0, 10),
-    end: p.end ? String(p.end).slice(0, 10) : undefined,
+    // Trust boundary: a weak model's 'tomorrow'/'next Friday' must not be stored as a date — gate on
+    // the ISO shape (create falls back to today; a bad end is dropped), like every sibling builder.
+    start: ISO_DAY_RE.test(String(p.start || '')) ? String(p.start).slice(0, 10) : todayStr,
+    end: ISO_DAY_RE.test(String(p.end || '')) ? String(p.end).slice(0, 10) : undefined,
     startTime: cleanTime(p.startTime),
     endTime: cleanTime(p.endTime),
     // Carry an AI-provided description (e.g. a suggestion's weather/what-to-bring note), clamped.
@@ -128,8 +133,8 @@ export function buildEventUpdateFromPayload(
   // 2) Build a partial change set from ONLY the supplied fields (each clamped/coerced).
   const changes: Partial<CalendarEvent> = {};
   if (typeof p.title === 'string' && p.title.trim()) changes.title = String(p.title).slice(0, 200);
-  if (typeof p.start === 'string' && p.start.trim()) changes.start = String(p.start).slice(0, 10);
-  if ('end' in p) changes.end = p.end ? String(p.end).slice(0, 10) : (null as any);
+  if (typeof p.start === 'string' && ISO_DAY_RE.test(p.start)) changes.start = String(p.start).slice(0, 10);
+  if ('end' in p) changes.end = (p.end && ISO_DAY_RE.test(String(p.end))) ? String(p.end).slice(0, 10) : (null as any);
   if ('startTime' in p) changes.startTime = cleanTime(p.startTime) ?? (null as any);
   if ('endTime' in p) changes.endTime = cleanTime(p.endTime) ?? (null as any);
   if (typeof p.description === 'string') changes.description = String(p.description).slice(0, 2000);
@@ -212,8 +217,8 @@ export function buildCartDraft(p: any): { summary: string; link: string } | null
   if (!raw) return null;
   const item = String(raw).replace(/\s+/g, ' ').trim().slice(0, 100);
   if (!item) return null;
-  const qty = Number(p?.quantity);
-  const q = Number.isFinite(qty) && qty > 1 ? ` ×${Math.min(99, Math.round(qty))}` : '';
+  const qtyN = Math.round(Number(p?.quantity));
+  const q = Number.isFinite(qtyN) && qtyN > 1 ? ` ×${Math.min(99, qtyN)}` : '';
   return {
     summary: `Add to Amazon cart: ${item}${q}`.slice(0, 120),
     link: `https://www.amazon.com/s?k=${encodeURIComponent(item)}`,
@@ -250,7 +255,7 @@ export function buildGoalFromPayload(p: any): Goal | null {
     .filter((s: GoalStep | null): s is GoalStep => s !== null)
     .slice(0, 20);
   const goal: Goal = {
-    id: p.id ? String(p.id) : 'goal-' + uuid(),
+    id: p.id ? String(p.id).slice(0, 64) : 'goal-' + uuid(),
     text: String(p.text).slice(0, 300),
     status: (GOAL_STATUS.includes(p.status) ? p.status : 'active') as Goal['status'],
   };
@@ -357,7 +362,7 @@ export function buildSuggestionFromPayload(p: any, todayStr: string): CopilotSug
   const start = typeof p.start === 'string' && /^\d{4}-\d{2}-\d{2}/.test(p.start) ? p.start.slice(0, 10) : todayStr;
   const out: CopilotSuggestion = { start, title: String(p.title).slice(0, 120) };
   if (VALID_CATEGORIES.includes(p.category)) out.category = p.category;
-  if (Array.isArray(p.members)) { const m = p.members.map(String).slice(0, 12); if (m.length) out.members = m; }
+  if (Array.isArray(p.members)) { const m = p.members.map((v: any) => String(v).slice(0, 40)).slice(0, 12); if (m.length) out.members = m; }
   if (typeof p.note === 'string' && p.note.trim()) out.note = p.note.slice(0, 300);
   if (typeof p.url === 'string' && /^https?:\/\//i.test(p.url)) out.url = p.url.slice(0, 400);
   return out;

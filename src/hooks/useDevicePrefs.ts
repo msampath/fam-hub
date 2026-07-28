@@ -61,8 +61,11 @@ export function useDevicePrefs(): DevicePrefs {
   });
   // How long before a timed event the per-event reminder fires (minutes; 0 = at start).
   const [reminderLeadMinutes, setReminderLeadMinutes] = useState<number>(() => {
-    const saved = Number(localStorage.getItem('famplan_reminder_lead'));
-    return Number.isFinite(saved) && saved >= 0 ? saved : 30;
+    // raw !== null guard (like idleTimeoutMs/reminderTime above): Number(null) === 0, which silently
+    // replaced the 30-minute default with 'at start' on every fresh device and then persisted sticky.
+    const raw = localStorage.getItem('famplan_reminder_lead');
+    const saved = Number(raw);
+    return raw !== null && Number.isFinite(saved) && saved >= 0 ? saved : 30;
   });
   // Opt-in proactive email scan (default off) — auto-scan the inbox on an interval while signed in.
   const [autoScanEnabled, setAutoScanEnabled] = useState<boolean>(() =>

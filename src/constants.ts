@@ -71,16 +71,16 @@ export const REMINDER_LEAD_OPTIONS: { label: string; minutes: number }[] = [
 ];
 
 export const MEMBER_COLORS_LIST = [
-  { id: 'indigo', name: 'Indigo Blue', bg: 'bg-indigo-100 text-indigo-850 border-indigo-200', dot: 'bg-indigo-600', bar: 'bg-indigo-500', color: 'indigo' },
-  { id: 'rose', name: 'Rose Red', bg: 'bg-rose-100 text-rose-850 border-rose-200', dot: 'bg-rose-600', bar: 'bg-rose-500', color: 'rose' },
-  { id: 'amber', name: 'Amber Yellow', bg: 'bg-amber-100 text-amber-850 border-amber-200', dot: 'bg-amber-600', bar: 'bg-amber-500', color: 'amber' },
+  { id: 'indigo', name: 'Indigo Blue', bg: 'bg-indigo-100 text-indigo-800 border-indigo-200', dot: 'bg-indigo-600', bar: 'bg-indigo-500', color: 'indigo' },
+  { id: 'rose', name: 'Rose Red', bg: 'bg-rose-100 text-rose-800 border-rose-200', dot: 'bg-rose-600', bar: 'bg-rose-500', color: 'rose' },
+  { id: 'amber', name: 'Amber Yellow', bg: 'bg-amber-100 text-amber-800 border-amber-200', dot: 'bg-amber-600', bar: 'bg-amber-500', color: 'amber' },
   // id kept as 'teal' for backward-compat with stored member data, but recolored to
   // cyan so it doesn't read as green (green is reserved for the Family calendar).
-  { id: 'teal', name: 'Cyan Blue', bg: 'bg-cyan-100 text-cyan-850 border-cyan-200', dot: 'bg-cyan-600', bar: 'bg-cyan-500', color: 'teal' },
-  { id: 'violet', name: 'Violet Purple', bg: 'bg-violet-100 text-violet-850 border-violet-200', dot: 'bg-violet-600', bar: 'bg-violet-500', color: 'violet' },
-  { id: 'sky', name: 'Sky Blue', bg: 'bg-sky-100 text-sky-850 border-sky-200', dot: 'bg-sky-600', bar: 'bg-sky-500', color: 'sky' },
+  { id: 'teal', name: 'Cyan Blue', bg: 'bg-cyan-100 text-cyan-800 border-cyan-200', dot: 'bg-cyan-600', bar: 'bg-cyan-500', color: 'teal' },
+  { id: 'violet', name: 'Violet Purple', bg: 'bg-violet-100 text-violet-800 border-violet-200', dot: 'bg-violet-600', bar: 'bg-violet-500', color: 'violet' },
+  { id: 'sky', name: 'Sky Blue', bg: 'bg-sky-100 text-sky-800 border-sky-200', dot: 'bg-sky-600', bar: 'bg-sky-500', color: 'sky' },
   { id: 'orange', name: 'Orange', bg: 'bg-orange-100 text-orange-900 border-orange-200', dot: 'bg-orange-600', bar: 'bg-orange-500', color: 'orange' },
-  { id: 'fuchsia', name: 'Fuchsia Pink', bg: 'bg-fuchsia-100 text-fuchsia-850 border-fuchsia-200', dot: 'bg-fuchsia-600', bar: 'bg-fuchsia-500', color: 'fuchsia' }
+  { id: 'fuchsia', name: 'Fuchsia Pink', bg: 'bg-fuchsia-100 text-fuchsia-800 border-fuchsia-200', dot: 'bg-fuchsia-600', bar: 'bg-fuchsia-500', color: 'fuchsia' }
 ];
 
 export const MEMBER_COLORS_MAP: Record<string, typeof MEMBER_COLORS_LIST[0]> = {
@@ -95,7 +95,7 @@ export const MEMBER_COLORS_MAP: Record<string, typeof MEMBER_COLORS_LIST[0]> = {
 };
 
 export const FAMILY_COLOR_THEME = {
-  bg: 'bg-green-100 text-green-850 border-green-200',
+  bg: 'bg-green-100 text-green-800 border-green-200',
   dot: 'bg-green-600',
   bar: 'bg-green-500',
   color: 'green'
@@ -129,8 +129,8 @@ export const CHORE_SCHEMES = [
   },
   {
     key: 'pink' as const,
-    card: 'bg-pink-50/50 border-pink-200', avatar: 'bg-pink-100 border-pink-200 text-pink-850',
-    name: 'text-pink-950', sub: 'text-pink-700', xp: 'text-pink-900', xpLabel: 'text-pink-650',
-    award: 'text-pink-855', badge: 'bg-pink-100 text-pink-800 border-pink-200',
+    card: 'bg-pink-50/50 border-pink-200', avatar: 'bg-pink-100 border-pink-200 text-pink-800',
+    name: 'text-pink-950', sub: 'text-pink-700', xp: 'text-pink-900', xpLabel: 'text-pink-600',
+    award: 'text-pink-800', badge: 'bg-pink-100 text-pink-800 border-pink-200',
   },
 ];

@@ -2,7 +2,7 @@
 // plain args in, `{status, body}` out) so it's unit-tested without spinning up Express or auth. The thin
 // Express routes in server.ts resolve the authenticated householdId, pick the adapter (SQLite or a per-request
 // Supabase client), and delegate here.
-import type { StorageAdapter } from './StorageAdapter';
+import { retrySave, type StorageAdapter } from './StorageAdapter';
 
 // Collection keys are the app's data_keys — lowercase identifiers (events, chores, actionledger, …). Validate
 // so a key can't carry path/SQL oddities and so a typo'd key is a clean 400, not a silently-empty collection.
@@ -23,7 +23,7 @@ export async function handleDataSave(adapter: StorageAdapter, householdId: strin
   }
   // version semantics mirror the adapter's CAS: omitted → forced write; null → expect-absent; string → compare.
   const expected: string | null | undefined = 'version' in body ? body.version : undefined;
-  const res = await adapter.save(householdId, key, body.data, expected);
+  const res = await retrySave(adapter, householdId, key, body.data, expected);
   if (!res.ok && res.conflict) {
     // Another writer was ahead — hand back the current version so the client refreshes + re-applies.
     return { status: 409, body: { error: 'stale', version: res.version } };

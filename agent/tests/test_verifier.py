@@ -1,5 +1,5 @@
 """Keyless tests for the small-model verifier (concierge.verifier) — the owner-directed accuracy
-tier where qwen checks the local gpt-oss head's answers and an insufficient verdict escalates the
+tier where the verifier model checks the local head's answers and an insufficient verdict escalates the
 turn to the cloud chain. Pure helpers + the fail-open I/O contract; no Ollama, no Gemini key."""
 import os
 import sys

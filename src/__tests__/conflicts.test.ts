@@ -47,6 +47,22 @@ describe('detectConflicts (time-aware)', () => {
     expect(c).toHaveLength(1);
     expect(c[0].member).toBe('Dad');
   });
+  it('a family-wide TIMED event (members []) clashes with a member\'s overlapping timed event', () => {
+    const c = detectConflicts([
+      tev('a', { start: '2026-07-05', startTime: '18:00', endTime: '19:00', members: [] }),      // family-wide
+      tev('b', { start: '2026-07-05', startTime: '18:30', endTime: '19:30', members: ['Ava'] }),
+    ]);
+    expect(c).toHaveLength(1);
+    expect(c[0]).toMatchObject({ date: '2026-07-05', member: 'Ava' });
+    expect(c[0].overlappingEvents.map(e => e.id).sort()).toEqual(['a', 'b']);
+  });
+  it('an ALL-DAY family event (no startTime) does NOT clash with a member timed event', () => {
+    const c = detectConflicts([
+      tev('fam', { start: '2026-07-05', members: [] }),                                          // all-day, family-wide
+      tev('b', { start: '2026-07-05', startTime: '18:30', endTime: '19:30', members: ['Ava'] }),
+    ]);
+    expect(c).toHaveLength(0);
+  });
 });
 
 const ev = (id: string, title: string): CalendarEvent => ({ id, title, start: '2026-07-02', category: 'Other' });

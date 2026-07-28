@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent, type ChangeEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent, type ChangeEvent } from 'react';
 import { useApp } from '../../../AppContext';
 import { useCalendar } from '../../../CalendarContext';
 import { uuid } from '../../../utils/uuid';
@@ -24,6 +24,18 @@ export default function LibraryPage() {
   const toggleFolder = (f: string) => setCollapsed(prev => { const n = new Set(prev); n.has(f) ? n.delete(f) : n.add(f); return n; });
   // Per-row actions menu (✕ → Delete · Rename · Move) and the inline rename/move editor.
   const [menuId, setMenuId] = useState<string | null>(null);
+  // The ⋯ row menu previously only closed via its own buttons — dismiss on outside tap or Escape
+  // (it's role="menu", so keyboard dismissal is part of the contract).
+  useEffect(() => {
+    if (!menuId) return;
+    const onDown = (e: PointerEvent) => {
+      if (!(e.target as Element | null)?.closest?.('[role="menu"],[aria-haspopup="menu"]')) setMenuId(null);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuId(null); };
+    document.addEventListener('pointerdown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('pointerdown', onDown); document.removeEventListener('keydown', onKey); };
+  }, [menuId]);
   const [editDoc, setEditDoc] = useState<{ id: string; mode: 'rename' | 'move'; value: string } | null>(null);
 
   // Newsletters are auto-ingested for the agent's searchable knowledge (search_local_knowledge) but are NOT

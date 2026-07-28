@@ -75,12 +75,38 @@ function redirectInit(init: Parameters<typeof undiciFetch>[1], status: number): 
   delete next.body;
   if (status === 301 || status === 302 || status === 303) next.method = 'GET';
   const srcHeaders = (init as any)?.headers;
-  if (srcHeaders && !(srcHeaders instanceof Headers)) {
+  if (srcHeaders) {
+    // Normalize through Headers first: HeadersInit is legally a plain object, a Headers instance, OR a
+    // [k,v][] array — the old plain-object-only filter silently REPLAYED credentials for the other two
+    // forms (Headers rode the spread untouched; Object.entries turned the array into index keys).
     next.headers = Object.fromEntries(
-      Object.entries(srcHeaders).filter(([k]) => !REDIRECT_UNSAFE_HEADERS.has(k.toLowerCase())),
+      [...new Headers(srcHeaders as any).entries()].filter(([k]) => !REDIRECT_UNSAFE_HEADERS.has(k)),
     );
   }
   return next;
+}
+
+// Read a fetch Response body as UTF-8 text but ABORT once cumulative bytes exceed `max`. A
+// content-length check alone is bypassable by a chunked (no-length) response, which would otherwise
+// let `response.text()` buffer an endless/oversized body into memory and OOM the single-instance
+// server. Throws 'BODY_TOO_LARGE' past the cap. Shared by server.ts's page fetcher and
+// webResearch's fetchPage — one implementation for every capped outbound body read.
+export async function readTextCapped(response: any, max: number): Promise<string> {
+  const body = response?.body;
+  if (!body || typeof body.getReader !== 'function') return String(await response.text()).slice(0, max);
+  const reader = body.getReader();
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) {
+      total += value.byteLength;
+      if (total > max) { try { await reader.cancel(); } catch { /* ignore */ } throw new Error('BODY_TOO_LARGE'); }
+      chunks.push(Buffer.from(value));
+    }
+  }
+  return Buffer.concat(chunks).toString('utf8');
 }
 
 // Re-validate AND re-pin on every redirect hop, so a public URL can't 30x (or DNS-rebind) into a private
@@ -94,9 +120,13 @@ export async function safeFetch(
     const pinnedIp = await assertSafeUrl(url);
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), 15_000);
+    // Honor the CALLER's abort signal alongside the per-hop 15s ceiling — the old code overwrote it,
+    // so a caller's tighter timeout silently stopped bounding the request (and the body read after it).
+    const callerSignal = (currentInit as any)?.signal as AbortSignal | undefined;
+    const signal = callerSignal ? (AbortSignal as any).any([callerSignal, ac.signal]) : ac.signal;
     let res: Awaited<ReturnType<typeof undiciFetch>>;
     try {
-      res = await undiciFetch(url, { ...currentInit, redirect: 'manual', dispatcher: pinnedDispatcher(pinnedIp), signal: ac.signal as any });
+      res = await undiciFetch(url, { ...currentInit, redirect: 'manual', dispatcher: pinnedDispatcher(pinnedIp), signal: signal as any });
     } finally { clearTimeout(timer); }
     if (res.status >= 300 && res.status < 400) {
       const location = res.headers.get('location');

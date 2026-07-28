@@ -88,7 +88,10 @@ export default function NamePromptModal({ dismissable, onDismiss }: { dismissabl
   // If the household already has profiles, this is almost certainly an EXISTING user whose account
   // link drifted — let them reconnect to their profile in one tap instead of being forced to create
   // a duplicate (🐞 #6). New households (no members) just see the name input.
-  const existingProfiles = familyMembers.filter(m => m.name?.trim());
+  // Dedupe by name: the reclaim buttons are keyed + handled BY NAME, so duplicate-named rows would
+  // produce duplicate React keys/DOM ids and indistinguishable click targets.
+  const existingProfiles = familyMembers.filter(m => m.name?.trim())
+    .filter((m, i, arr) => arr.findIndex(x => x.name === m.name) === i);
   // An EMPTY household on first sign-in is the classic "2nd family member landed in their own silo"
   // case (they need to JOIN via invite code, not create a new household). Lead with Join then.
   const emptyHousehold = existingProfiles.length === 0;

@@ -152,7 +152,7 @@ Cloud Scheduler ─▶ morning agent: digest email + a grounded planner pass tha
 > This Setup section is the **cloud / development** path (Supabase + Google OAuth). To run the zero-cloud
 > **LAN appliance** instead, follow [`docs/INSTALL.md`](./docs/INSTALL.md) — it needs only Docker + a free Gemini key.
 
-- Node.js **v22.5+** — the appliance's default SQLite backend uses the built-in `node:sqlite` (v18/20 cannot run it; `npm` enforces this via `engines`)
+- Node.js **v22.5+** — the appliance's default SQLite backend uses the built-in `node:sqlite` (v18/20 cannot run it; the server checks at boot and exits with a clear message on an older Node — `engines` alone only makes npm warn)
 - A [Supabase](https://supabase.com) project (free tier works) — *cloud mode only*
 - A Google Cloud project with the Calendar API enabled — *cloud mode only*
 

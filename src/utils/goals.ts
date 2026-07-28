@@ -41,5 +41,8 @@ export function advanceGoalStep(goal: Goal, ledgerId: string): Goal {
   if (ti < 0) ti = steps.findIndex(s => s.status === 'blocked');
   if (ti >= 0) steps[ti] = { ...steps[ti], status: 'done', ledgerId: undefined };
   const nextPending = steps.find(s => s.status !== 'done');
-  return { ...goal, steps, status: nextPending ? 'active' : 'done', nextAction: nextPending?.title };
+  // A remaining 'blocked' step means the goal is human-blocked (its own Approvals entry is still
+  // pending) → 'waiting', matching blockNextGoalStep — not 'active', which falsely shows progress.
+  const status: Goal['status'] = steps.some(s => s.status === 'blocked') ? 'waiting' : (nextPending ? 'active' : 'done');
+  return { ...goal, steps, status, nextAction: nextPending?.title };
 }

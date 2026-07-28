@@ -31,6 +31,7 @@ const DOC_TOOL_DEFS = [
     inputSchema: {
       type: 'object' as const,
       properties: {
+        id: { type: 'string', description: "The document's id (as returned by search_local_knowledge) — the precise selector." },
         name: { type: 'string', description: "The document's name." },
         folder: { type: 'string', description: 'Destination folder (created if new).' },
       },
@@ -45,6 +46,7 @@ const DOC_TOOL_DEFS = [
     inputSchema: {
       type: 'object' as const,
       properties: {
+        id: { type: 'string', description: "The document's id (as returned by search_local_knowledge) — the precise selector." },
         name: { type: 'string', description: "The document's name (for a single delete)." },
         folder: { type: 'string', description: 'Delete EVERY document in this folder (for a folder-clear).' },
       },
@@ -280,14 +282,18 @@ async function handleFindEvents(args: Record<string, unknown>): Promise<McpToolR
   const today = clientToday || new Date().toISOString().slice(0, 10);
   const from = typeof args.from === 'string' && ISO_DAY.test(args.from) ? args.from : today;
   // Inclusive `to`; the default from+6 is a 7-day window, matching the tool description.
-  const to = typeof args.to === 'string' && ISO_DAY.test(args.to) && args.to >= from ? args.to : addDaysISO(from, 6);
+  const toValid = typeof args.to === 'string' && ISO_DAY.test(args.to) && args.to >= from;
+  const to = toValid ? (args.to as string) : addDaysISO(from, 6);
+  // Say so when a supplied `to` was discarded (invalid / before `from`) — a silent coercion reads as
+  // the tool honoring an argument it actually replaced.
+  const toNote = !toValid && args.to !== undefined ? ' (your `to` was invalid or before `from`; used a 7-day window)' : '';
   const windowEndExcl = addDaysISO(to, 1);
   try {
     const events = await fetchTicketmasterEvents(apiKey, lat, lng, from, windowEndExcl);
     return {
       ok: true, tool: 'find_events', tier: 'auto', status: 'validated',
       artifact: events,
-      message: events.length ? `Found ${events.length} real event(s) from ${from} to ${to}.` : `No organized events found from ${from} to ${to}.`,
+      message: (events.length ? `Found ${events.length} real event(s) from ${from} to ${to}.` : `No organized events found from ${from} to ${to}.`) + toNote,
     };
   } catch (err: any) {
     // stderr is the MCP log channel — a revoked key (401), an outage (5xx), and a timeout must be

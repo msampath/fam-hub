@@ -32,6 +32,7 @@ export default function BriefingCard() {
       if (!res.ok) throw new Error('briefing failed');
       setBriefing(await res.json());
       setStagedProposals(false);
+      setAdded(new Set()); // fresh briefing = fresh nudge indices — stale entries disabled NEW nudges as "Added"
     } catch {
       setError('Could not build the briefing. Try again.');
     } finally {

@@ -9,6 +9,21 @@ import { buildKidsActivityQuery, activityToSuggestion, buildKidsActivityParsePro
 import { callGeminiJSON } from './gemini';
 import { fetchWithTimeout, mapWithConcurrency } from './fetchUtils';
 import { requireAuth, aiRateLimit } from './middleware';
+import { createHash } from 'crypto';
+
+// Per-scan-kind result memo: the client fires all four scans every 30 minutes, and an UNCHANGED inbox
+// window was re-paying the LLM parse each cycle (4×48 ≈ 192 calls/day at idle). Fingerprint = the
+// hydrated messages themselves (from/subject/date/snippet) — identical window in, previous response
+// body back out, zero model calls. One entry per scan kind, so memory is bounded and a changed inbox
+// re-parses immediately.
+const scanMemo = new Map<string, { fp: string; body: unknown }>();
+function scanFingerprint(messages: NormalizedMessage[]): string {
+  return createHash('sha256').update(messages.map(m => `${m.from}|${m.subject}|${m.date || ''}|${m.snippet}`).join('\n')).digest('hex');
+}
+function memoHit(kind: string, fp: string): unknown | null {
+  const hit = scanMemo.get(kind);
+  return hit && hit.fp === fp ? hit.body : null;
+}
 
 async function gmailScan(accessToken: string, query: string, maxResults = 30):
   Promise<{ messages: NormalizedMessage[]; status?: number; error?: string }> {
@@ -37,10 +52,28 @@ async function gmailScan(accessToken: string, query: string, maxResults = 30):
   return { messages };
 }
 
-async function graphScan(accessToken: string, maxResults = 30):
+// Translate the Gmail-syntax scan query (subject:(a OR b) ... newer_than:Nd) into a Graph $search
+// term + received-date window, so Microsoft accounts filter server-side like Gmail ones do — without
+// this, Graph returned the 30 NEWEST messages of ANY kind: older bills missed as false "nothing
+// found", and unrelated personal mail bodies shipped to the LLM parse.
+function graphQueryFromGmail(query: string): { search: string; sinceIso: string | null } {
+  const days = /newer_than:(\d+)d/.exec(query)?.[1];
+  const sinceIso = days ? new Date(Date.now() - Number(days) * 86400_000).toISOString() : null;
+  const subjectTerms = [...query.matchAll(/subject:\(([^)]*)\)/g)].map(m => m[1]).join(' OR ');
+  const search = subjectTerms.replace(/"/g, '').trim();
+  return { search, sinceIso };
+}
+
+async function graphScan(accessToken: string, query: string, maxResults = 30):
   Promise<{ messages: NormalizedMessage[]; status?: number; error?: string }> {
+  const { search, sinceIso } = graphQueryFromGmail(query);
+  // $search and $orderby are mutually exclusive in Graph — with a search term, relevance order + the
+  // date filter stand in; without one, keep the newest-first fallback.
   const url = `https://graph.microsoft.com/v1.0/me/messages?$top=${maxResults}`
-    + `&$select=from,subject,receivedDateTime,bodyPreview,body&$orderby=receivedDateTime desc`;
+    + `&$select=from,subject,receivedDateTime,bodyPreview,body`
+    + (search
+      ? `&$search=${encodeURIComponent(`"${search}"`)}${sinceIso ? `&$filter=${encodeURIComponent(`receivedDateTime ge ${sinceIso}`)}` : ''}`
+      : `&$orderby=receivedDateTime desc`);
   const r = await fetchWithTimeout(url, 8000, { headers: { Authorization: `Bearer ${accessToken}` } });
   if (!r.ok) {
     if (r.status === 401 || r.status === 403) return { messages: [], status: 403, error: 'Outlook access not granted — reconnect your Microsoft account.' };
@@ -54,7 +87,7 @@ async function graphScan(accessToken: string, maxResults = 30):
 async function fetchInbox(req: Request, query: string, maxResults = 30):
   Promise<{ messages: NormalizedMessage[]; status?: number; error?: string }> {
   const graphToken = String(req.headers['x-graph-token'] || '');
-  if (graphToken) return graphScan(graphToken, maxResults);
+  if (graphToken) return graphScan(graphToken, query, maxResults);
   const googleToken = String(req.headers['x-google-token'] || '');
   if (googleToken) return gmailScan(googleToken, query, maxResults);
   return { messages: [], status: 400, error: 'Connect your Google or Microsoft account to scan email.' };
@@ -98,6 +131,9 @@ emailScanRouter.post('/scan-bills', requireAuth, aiRateLimit, async (req, res) =
     const scan = await fetchInbox(req, buildBillQuery());
     if (scan.error) return res.status(scan.status || 502).json({ error: scan.error });
     if (!scan.messages.length) return res.json({ suggestions: [], scanned: 0 });
+    const fp = scanFingerprint(scan.messages);
+    const hit = memoHit('bills', fp);
+    if (hit) return res.json(hit);
     let parsed: any;
     try { parsed = await callGeminiJSON(buildBillParsePrompt(scan.messages), BILL_SYSTEM, BILL_SCHEMA, '{"bills":[]}', undefined, SCAN_GENCONFIG, SCAN_LOCAL_OPTS); }
     catch (e: any) {
@@ -106,7 +142,9 @@ emailScanRouter.post('/scan-bills', requireAuth, aiRateLimit, async (req, res) =
     }
     const bills: ParsedBill[] = confidentRows(Array.isArray(parsed?.bills) ? parsed.bills : []);
     const suggestions = dedupeSuggestions(bills.map(b => billToSuggestion(b, today)));
-    return res.json({ suggestions, bills, scanned: scan.messages.length });
+    const body = { suggestions, bills, scanned: scan.messages.length };
+    scanMemo.set('bills', { fp, body });
+    return res.json(body);
   } catch (err: any) {
     console.error('scan-bills error:', err?.message || err);
     return res.status(500).json({ error: 'Bill scan failed.' });
@@ -128,6 +166,9 @@ emailScanRouter.post('/scan-newsletters', requireAuth, aiRateLimit, async (req, 
     const scan = await fetchInbox(req, buildNewsletterQuery(), 30);
     if (scan.error) return res.status(scan.status || 502).json({ error: scan.error });
     if (!scan.messages.length) return res.json({ newsletters: [], scanned: 0 });
+    const fp = scanFingerprint(scan.messages);
+    const hit = memoHit('newsletters', fp);
+    if (hit) return res.json(hit);
     const byIndex = new Map<number, { keep?: boolean; title?: string; summary?: string }>();
     let ran = false;
     try {
@@ -143,7 +184,9 @@ emailScanRouter.post('/scan-newsletters', requireAuth, aiRateLimit, async (req, 
       .map((m, i) => ({ m, v: byIndex.get(i + 1) }))
       .filter(({ v }) => (ran ? v?.keep === true : true))
       .map(({ m, v }) => ({ ...m, subject: v?.title?.trim() || m.subject, snippet: v?.summary?.trim() || m.snippet }));
-    return res.json({ newsletters, scanned: scan.messages.length });
+    const body = { newsletters, scanned: scan.messages.length };
+    if (ran) scanMemo.set('newsletters', { fp, body });
+    return res.json(body);
   } catch (err: any) {
     console.error('scan-newsletters error:', err?.message || err);
     return res.status(500).json({ error: 'Newsletter scan failed.' });
@@ -167,6 +210,9 @@ emailScanRouter.post('/scan-packages', requireAuth, aiRateLimit, async (req, res
     const scan = await fetchInbox(req, buildPackageQuery());
     if (scan.error) return res.status(scan.status || 502).json({ error: scan.error });
     if (!scan.messages.length) return res.json({ suggestions: [], scanned: 0 });
+    const fp = scanFingerprint(scan.messages);
+    const hit = memoHit('packages', fp);
+    if (hit) return res.json(hit);
     let parsed: any;
     try { parsed = await callGeminiJSON(buildPackageParsePrompt(scan.messages), PACKAGE_SYSTEM, PACKAGE_SCHEMA, '{"packages":[]}', undefined, SCAN_GENCONFIG, SCAN_LOCAL_OPTS); }
     catch (e: any) {
@@ -175,7 +221,9 @@ emailScanRouter.post('/scan-packages', requireAuth, aiRateLimit, async (req, res
     }
     const pkgs: ParsedPackage[] = confidentRows(Array.isArray(parsed?.packages) ? parsed.packages : []);
     const suggestions = dedupeSuggestions(pkgs.map(p => packageToSuggestion(p, today)));
-    return res.json({ suggestions, scanned: scan.messages.length });
+    const body = { suggestions, scanned: scan.messages.length };
+    scanMemo.set('packages', { fp, body });
+    return res.json(body);
   } catch (err: any) {
     console.error('scan-packages error:', err?.message || err);
     return res.status(500).json({ error: 'Package scan failed.' });
@@ -199,6 +247,9 @@ emailScanRouter.post('/scan-kids', requireAuth, aiRateLimit, async (req, res) =>
     const scan = await fetchInbox(req, buildKidsActivityQuery());
     if (scan.error) return res.status(scan.status || 502).json({ error: scan.error });
     if (!scan.messages.length) return res.json({ suggestions: [], scanned: 0 });
+    const fp = scanFingerprint(scan.messages);
+    const hit = memoHit('kids', fp);
+    if (hit) return res.json(hit);
     let parsed: any;
     try { parsed = await callGeminiJSON(buildKidsActivityParsePrompt(scan.messages), KIDS_SYSTEM, KIDS_SCHEMA, '{"activities":[]}', undefined, SCAN_GENCONFIG, SCAN_LOCAL_OPTS); }
     catch (e: any) {
@@ -207,7 +258,9 @@ emailScanRouter.post('/scan-kids', requireAuth, aiRateLimit, async (req, res) =>
     }
     const acts: ParsedActivity[] = confidentRows(Array.isArray(parsed?.activities) ? parsed.activities : []);
     const suggestions = dedupeSuggestions(acts.map(a => activityToSuggestion(a, today)));
-    return res.json({ suggestions, scanned: scan.messages.length });
+    const body = { suggestions, scanned: scan.messages.length };
+    scanMemo.set('kids', { fp, body });
+    return res.json(body);
   } catch (err: any) {
     console.error('scan-kids error:', err?.message || err);
     return res.status(500).json({ error: "Kids' activity scan failed." });

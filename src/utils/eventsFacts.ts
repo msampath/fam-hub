@@ -5,7 +5,7 @@
 // FORMATTER. Unit-tested. EVENTS are not places — maps APIs don't provide them, hence a separate
 // source/block.
 import { weekdayOf, addDaysISO } from './copilotHarness';
-import { sanitizeForPrompt } from './promptSafety';
+import { sanitizeForPrompt, safeHomeLabel } from './promptSafety';
 
 export interface LocalEvent {
   name: string;
@@ -91,7 +91,7 @@ export function indexedEvents(events: LocalEvent[], maxItems = 12): Array<{ id: 
 export function buildEventsFacts(homeLabel: string, events: LocalEvent[], maxItems = 12): string {
   const indexed = indexedEvents(events, maxItems);
   if (!indexed.length) return '';
-  const safeLabel = (String(homeLabel || '').replace(/[\r\n]+/g, ' ').trim() || 'home').slice(0, 80);
+  const safeLabel = safeHomeLabel(homeLabel);
   const lines = indexed.map(({ id, event: e }) => {
     const venue = e.venue ? ` at ${e.venue}` : '';
     const cat = e.category ? ` [${e.category}]` : '';

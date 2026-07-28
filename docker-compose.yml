@@ -3,8 +3,9 @@
 # Reads variables from a local .env (copy .env.example). Two services:
 #   web   — the React app + Express Gemini proxy (http://localhost:4894)
 #   agent — the Python ADK concierge API + its Node MCP child (http://localhost:8080)
-# The React surface's Concierge Agent panel calls the agent service at VITE_AGENT_BASE_URL (baked at build
-# time). It's the HOST-reachable URL because the bundle runs in the BROWSER, not the compose network.
+# VITE_AGENT_BASE_URL (baked at build time) is just the ON/OFF FLAG that reveals the Concierge panel —
+# the browser always calls the SAME-ORIGIN proxy /api/agent/chat; Express forwards to the agent service
+# over the compose network (AGENT_BASE_URL).
 services:
   web:
     build:
@@ -31,8 +32,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    ports:
-      - "8080:8080"
+    # No host port: the browser reaches the agent ONLY via Express's same-origin proxy /api/agent/chat
+    # (AGENT_BASE_URL=http://agent:8080 on the compose network) — publishing 8080 was a vestigial hole
+    # that exposed the unauthenticated /chat to the LAN.
     environment:
       PORT: 8080
       # ADK / Gemini (AI Studio key) — ONE key powers both containers, matching .env.example's single

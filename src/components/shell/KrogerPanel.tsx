@@ -81,6 +81,12 @@ export default function KrogerPanel() {
                 className="min-w-0 flex-1 max-w-[62%] rounded-[8px] px-2 py-1.5 text-sm"
                 style={{ border: `2px solid ${C.elevated}`, background: C.card, color: krogerConnection ? C.primary : C.muted }}>
                 <option value="">{krogerConnection && !stores.length ? krogerConnection.name : 'Select a store…'}</option>
+                {/* Keep the SAVED store selectable when the fresh nearby fetch doesn't include it —
+                    else the controlled select matches nothing and shows 'Select a store…' despite an
+                    active connection, inviting a needless re-pick. */}
+                {krogerConnection && stores.length > 0 && !stores.some(s => s.locationId === krogerConnection.locationId) && (
+                  <option value={krogerConnection.locationId}>{krogerConnection.name}</option>
+                )}
                 {stores.map(s => <option key={s.locationId} value={s.locationId}>{s.name}</option>)}
               </select>
             </label>

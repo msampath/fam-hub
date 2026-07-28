@@ -6,6 +6,7 @@
 // cached, which is fine at household scale.)
 import { sanitizeForPrompt } from './promptSafety';
 import { cosineSimilarity, embedViaOllama, embeddingsEnabled } from './embeddings';
+import { mapWithConcurrency } from '../server/fetchUtils';
 
 export interface KnowledgeDoc { name: string; folder?: string; text: string; createdAt?: string }
 
@@ -84,7 +85,8 @@ export async function selectRelevantDocsSemantic(
   if (!Array.isArray(docs) || docs.length === 0) return [];
   const qv = await embed(query);
   if (!qv) return selectRelevantDocs(docs, query, max); // transparent fallback
-  const vecs = await Promise.all(docs.map(d => embedCached(`${d.name} ${d.text}`, embed))); // embed in parallel
+  // Bounded fan-out (was an unbounded Promise.all — a 200-doc library fired 200 concurrent embed calls).
+  const vecs = await mapWithConcurrency(docs, 4, d => embedCached(`${d.name} ${d.text}`, embed));
   return docs
     .map((d, i) => ({ d, s: vecs[i] ? cosineSimilarity(qv, vecs[i]!) : -1 }))
     .sort((a, b) => b.s - a.s)

@@ -20,12 +20,18 @@ const DISCOVERY = /\b(find|recommend|plan|sort|organi[sz]e|arrange)\b|\bwhere (c
 // A pure read-only question: opens with an interrogative AND carries no action/discovery verb. Only these
 // stay local; everything else is the agent's job.
 const READONLY_Q = /^\s*(what(?:'?s)?|when(?:'?s)?|who(?:'?s)?|which|are|is|was|were|do|does|did|how|why|explain|tell me|show me|list|any\b)/i;
+// Read-only questions about domains the LOCAL PATH HAS NO DATA FOR: the /api/copilot body carries
+// events/mealplan/documents but NO chores, shopping list, or bills — those live behind the agent's
+// get_chores/get_bills read tools (the agent-side router's eval-derived list names the same shapes).
+// Routing them local produced a data-blind engine confidently answering a primary family journey.
+const AGENT_DATA_Q = /\b(chores?|shopping list|shopping|groceries|bills?)\b/i;
 
 export function routeTurn(message: string, opts: { agentReachable: boolean; forced?: boolean }): Engine {
   if (!opts.agentReachable) return 'local'; // resilience: the bar still answers (degraded) when the agent is down
   if (opts.forced) return 'agent';
   const m = (message || '').trim();
-  // Pure read-only question with no action/discovery intent → local (fast/cheap). EVERYTHING else → agent.
-  if (READONLY_Q.test(m) && !ACTION.test(m) && !DISCOVERY.test(m)) return 'local';
+  // Pure read-only question with no action/discovery intent → local (fast/cheap) — UNLESS it asks about
+  // chores/shopping/bills, which the local path cannot see. EVERYTHING else → agent.
+  if (READONLY_Q.test(m) && !ACTION.test(m) && !DISCOVERY.test(m) && !AGENT_DATA_Q.test(m)) return 'local';
   return 'agent';
 }

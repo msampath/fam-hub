@@ -13,13 +13,23 @@ const KROGER_CLIENT_ID = process.env.KROGER_CLIENT_ID || '';
 const KROGER_CLIENT_SECRET = process.env.KROGER_CLIENT_SECRET || '';
 const krogerConfigured = () => !!(KROGER_CLIENT_ID && KROGER_CLIENT_SECRET);
 const krogerBasic = () => 'Basic ' + Buffer.from(`${KROGER_CLIENT_ID}:${KROGER_CLIENT_SECRET}`).toString('base64');
-const krogerRedirectUri = (req: any) => {
+// One origin derivation for the redirect URI and the callback's postMessage target (was duplicated).
+const requestOrigin = (req: any) => {
   const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim();
-  return `${proto}://${req.get('host')}/api/kroger/callback`;
+  return `${proto}://${req.get('host')}`;
 };
+const krogerRedirectUri = (req: any) => `${requestOrigin(req)}/api/kroger/callback`;
 
 const krogerPending = new Map<string, { token: string; exp: number }>();
-function krogerPendingSweep(): void { const now = Date.now(); for (const [k, v] of krogerPending) if (v.exp < now) krogerPending.delete(k); }
+// state → the authed user who MINTED it (login-CSRF guard): /callback only stores tokens for states
+// this server issued, and /poll only releases a token to the user who started that OAuth dance —
+// without this, an attacker could hand a victim their own state and poll away the victim's token.
+const krogerIssuedStates = new Map<string, { userId: string; exp: number }>();
+function krogerPendingSweep(): void {
+  const now = Date.now();
+  for (const [k, v] of krogerPending) if (v.exp < now) krogerPending.delete(k);
+  for (const [k, v] of krogerIssuedStates) if (v.exp < now) krogerIssuedStates.delete(k);
+}
 
 async function krogerToken(body: string): Promise<{ ok: boolean; data: any }> {
   const r = await fetchWithTimeout('https://api.kroger.com/v1/connect/oauth2/token', 10000, {
@@ -44,6 +54,8 @@ export const krogerRouter = Router();
 krogerRouter.get('/auth-url', requireAuth, (req, res) => {
   if (!krogerConfigured()) return res.status(503).json({ error: 'Kroger integration is not configured on the server (KROGER_CLIENT_ID / KROGER_CLIENT_SECRET).' });
   const state = randomBytes(16).toString('hex');
+  krogerPendingSweep();
+  krogerIssuedStates.set(state, { userId: String((req as any).user?.id || ''), exp: Date.now() + 600000 });
   return res.json({ url: buildKrogerAuthUrl(KROGER_CLIENT_ID, krogerRedirectUri(req), state), state });
 });
 
@@ -59,9 +71,9 @@ krogerRouter.get('/callback', async (req, res) => {
       console.warn('[kroger] code exchange failed:', data?.error_description || data?.error || 'unknown');
       return res.status(400).send('Kroger sign-in failed — close this window and try again.');
     }
-    const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim();
-    const appOrigin = `${proto}://${req.get('host')}`;
-    if (state) krogerPending.set(state, { token: data.refresh_token, exp: Date.now() + 300000 });
+    const appOrigin = requestOrigin(req);
+    // Only store the token for a state THIS server minted — a never-issued state is dropped.
+    if (state && krogerIssuedStates.has(state)) krogerPending.set(state, { token: data.refresh_token, exp: Date.now() + 300000 });
     const payload = JSON.stringify({ source: 'kroger-connect', refreshToken: data.refresh_token, state });
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     return res.send(`<!doctype html><title>Kroger connected</title><body style="font-family:sans-serif">
@@ -76,9 +88,13 @@ krogerRouter.get('/callback', async (req, res) => {
 krogerRouter.get('/poll', requireAuth, (req, res) => {
   const state = String(req.query.state || '');
   krogerPendingSweep();
-  const entry = state ? krogerPending.get(state) : undefined;
+  const issued = state ? krogerIssuedStates.get(state) : undefined;
+  // The token is released ONLY to the user who minted this state at /auth-url.
+  if (!issued || issued.userId !== String((req as any).user?.id || '')) return res.json({ pending: true });
+  const entry = krogerPending.get(state);
   if (!entry) return res.json({ pending: true });
   krogerPending.delete(state);
+  krogerIssuedStates.delete(state);
   return res.json({ refreshToken: entry.token });
 });
 

@@ -43,9 +43,11 @@ Leave the keys empty and run [Ollama](https://ollama.com) on the box (or another
 `LOCAL_LLM_*` env in `.env` (the **in-app copilot** supports a keyless local-first chain). Maps/web/weather are
 keyless by default (OpenStreetMap / DuckDuckGo / Open-Meteo), so the dashboard + copilot run at ~$0 marginal.
 
-> **Caveat — the concierge still needs a key.** The multi-agent **concierge** (the ADK agent that researches +
-> plans trips) has no local-model path yet, so on a keyless box it stays offline while everything else (calendar,
-> chores, shopping, the in-app copilot) works. The box comes up either way — it no longer blocks on the concierge.
+> **Caveat — the concierge prefers a key.** The multi-agent **concierge** (the ADK agent that researches +
+> plans trips) CAN run on a local model (`CONCIERGE_LOCAL_ENABLED` + a tool-calling Ollama model; the
+> eval-proven pairing is `ministral-3:8b` head + `qwen2.5:14b` verifier), with a Gemini key used for the
+> request shapes that escalate to the cloud chain. Fully keyless, escalations fail politely while everything
+> else (calendar, chores, shopping, the in-app copilot) works. The box comes up either way.
 
 ## Optional: Kroger send-to-cart (real grocery-cart writes)
 Approve a matched shopping list into your actual Kroger/Fred Meyer/QFC cart — payment stays in Kroger's

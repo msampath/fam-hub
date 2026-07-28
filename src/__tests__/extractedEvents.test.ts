@@ -28,6 +28,15 @@ describe('validateExtractedEvents', () => {
     expect(out).toHaveLength(0);
   });
 
+  it('re-serializes a trailing-garbage start to clean ISO, and drops a purely non-ISO start', () => {
+    const out = validateExtractedEvents([
+      { title: 'Trailing garbage', start: '2026-05-05 around 3pm' }, // was stored verbatim (regex is unanchored)
+      { title: 'Vague', start: 'next Tuesday' },                     // no ISO prefix at all → dropped
+    ], TODAY);
+    expect(out).toHaveLength(1);                                     // only the garbage-suffixed one survives, cleaned
+    expect(out[0]).toMatchObject({ title: 'Trailing garbage', start: '2026-05-05' });
+  });
+
   it(`drops events outside the ±${EXTRACTION_WINDOW_DAYS}-day window`, () => {
     const out = validateExtractedEvents([
       { title: 'WayFuture', start: '2028-01-01' },

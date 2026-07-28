@@ -104,7 +104,9 @@ export const signInWithGoogle = () =>
 // Mode-guarded like getAuthToken below: on the local SQLite appliance there's no Supabase (`supabase` is a
 // throwing Proxy), so touching supabase.auth would throw and strand the user mid-sign-out (the App.tsx reset
 // block + idle auto-logout never run). Clearing the box token IS the local sign-out.
-export const signOut = async () => { dataVersions.clear(); setLocalToken(null); if (_mode === 'sqlite') return; await supabase.auth.signOut(); };
+// Also drop the persisted Google refresh token — it survives Supabase sign-out otherwise, and the next
+// account on this device could exchange the PREVIOUS account's Calendar/Gmail access server-side.
+export const signOut = async () => { dataVersions.clear(); setLocalToken(null); localStorage.removeItem('famplan_google_refresh'); if (_mode === 'sqlite') return; await supabase.auth.signOut(); };
 
 // Supabase only returns provider_token/provider_refresh_token right after the OAuth
 // redirect — they are NOT persisted across reloads. We stash the refresh token

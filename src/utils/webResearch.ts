@@ -6,7 +6,12 @@
 // (web_search / fetch_page tools). The SSRF guard is now the SHARED src/utils/ssrfGuard.ts (esbuild inlines it
 // into the standalone MCP bundle), so server.ts and this module read the SAME guard and can't drift.
 import net from 'node:net';
-import { safeFetch } from './ssrfGuard';
+import { safeFetch, readTextCapped } from './ssrfGuard';
+
+// Cap a fetched page's buffered bytes (the parse caps below only apply AFTER buffering — without this
+// an endless-stream URL fetched by the agent's fetch_page would buffer until OOM). ~8 MB matches the
+// server's MAX_EXTRACT_BYTES discipline.
+const MAX_PAGE_BYTES = 8 * 1024 * 1024;
 
 export interface WebResult { title: string; url: string; snippet: string }
 export interface WebSearchOutcome { provider: string; results: WebResult[] }
@@ -31,7 +36,9 @@ export function htmlToText(html: string, cap = 20000): string {
   s = s.replace(/<li[^>]*>/gi, '\n - ');
   s = s.replace(/<br\s*\/?>/gi, '\n');
   s = s.replace(/<[^>]+>/g, ' ');
-  s = s.replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&#39;|&apos;/gi, "'").replace(/&quot;/gi, '"');
+  // &amp; decodes LAST — decoding it first double-decodes text a page displayed as escaped markup
+  // (&amp;lt; would become a real '<').
+  s = s.replace(/&nbsp;/gi, ' ').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&#39;|&apos;/gi, "'").replace(/&quot;/gi, '"').replace(/&amp;/gi, '&');
   s = s.replace(/[ \t]+/g, ' ').replace(/\n\s*\n+/g, '\n').trim();
   return s.length > cap ? s.slice(0, cap) + '\n… [truncated]' : s;
 }
@@ -203,7 +210,11 @@ export async function fetchPage(url: string, cap = 20000): Promise<{ text: strin
     const res = await safeFetch(url, { signal, headers: { 'User-Agent': BROWSER_UA } });
     if (!res.ok) throw new Error(`The page returned HTTP ${res.status}.`);
     const ct = res.headers.get('content-type') || '';
-    const body = await res.text();
+    const declared = Number(res.headers.get('content-length'));
+    if (Number.isFinite(declared) && declared > MAX_PAGE_BYTES) throw new Error('That page is too large to read.');
+    const body = await readTextCapped(res, MAX_PAGE_BYTES).catch((e: any) => {
+      throw e?.message === 'BODY_TOO_LARGE' ? new Error('That page is too large to read.') : e;
+    });
     const isHtml = /html|xml|^$/i.test(ct) || body.includes('<');
     const text = /json/i.test(ct) ? body.slice(0, cap) : (isHtml ? htmlToText(body, cap) : body.slice(0, cap));
     const links = isHtml ? extractLinks(body, url) : [];

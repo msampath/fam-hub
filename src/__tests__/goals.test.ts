@@ -75,6 +75,16 @@ describe('advanceGoalStep — resume the goal on approval', () => {
     expect(g.status).toBe('done');
     expect(g.nextAction).toBeUndefined();
   });
+  it('stays WAITING (not active) when another step is still blocked after this approval', () => {
+    // Approving the first of two staged steps must not flip the goal to 'active' while the second
+    // remains human-blocked on its own Approvals entry.
+    const g = advanceGoalStep(goal([
+      { title: 'A', status: 'blocked', ledgerId: 'led-5' },
+      { title: 'B', status: 'blocked', ledgerId: 'led-6' },
+    ]), 'led-5');
+    expect(g.steps!.find(s => s.title === 'A')!.status).toBe('done');
+    expect(g.status).toBe('waiting');
+  });
   it('falls back to the first BLOCKED step (never a pending/active one) when no ledgerId matches', () => {
     const g = advanceGoalStep(goal([
       { title: 'A', status: 'active' },

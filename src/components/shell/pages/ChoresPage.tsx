@@ -1,4 +1,4 @@
-import { useState, useEffect, type CSSProperties, type FormEvent } from 'react';
+import { useState, useEffect, useMemo, type CSSProperties, type FormEvent } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { useApp } from '../../../AppContext';
 import { choreEmoji, earnedXp, lifetimeEarnedXp } from '../../../utils/chores';
@@ -30,7 +30,9 @@ export default function ChoresPage() {
     setIsGeneratingChoresOpen,
   } = useApp();
 
-  const kids = familyMembers.filter(m => m.role === 'Kid');
+  // Memoized so it can sit in the effect deps below without tripping exhaustive-deps (it derives
+  // purely from familyMembers).
+  const kids = useMemo(() => familyMembers.filter(m => m.role === 'Kid'), [familyMembers]);
   const [activeKid, setActiveKid] = useState(0);
   const [newChoreTitle, setNewChoreTitle] = useState('');
   const [newChoreAssigned, setNewChoreAssigned] = useState(kids[0]?.name ?? '');
@@ -47,7 +49,7 @@ export default function ChoresPage() {
   useEffect(() => {
     const kidNames = kids.map(m => m.name);
     if (kidNames.length > 0 && !kidNames.includes(newChoreAssigned)) setNewChoreAssigned(kidNames[0]);
-  }, [familyMembers, newChoreAssigned]);
+  }, [kids, newChoreAssigned]);
 
   const openAddChore = (kidName: string) => { setNewChoreAssigned(kidName); setShowAddChore(true); setAddMsg(null); };
   const handleAddChore = (e: FormEvent) => {

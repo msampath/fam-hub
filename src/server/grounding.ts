@@ -1,10 +1,6 @@
 import { fetchWithTimeout, pruneByAge } from './fetchUtils';
 import { pruneExpired } from './rateLimit';
 import { dailyMaxFromHourly, parseGooglePollen } from '../utils/weatherFacts';
-import {
-  parseGooglePlaces, parseOverpassPlaces, filterKeylessPlacesByName,
-  GOOGLE_PLACE_TYPES, OVERPASS_TOURISM, OVERPASS_LEISURE, type Place,
-} from '../utils/placesFacts';
 import { fetchTicketmasterEvents, type LocalEvent } from '../utils/eventsFacts';
 
 // ── Per-user data-fetch quota ─────────────────────────────────────────────────────
@@ -88,128 +84,10 @@ export async function fetchPollenDaily(lat: number, lng: number): Promise<Record
   }
 }
 
-// ── Places + travel-time grounding (Google primary, free OSM fallback) ─────────────
-const PLACES_RADIUS_M = Number(process.env.PLACES_RADIUS_M) || 40000;
-const placesCache = new Map<string, { at: number; places: Place[] }>();
-const PLACES_TTL_MS = 24 * 3600_000;
-
-export async function fetchNearbyPlaces(lat: number, lng: number, opts?: { radiusM?: number; rank?: 'POPULARITY' | 'DISTANCE'; textQuery?: string }): Promise<Place[]> {
-  const radiusM = Math.round(opts?.radiusM || PLACES_RADIUS_M);
-  const rank = opts?.rank || 'POPULARITY';
-  const textQuery = opts?.textQuery?.trim() || '';
-  const cacheKey = `${lat.toFixed(2)},${lng.toFixed(2)}|${radiusM}|${rank}|${textQuery}`;
-  const cached = placesCache.get(cacheKey);
-  if (cached && Date.now() - cached.at < PLACES_TTL_MS) return cached.places;
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-  const fieldMask = 'places.displayName,places.types,places.rating,places.userRatingCount,places.location,places.googleMapsUri,places.websiteUri';
-  try {
-    let places: Place[] = [];
-    if (apiKey && textQuery) {
-      const r = await fetchWithTimeout('https://places.googleapis.com/v1/places:searchText', 8000, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': apiKey, 'X-Goog-FieldMask': fieldMask },
-        body: JSON.stringify({
-          textQuery,
-          maxResultCount: 15,
-          locationBias: { circle: { center: { latitude: lat, longitude: lng }, radius: radiusM } },
-        }),
-      });
-      if (r.ok) places = parseGooglePlaces(await r.json());
-      else console.warn('Google Text Search non-200 (falling back to OSM):', r.status);
-    } else if (apiKey) {
-      const r = await fetchWithTimeout('https://places.googleapis.com/v1/places:searchNearby', 8000, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': apiKey, 'X-Goog-FieldMask': fieldMask },
-        body: JSON.stringify({
-          includedTypes: GOOGLE_PLACE_TYPES,
-          maxResultCount: 15,
-          rankPreference: rank,
-          locationRestriction: { circle: { center: { latitude: lat, longitude: lng }, radius: radiusM } },
-        }),
-      });
-      if (r.ok) places = parseGooglePlaces(await r.json());
-      else console.warn('Google Places non-200 (falling back to OSM):', r.status);
-    }
-    if (!places.length && textQuery) {
-      const q = `[out:json][timeout:20];(`
-        + `node["amenity"~"cafe|restaurant|fast_food"]["name"](around:${radiusM},${lat},${lng});`
-        + `way["amenity"~"cafe|restaurant|fast_food"]["name"](around:${radiusM},${lat},${lng});`
-        + `);out center tags 60;`;
-      const r = await fetchWithTimeout('https://overpass-api.de/api/interpreter', 12000, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'data=' + encodeURIComponent(q),
-      });
-      if (r.ok) places = filterKeylessPlacesByName(parseOverpassPlaces(await r.json()), textQuery).places;
-    }
-    if (!places.length && !textQuery) {
-      const q = `[out:json][timeout:20];(`
-        + `node["tourism"~"${OVERPASS_TOURISM}"](around:${radiusM},${lat},${lng});`
-        + `way["tourism"~"${OVERPASS_TOURISM}"](around:${radiusM},${lat},${lng});`
-        + `node["leisure"~"${OVERPASS_LEISURE}"]["name"](around:${radiusM},${lat},${lng});`
-        + `way["leisure"~"${OVERPASS_LEISURE}"]["name"](around:${radiusM},${lat},${lng});`
-        + `);out center tags 60;`;
-      const r = await fetchWithTimeout('https://overpass-api.de/api/interpreter', 12000, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'data=' + encodeURIComponent(q),
-      });
-      if (r.ok) places = parseOverpassPlaces(await r.json());
-    }
-    if (places.length) { pruneByAge(placesCache, PLACES_TTL_MS, Date.now()); placesCache.set(cacheKey, { at: Date.now(), places }); }
-    return places;
-  } catch (err: any) {
-    console.warn('Places fetch failed (proceeding without):', err?.message || err);
-    return [];
-  }
-}
-
-export async function attachTravelTimes(homeLat: number, homeLng: number, places: Place[]): Promise<void> {
-  const targets = places.slice(0, 12);
-  if (!targets.length) return;
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-  try {
-    if (apiKey) {
-      const dest = targets.map(p => `${p.lat},${p.lng}`).join('|');
-      const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${homeLat},${homeLng}`
-        + `&destinations=${encodeURIComponent(dest)}&mode=driving&units=imperial&key=${apiKey}`;
-      const r = await fetchWithTimeout(url, 8000);
-      if (r.ok) {
-        const data: any = await r.json();
-        const elements = data?.rows?.[0]?.elements;
-        if (Array.isArray(elements)) {
-          targets.forEach((p, i) => {
-            const el = elements[i];
-            if (el?.status === 'OK') {
-              if (Number.isFinite(el.duration?.value)) p.driveMinutes = Math.round(el.duration.value / 60);
-              if (Number.isFinite(el.distance?.value)) p.driveMiles = Math.round(el.distance.value / 1609.34);
-            }
-          });
-          return;
-        }
-      } else {
-        console.warn('Distance Matrix non-200 (falling back to OSRM):', r.status);
-      }
-    }
-    const coords = [[homeLng, homeLat], ...targets.map(p => [p.lng, p.lat])].map(c => `${c[0]},${c[1]}`).join(';');
-    const url = `https://router.project-osrm.org/table/v1/driving/${coords}?sources=0&annotations=duration,distance`;
-    const r = await fetchWithTimeout(url, 10000);
-    if (!r.ok) return;
-    const data: any = await r.json();
-    const durations = data?.durations?.[0];
-    const distances = data?.distances?.[0];
-    if (Array.isArray(durations)) {
-      targets.forEach((p, i) => {
-        const sec = durations[i + 1];
-        if (Number.isFinite(sec)) p.driveMinutes = Math.round(Number(sec) / 60);
-        const m = distances?.[i + 1];
-        if (Number.isFinite(m)) p.driveMiles = Math.round(Number(m) / 1609.34);
-      });
-    }
-  } catch (err: any) {
-    console.warn('Travel-time fetch failed (places without drive times):', err?.message || err);
-  }
-}
+// ── Places + travel-time grounding — ONE implementation (src/utils/placesFetch.ts, shared with the
+// MCP find_places tool). This module re-exports it so server.ts keeps its import surface; the twin
+// copy that used to live here (115 near-identical lines) drifted once (prune-before-cache) and is gone.
+export { fetchNearbyPlaces, attachTravelTimes } from '../utils/placesFetch';
 
 // ── Local events (Ticketmaster, key-gated) ────────────────────────────────────────
 const eventsCache = new Map<string, { at: number; events: LocalEvent[] }>();
@@ -217,7 +95,9 @@ const EVENTS_TTL_MS = 6 * 3600_000;
 export async function fetchLocalEvents(lat: number, lng: number, today: string, windowEndExcl: string): Promise<LocalEvent[]> {
   const apiKey = process.env.TICKETMASTER_API_KEY;
   if (!apiKey) return [];
-  const cacheKey = `${lat.toFixed(2)},${lng.toFixed(2)}|${today}`;
+  // windowEndExcl is part of the identity — with only |today| a second caller with a different window
+  // would silently get the first caller's cached span (latent trap; today's sole caller is constant).
+  const cacheKey = `${lat.toFixed(2)},${lng.toFixed(2)}|${today}|${windowEndExcl}`;
   const cached = eventsCache.get(cacheKey);
   if (cached && Date.now() - cached.at < EVENTS_TTL_MS) return cached.events;
   try {
