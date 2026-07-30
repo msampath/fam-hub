@@ -9,10 +9,10 @@ name: appliance-images
 
 on:
   push:
-    branches: [initial-push, main, master]   # build on the default branch (and a fork's master)
+    branches: [main, master]   # main is the default branch (post-judging flip); master for a fork
     tags: ['v*']
   pull_request:                              # run the test gate on PRs too (no image push — see the build job)
-    branches: [initial-push, main, master]
+    branches: [main, master]
   workflow_dispatch:
 
 permissions:

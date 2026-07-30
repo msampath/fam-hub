@@ -1,14 +1,14 @@
 #!/bin/sh
 # fam-hub LAN appliance — one-command installer. On a box with Docker:
 #
-#   curl -fsSL https://raw.githubusercontent.com/msampath/fam-hub/initial-push/scripts/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/msampath/fam-hub/main/scripts/install.sh | sh
 #
 # Sets up ~/fam-hub with the prebuilt compose + your config, pulls the published images, and starts. Re-run
 # anytime to update. Override: IMAGE_OWNER (fork), FAMHUB_DIR (install path), FAMHUB_BRANCH, GEMINI_API_KEY.
 set -eu
 
 OWNER="${IMAGE_OWNER:-msampath}"
-BRANCH="${FAMHUB_BRANCH:-initial-push}"
+BRANCH="${FAMHUB_BRANCH:-main}"
 DIR="${FAMHUB_DIR:-$HOME/fam-hub}"
 RAW="https://raw.githubusercontent.com/$OWNER/fam-hub/$BRANCH"
 

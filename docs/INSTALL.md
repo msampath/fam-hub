@@ -14,7 +14,7 @@ free Google AI Studio key (or a local model). One family per box.
 ## Option A — one command (recommended)
 On the box:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/msampath/fam-hub/initial-push/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/msampath/fam-hub/main/scripts/install.sh | sh
 ```
 It checks Docker, drops the config into `~/fam-hub`, asks for your key, pulls the prebuilt images, and starts.
 When it finishes it prints the URL. Open **`http://<box-LAN-ip>:4894`** from any device on your network → set a
@@ -23,8 +23,8 @@ household passphrase → you're in. Re-run the same command anytime to **update*
 ## Option B — manual (prebuilt images)
 ```bash
 mkdir fam-hub && cd fam-hub
-curl -fsSL https://raw.githubusercontent.com/msampath/fam-hub/initial-push/docker-compose.appliance.prebuilt.yml -o docker-compose.yml
-curl -fsSL https://raw.githubusercontent.com/msampath/fam-hub/initial-push/.env.example -o .env
+curl -fsSL https://raw.githubusercontent.com/msampath/fam-hub/main/docker-compose.appliance.prebuilt.yml -o docker-compose.yml
+curl -fsSL https://raw.githubusercontent.com/msampath/fam-hub/main/.env.example -o .env
 # edit .env → paste your key into GEMINI_API_KEY (one key powers both the copilot + the agent)
 docker compose pull
 docker compose up -d

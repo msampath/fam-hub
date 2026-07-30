@@ -31,7 +31,7 @@ the AI on *your* free [Google AI Studio key](https://aistudio.google.com/apikey)
 
 ```bash
 # on any always-on Docker host (mini-PC, NAS, an old laptop, a Pi 4/5):
-curl -fsSL https://raw.githubusercontent.com/msampath/fam-hub/initial-push/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/msampath/fam-hub/main/scripts/install.sh | sh
 ```
 
 Then open `http://<box-LAN-ip>:4894` → set a household passphrase. Full guide (prebuilt images, manual,
