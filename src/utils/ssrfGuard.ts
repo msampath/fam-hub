@@ -23,7 +23,9 @@ export function isBlockedIp(ip: string): boolean {
   if (v === 6) {
     const lower = ip.toLowerCase();
     if (lower === '::1' || lower === '::') return true;                        // loopback / unspecified
-    if (lower.startsWith('fe80')) return true;                                // link-local
+    // link-local fe80::/10 spans first-hextet 0xfe80-0xfebf, not just the literal 'fe80' prefix
+    // (e.g. fe90::1/febf::1 are link-local too; a plain startsWith('fe80') let those through).
+    { const h = parseInt(lower.split(':', 1)[0], 16); if (h >= 0xfe80 && h <= 0xfebf) return true; }
     if (lower.startsWith('fc') || lower.startsWith('fd')) return true;        // unique-local
     if (lower.startsWith('::ffff:')) return isBlockedIp(lower.slice(7));       // IPv4-mapped (::ffff:a.b.c.d)
     if (lower.startsWith('64:ff9b:')) { const t = lower.split(':').pop() || ''; return t.includes('.') ? isBlockedIp(t) : true; } // NAT64 64:ff9b::/96

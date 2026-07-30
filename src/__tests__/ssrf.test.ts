@@ -15,6 +15,12 @@ describe('isBlockedIp', () => {
     expect(isBlockedIp('100.64.0.1')).toBe(true);
   });
 
+  it('blocks the full fe80::/10 link-local range, not just the literal fe80 prefix', () => {
+    expect(isBlockedIp('fe90::1')).toBe(true);   // mid-range — a plain startsWith('fe80') let this through
+    expect(isBlockedIp('febf::1')).toBe(true);   // top of the /10 range
+    expect(isBlockedIp('fec0::1')).toBe(false);  // just past the /10 range — not link-local
+  });
+
   it('allows public IPs', () => {
     expect(isBlockedIp('8.8.8.8')).toBe(false);
     expect(isBlockedIp('1.1.1.1')).toBe(false);

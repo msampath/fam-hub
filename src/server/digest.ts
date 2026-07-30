@@ -14,7 +14,7 @@ import { buildRoutineDrafts } from '../utils/routineMiner';
 import { callGeminiJSON } from './gemini';
 import { fetchWeatherDaily, fetchAirQualityDaily } from './grounding';
 import { SUPABASE_URL, LOCAL_MODE } from './config';
-import { fetchCloudRunIdToken } from './fetchUtils';
+import { fetchCloudRunIdToken, mapWithConcurrency } from './fetchUtils';
 import type { CalendarEvent, Chore, FamilyMember, LedgerEntry, Goal, ShoppingItem } from '../types';
 
 const AGENT_BASE_URL = (process.env.AGENT_BASE_URL || 'http://127.0.0.1:8080').replace(/\/+$/, '');
@@ -27,6 +27,8 @@ export function briefingToText(b: Briefing, weatherLine?: string): string {
 }
 
 const asTypedArray = <T>(d: unknown): T[] => (Array.isArray(d) ? (d as T[]) : []);
+
+const DIGEST_CONCURRENCY = 5;
 
 export async function composeBriefingViaAgent(factsText: string, today: string): Promise<string | null> {
   const prompt =
@@ -69,7 +71,9 @@ export async function runDailyDigest(): Promise<void> {
   const admin = createClient(SUPABASE_URL, serviceKey, { auth: { persistSession: false } });
   const now = new Date();
   const { data: prefsRows } = await admin.from('family_data').select('household_id,data').eq('data_key', 'digestprefs');
-  for (const row of prefsRows || []) {
+  // Bounded-concurrency, not fully sequential: many households × a weather fetch + a Gemini planner call
+  // + email sends each risks the Cloud Scheduler --attempt-deadline window if run one at a time.
+  await mapWithConcurrency(prefsRows || [], DIGEST_CONCURRENCY, async (row) => {
     // One household's uncaught throw must not abort the rest of the run — isolate each iteration.
     try {
     const prefs = Array.isArray(row.data) ? row.data[0] : null;
@@ -77,11 +81,11 @@ export async function runDailyDigest(): Promise<void> {
       ...(Array.isArray(prefs?.emails) ? prefs.emails : []),
       ...(prefs?.email ? [prefs.email] : []),
     ].map((e: any) => String(e || '').trim()).filter((e: string) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e))));
-    if (!prefs?.enabled || !recipients.length) continue;
+    if (!prefs?.enabled || !recipients.length) return;
     // Compute "today" + the hour in THIS household's timezone (the client stamps prefs.timeZone) — on the
     // UTC Cloud Run deploy the process clock is not the family's, so sendHour=7 must mean 7am THEIR time.
     const { date: today, hour: localHour } = localDateHour(now, prefs.timeZone);
-    if (!shouldRunDigestNow(localHour, Number(prefs.sendHour ?? 7), prefs.lastRunDate || null, today)) continue;
+    if (!shouldRunDigestNow(localHour, Number(prefs.sendHour ?? 7), prefs.lastRunDate || null, today)) return;
     // Re-read THIS household's prefs right before writing — narrows the window since the batch read
     // above (taken before every OTHER household in this run was processed) so a user's own edit in the
     // meantime (e.g. disabling the digest) isn't reverted by the stale `enabled`/fields we'd otherwise spread.
@@ -160,7 +164,7 @@ export async function runDailyDigest(): Promise<void> {
     } catch (e: any) {
       console.error(`[digest] household ${row.household_id} failed (continuing with the rest):`, e?.message || e);
     }
-  }
+  });
 }
 
 let _digestRunning = false;

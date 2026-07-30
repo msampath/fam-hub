@@ -295,3 +295,18 @@ drop trigger if exists family_data_set_updated_at on family_data;
 create trigger family_data_set_updated_at
   before insert or update on family_data
   for each row execute function set_updated_at();
+
+-- ── 8. Grounding cache (shared across Cloud Run instances) ───────────────────────────────────────────
+-- Weather/air-quality/pollen/local-events lookups (src/server/grounding.ts) were cached in a per-instance
+-- in-memory Map — with --max-instances 2, a request can land on either instance and get a cold cache,
+-- doubling paid Pollen/Ticketmaster calls and halving the effective TTL benefit. This table backs those
+-- 4 caches in cloud mode (server-only via the service-role key — no anon/authenticated access, hence no
+-- policies). Not household-scoped: a weather forecast for a given lat/lng is the same for every household,
+-- unlike web_cache's fetch_page results which are user-supplied URLs.
+
+create table if not exists grounding_cache (
+  cache_key  text primary key,
+  value      jsonb not null,
+  fetched_at timestamptz default now() not null
+);
+alter table grounding_cache enable row level security; -- no policies: server-only via service key.
