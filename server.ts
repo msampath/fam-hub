@@ -1585,13 +1585,16 @@ async function startServer() {
     // Vite content-hashes asset filenames, so they're safe to cache for a year (immutable).
     // index.html itself must NOT be long-cached (it points at the hashed assets) — express.static
     // serves it with the default no-long-cache, and the SPA fallback below re-sends it fresh.
-    app.use(express.static(distPath, { maxAge: '1y', immutable: true, index: false }));
+    // Mounted at /fam-hub (matching vite.config.ts's base): the app is served at
+    // surakshith.com/fam-hub behind a Firebase Hosting rewrite, and the built index.html only
+    // references /fam-hub/assets/... — the domain root intentionally 404s, same as cms-0057.
+    app.use('/fam-hub', express.static(distPath, { maxAge: '1y', immutable: true, index: false }));
     // Inject the RUNTIME web config into index.html so ONE built image runs against any backend — cloud
     // Supabase OR the local SQLite appliance — without baking VITE_* at build time ("build once, deploy
     // anywhere"). The client reads window.__APP_CONFIG__ (falling back to import.meta.env in dev). Cached:
     // the server env is fixed for the process lifetime.
     let indexHtmlInjected: string | null = null;
-    app.get('*', (req, res, next) => {
+    app.get(['/fam-hub', '/fam-hub/*'], (req, res, next) => {
       // Exclude /api: an unmatched or wrong-method /api/* request (typo'd path, or GET on a POST-only
       // route) would otherwise fall through to this SPA shell and get a misleading 200 HTML page
       // instead of a proper 404 — let it continue past this handler to the real 404 instead.

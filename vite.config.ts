@@ -5,6 +5,9 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
+    // Served at surakshith.com/fam-hub behind a Firebase Hosting rewrite to Cloud Run (the portfolio
+    // site owns the domain root). Hardcoded rather than env-driven so dev, Docker, and prod all agree.
+    base: '/fam-hub/',
     plugins: [react(), tailwindcss()],
     // Pre-bundle the heavy, eagerly-imported deps deterministically (cached in node_modules/.vite) so a
     // dev cold-start doesn't discover + bundle them on every boot — the main lever on the slow first load.

@@ -15,17 +15,17 @@ describe('signInWithGoogle redirectTo', () => {
     signInWithOAuth.mockClear();
   });
 
-  it('sends the bare window.location.origin (no trailing slash) as redirectTo', async () => {
+  it('sends origin + /fam-hub (no trailing slash) as redirectTo', async () => {
     const { signInWithGoogle } = await import('../supabase');
     await signInWithGoogle();
 
     expect(signInWithOAuth).toHaveBeenCalledTimes(1);
     const opts = signInWithOAuth.mock.calls[0][0].options;
 
-    // Must be the exact origin with NO trailing slash, so it exact-matches the
-    // slash-less origin entry in Supabase Redirect URLs (Bug 8). Appending '/'
-    // would force reliance on a "<origin>/**" glob, which is not a dependable match.
-    expect(opts.redirectTo).toBe(window.location.origin);
+    // Must be an exact string, so it exact-matches the corresponding entry in Supabase
+    // Redirect URLs (Bug 8). Appending '/' would force reliance on a "<origin>/**" glob,
+    // which is not a dependable match. The app lives at /fam-hub, so login must return there.
+    expect(opts.redirectTo).toBe(`${window.location.origin}/fam-hub`);
     expect(opts.redirectTo.endsWith('/')).toBe(false);
   });
 });

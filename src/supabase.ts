@@ -92,11 +92,12 @@ export const signInWithGoogle = () =>
       // server only ever queries Gmail with a tight bill/shipment filter and stores parsed fields, not bodies.
       scopes: 'https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/gmail.readonly',
       // Supabase validates this against Auth → URL Configuration → Redirect URLs and
-      // falls back to the Site URL (localhost) on ANY mismatch. window.location.origin
-      // has NO trailing slash, so the reliable fix is to add the exact slash-less
-      // origin to that list — an exact string match beats a "<origin>/**" glob, which
-      // does not reliably match a path-less origin.
-      redirectTo: window.location.origin,
+      // falls back to the Site URL (localhost) on ANY mismatch — an exact string match
+      // beats a "<origin>/**" glob, which does not reliably match. The app is served at
+      // /fam-hub (see vite.config.ts base), so the post-login landing must return there
+      // too, or a signed-in user lands on the portfolio homepage instead of the app.
+      // This exact string must be added to Supabase's Redirect URLs allowlist.
+      redirectTo: `${window.location.origin}/fam-hub`,
       queryParams: { access_type: 'offline', prompt: 'consent' },
     },
   });
