@@ -247,24 +247,25 @@ export default function CopilotBar({ onOpenManage }: CopilotBarProps) {
             className="w-full min-w-0 flex-1 rounded-[14px] px-4 py-3 text-base font-semibold outline-none"
             style={{ border: `2px solid ${speech.listening ? C.emerald : C.elevated}`, boxShadow: brutShadow(C.elevated, 4), background: C.pill, color: C.primary }}
           />
-          {/* Mic (W6, feature-detected): press and hold to speak, release to send — a tap-to-toggle mic let
-              the recognizer's own utterance-boundary detection end the session early (read as "it just
-              quits"); holding puts the user in control of when the session ends. */}
+          {/* Mic (W6, feature-detected): press and hold to speak, release to send. Pointer events with
+              capture (not mouse/touch pairs): capture keeps release events coming to this button even if
+              the cursor/finger drifts off it mid-hold, so a slight slip can't end the recording early.
+              The hook itself survives Chrome ending the recognition session mid-hold (it restarts it) —
+              see useSpeechInput.ts. Space/Enter key-hold kept for keyboard parity with the old onClick. */}
           {speech.supported && (
             <button
               type="button"
-              onMouseDown={speech.start}
-              onMouseUp={speech.stop}
-              onMouseLeave={speech.stop}
-              onTouchStart={e => { e.preventDefault(); speech.start(); }}
-              onTouchEnd={e => { e.preventDefault(); speech.stop(); }}
-              onTouchCancel={e => { e.preventDefault(); speech.stop(); }}
+              onPointerDown={e => { try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* pointer already gone */ } speech.start(); }}
+              onPointerUp={speech.stop}
+              onPointerCancel={speech.stop}
+              onKeyDown={e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); speech.start(); } }}
+              onKeyUp={e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); speech.stop(); } }}
               aria-label={speech.listening ? 'Recording — release to send' : 'Press and hold to speak to the copilot'}
               title={speech.listening ? 'Recording — release to send' : 'Press and hold to speak'}
               className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[13px] text-lg"
               style={speech.listening
-                ? { border: `2px solid ${C.emerald}`, background: `${C.emerald}1a`, color: C.emerald, animation: 'screensaverPulse 1.6s ease-in-out infinite' }
-                : { border: `2px solid ${C.elevated}`, background: C.card, color: C.muted }}
+                ? { touchAction: 'none', border: `2px solid ${C.emerald}`, background: `${C.emerald}1a`, color: C.emerald, animation: 'screensaverPulse 1.6s ease-in-out infinite' }
+                : { touchAction: 'none', border: `2px solid ${C.elevated}`, background: C.card, color: C.muted }}
             >
               🎤
             </button>
